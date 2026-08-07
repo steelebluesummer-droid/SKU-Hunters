@@ -10,6 +10,9 @@ build/
 *.egg
 venv/
 .env/
+.env
+*.env
+!.env.example
 
 # Node
 node_modules/
