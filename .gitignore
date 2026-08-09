@@ -46,3 +46,6 @@ docs/_build/
 # Logs
 logs/
 *.log
+# Coverage
+.coverage
+htmlcov/
