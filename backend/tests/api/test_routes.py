@@ -45,6 +45,25 @@ def _at_gate(gate: str):
     return lambda s: (s["pending_gate"] or {}).get("gate") == gate
 
 
+def _drain_to_end(client, session_id: str, timeout: float = 20.0):
+    """通用收尾：不管当前在哪个门，批准/结束直到会议终局"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        s = client.get(f"/api/v1/reviews/{session_id}").json()
+        assert s["status"] != "failed", s.get("error")
+        if s["status"] in ("approved", "rejected", "completed"):
+            return s
+        gate = (s["pending_gate"] or {}).get("gate")
+        if gate in ("act1_gate", "human_gate"):
+            client.post(f"/api/v1/reviews/{session_id}/decision",
+                        json={"action": "approve", "reason": "ok"})
+        elif gate == "retro":
+            client.post(f"/api/v1/reviews/{session_id}/decision",
+                        json={"action": "done"})
+        time.sleep(0.1)
+    raise TimeoutError(f"收尾超时: {session_id}")
+
+
 def test_full_flow_approve_to_report(client):
     """全链路：发起 → Gate1 批准 → Gate2 批准 → done → 建议书可取"""
     sid = _create(client)
@@ -139,21 +158,15 @@ def test_reweight_requires_valid_weights(client):
 def test_decision_rejected_when_not_at_gate(client):
     """不在决策点提交决策 → 409 SESSION_NOT_AT_GATE"""
     sid = _create(client)
-    r = client.post(f"/api/v1/reviews/{sid}/decision",
-                    json={"action": "approve", "reason": "ok"})
-    assert r.status_code in (409, 200)  # 快机器上可能已到 act1_gate
-    if r.status_code == 409:
-        assert r.json()["detail"]["error"]["code"] == "SESSION_NOT_AT_GATE"
-    # 收尾，避免后台任务悬挂
-    _poll(client, sid, _at_gate("act1_gate"))
-    client.post(f"/api/v1/reviews/{sid}/decision",
-                json={"action": "approve", "reason": "ok"})
-    _poll(client, sid, _at_gate("human_gate"))
-    client.post(f"/api/v1/reviews/{sid}/decision",
-                json={"action": "approve", "reason": "ok"})
-    _poll(client, sid, _at_gate("retro"))
-    client.post(f"/api/v1/reviews/{sid}/decision", json={"action": "done"})
-    _poll(client, sid, lambda s: s["status"] == "approved")
+    state = client.get(f"/api/v1/reviews/{sid}").json()
+    if state["pending_gate"] is None:
+        r = client.post(f"/api/v1/reviews/{sid}/decision",
+                        json={"action": "approve", "reason": "ok"})
+        assert r.status_code in (409, 200)  # 极快机器上提交瞬间可能刚到门
+        if r.status_code == 409:
+            assert r.json()["detail"]["error"]["code"] == "SESSION_NOT_AT_GATE"
+    # 收尾：无论竞态走到哪，按当前门通用驱动到终局，避免后台任务悬挂
+    _drain_to_end(client, sid)
 
 
 def test_session_not_found(client):
