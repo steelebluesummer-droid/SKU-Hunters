@@ -31,16 +31,16 @@ class TrendAgent(BaseAgent):
     async def run(self, context: dict[str, Any]) -> dict[str, Any]:
         """执行趋势分析
 
-        context 输入:
-            keywords: 候选关键词列表，如 ['Labubu', 'Chiikawa']
-            category: 品类，如 '潮玩'
-            geo: 目标市场地区代码，如 'TH'，空为全球
+        context 输入（两种契约兼容）:
+            编排层（graph 节点）: brief（Brief dict）、feedback（人工修改意见）
+            独立直连（飞书 handler / 脚本）: keywords、category、geo
 
         输出: FeatureMatrix（含 evidence_refs）
         """
-        keywords = context.get("keywords", [])
-        category = context.get("category", "general")
+        brief = context.get("brief") or {}
+        category = brief.get("category") or context.get("category", "general")
         geo = context.get("geo", "")
+        keywords = context.get("keywords") or [category]
         region_label = geo or "global"
 
         trend_items: list[TrendItem] = []
