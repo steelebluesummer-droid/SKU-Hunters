@@ -183,6 +183,43 @@ def test_session_not_found(client):
     assert r.status_code == 404
 
 
+def test_question_action_roundtrip(client):
+    """D4 question：门前提问 → qa 作答 → 回到同一门，不重跑委员"""
+    sid = _create(client)
+    _poll(client, sid, _at_gate("act1_gate"))
+
+    r = client.post(f"/api/v1/reviews/{sid}/decision", json={"action": "question"})
+    assert r.status_code == 422  # 空问题必填
+    r = client.post(f"/api/v1/reviews/{sid}/decision",
+                    json={"action": "question", "question": "趋势数据源是什么？"})
+    assert r.status_code == 200
+    assert r.json()["mapped"]["action"] == "question"
+
+    _poll(client, sid, _at_gate("act1_gate"))  # 答完回到同一门
+    state = client.get(f"/api/v1/reviews/{sid}").json()
+    roles = [e["role"] for e in state["live_feed"]]
+    assert "qa" in roles
+    assert roles.count("trend") == 1  # 未重跑
+    _drain_to_end(client, sid)
+
+
+def test_list_reviews(client):
+    """D4 会议列表：任务中心/知识库数据源，含归档摘要与复盘轮数"""
+    sid = _create(client)
+    _drain_to_end(client, sid)
+
+    r = client.get("/api/v1/reviews")
+    assert r.status_code == 200
+    items = {i["session_id"]: i for i in r.json()["reviews"]}
+    assert sid in items
+    item = items[sid]
+    assert item["category"] == "解压玩具"
+    assert item["status"] == "approved"
+    assert item["created_at"]
+    assert item["archive"]["status"] == "archived"
+    assert item["retro_turns"] == 0
+
+
 def test_report_not_ready_before_decision(client):
     """会议早期查建议书 → 404 REPORT_NOT_READY"""
     sid = _create(client)

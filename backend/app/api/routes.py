@@ -117,6 +117,7 @@ async def create_review(payload: dict):
     session_id = f"sess_{datetime.now(timezone.utc):%Y%m%d}_{uuid.uuid4().hex[:4]}"
     _SESSIONS[session_id] = {
         "brief": brief.model_dump(),
+        "created_at": _now(),
         "current_act": "brief_locked",
         "status": "running",
         "live_feed": [],
@@ -131,6 +132,31 @@ async def create_review(payload: dict):
     }
     asyncio.create_task(_drive(session_id, brief.model_dump()))
     return {"session_id": session_id, "status": "created"}
+
+
+@router.get("/reviews")
+async def list_reviews():
+    """会议列表（D4 新增）：任务中心与知识库看板的数据源
+
+    只增不改：摘要素材，详情仍走 GET /reviews/{id}。
+    """
+    return {
+        "reviews": [
+            {
+                "session_id": sid,
+                "category": s["brief"].get("category", ""),
+                "market": s["brief"].get("market", ""),
+                "status": s["status"],
+                "created_at": s["created_at"],
+                "archive": s["archive"],
+                "retro_turns": (s["archive"] or {}).get("retro_turns", 0),
+            }
+            for sid, s in sorted(
+                _SESSIONS.items(),
+                key=lambda kv: kv[1]["created_at"], reverse=True,
+            )
+        ]
+    }
 
 
 def _get_session(session_id: str) -> dict[str, Any]:
@@ -218,6 +244,15 @@ async def submit_decision(session_id: str, payload: dict):
         decision = {"action": "modify", "suggestion": reason or "重定权重",
                     "scope": "business",
                     "custom_weights": payload["custom_weights"]}
+    elif action == "question":
+        question = payload.get("question", "").strip()
+        if not question:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": {"code": "QUESTION_REQUIRED",
+                                  "message": "question 必填"}},
+            )
+        decision = {"action": "question", "question": question}
     elif action == "chat":
         decision = {"action": "chat", "content": payload.get("content", "")}
     elif action == "done":
