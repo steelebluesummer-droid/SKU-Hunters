@@ -1,87 +1,150 @@
 """Decision Engine — 综合决策引擎
 
-汇聚商业官和全球化官的输出，生成结构化的《商品立项建议书》。
+汇聚商业官的五维评分与创意官的提案集，合成《商品立项建议书》。
+合成规则（与全景设计文档 3.4 一致）：
+1. 按总分排序取 Top1（总分算术一致性由 OpportunityScore validator 强制）
+2. 落选方案与评分分歧原样写入 dissent_records / runner_ups，不调和
+3. 置信度 = 上游最低值（衰减，不放大）；低置信结论显式标注降权
+4. 阈值定档：≥80 approve / 60~80 hold / <60 reject
+5. risk_warnings 改写为可执行立项条件
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from app.schemas import (
+    Confidence,
+    ConflictRecord,
+    ConflictType,
+    Decision,
+    OpportunityScore,
+    ProjectRecommendation,
+    ProposalSet,
+)
+
+_CONFIDENCE_ORDER = [
+    Confidence.UNKNOWN,
+    Confidence.LOW,
+    Confidence.MEDIUM,
+    Confidence.HIGH,
+]
+
+# 定档阈值
+_APPROVE_THRESHOLD = 80.0
+_HOLD_THRESHOLD = 60.0
+# 与第二名分差小于该值时，记一条 C3 评分分歧（不强制一致，写入建议书）
+_CLOSE_CALL_GAP = 10.0
 
 
-class DecisionResult(BaseModel):
-    """立项决策结果"""
-
-    product_name: str = Field(..., description="商品名称")
-    opportunity_score: float = Field(..., ge=0, le=100, description="机会值评分")
-    recommendation: str = Field(
-        ..., description="决策建议：approve/hold/reject"
+def min_confidence(values: list[Confidence | str]) -> Confidence:
+    """取置信度最低值——沿链路只衰减不放大"""
+    if not values:
+        return Confidence.UNKNOWN
+    return min(
+        (Confidence(v) for v in values), key=_CONFIDENCE_ORDER.index
     )
-    risk_warnings: list[str] = Field(default_factory=list, description="风险提示")
-    reasoning: str = Field(..., description="决策推理过程")
-    launch_plan: str | None = Field(default=None, description="上市建议")
 
 
 class DecisionEngine:
     """综合决策引擎"""
 
-    def __init__(self, config: dict | None = None):
-        self.config = config or {}
-
-    async def evaluate(
+    def synthesize(
         self,
-        business_output: dict,
-        global_output: dict,
-        ideation_output: dict | None = None,
-    ) -> DecisionResult:
-        """综合评估商品方案
+        proposal_set: dict[str, Any],
+        opportunity_scores: list[dict[str, Any]],
+        conflicts: list[dict[str, Any]] | None = None,
+    ) -> ProjectRecommendation:
+        """合成立项建议书
 
         Args:
-            business_output: 商业官输出
-            global_output: 全球化官输出
-            ideation_output: 创意官输出（可选）
+            proposal_set: 创意官 ProposalSet.model_dump()
+            opportunity_scores: 商业官 OpportunityScore.model_dump() 列表
+            conflicts: 会议中累积的冲突记录（C1-C6）
 
         Returns:
-            DecisionResult: 决策结果
+            ProjectRecommendation: 立项建议书
         """
-        # 综合评分逻辑
-        score = self._calculate_score(business_output, global_output)
-        recommendation = self._decide(score)
-        risk_warnings = self._extract_risks(business_output, global_output)
+        proposals = ProposalSet.model_validate(proposal_set)
+        scores = [
+            OpportunityScore.model_validate(s) for s in opportunity_scores
+        ]
+        if not scores:
+            raise ValueError("Decision Engine 至少需要一份机会值评分")
 
-        return DecisionResult(
-            product_name=business_output.get("product_name", "未知"),
-            opportunity_score=score,
-            recommendation=recommendation,
-            risk_warnings=risk_warnings,
-            reasoning=self._generate_reasoning(
-                business_output, global_output, score
-            ),
-            launch_plan=global_output.get("launch_strategy"),
+        ranked = sorted(scores, key=lambda s: s.total_score, reverse=True)
+        top = ranked[0]
+        proposal = next(
+            p for p in proposals.proposals if p.name == top.proposal_name
         )
 
-    def _calculate_score(self, business: dict, global_: dict) -> float:
-        """计算综合机会值"""
-        biz_score = business.get("opportunity_score", 0)
-        return min(biz_score, 100.0)
+        decision = self._decide(top.total_score)
+        confidence = min_confidence(
+            [top.upstream_confidence, proposal.confidence]
+        )
+        dissent = self._collect_dissent(ranked, conflicts or [])
+        conditions = self._build_conditions(top)
+        if confidence in (Confidence.LOW, Confidence.UNKNOWN):
+            conditions.append(
+                f"上游置信度为 {confidence.value}，低置信结论已降权处理，"
+                "建议补充数据后复评"
+            )
 
-    def _decide(self, score: float) -> str:
-        if score >= 80:
-            return "approve"
-        elif score >= 60:
-            return "hold"
-        return "reject"
+        return ProjectRecommendation(
+            proposal=proposal,
+            opportunity_score=top,
+            decision=decision,
+            conditions=conditions,
+            dissent_records=dissent,
+            runner_ups=[
+                f"{s.proposal_name}（{s.total_score:.1f} 分，落选）"
+                for s in ranked[1:]
+            ],
+            confidence=confidence,
+            summary=(
+                f"入选方案「{proposal.name}」，机会值 {top.total_score:.1f} 分"
+                f"（{decision.value}）。"
+                f"价格带 {proposal.price_band}，目标人群 {proposal.target_segment}。"
+            ),
+        )
 
-    def _extract_risks(
-        self, business: dict, global_: dict
-    ) -> list[str]:
-        risks = []
-        raw_risks = business.get("risk_warnings", [])
-        if isinstance(raw_risks, list):
-            risks.extend(raw_risks)
-        return risks
+    def _decide(self, total: float) -> Decision:
+        if total >= _APPROVE_THRESHOLD:
+            return Decision.APPROVE
+        if total >= _HOLD_THRESHOLD:
+            return Decision.HOLD
+        return Decision.REJECT
 
-    def _generate_reasoning(
-        self, business: dict, global_: dict, score: float
-    ) -> str:
-        return f"综合机会值评分 {score:.1f} 分，" \
-               f"基于商业评估和全球化策略分析。"
+    def _collect_dissent(
+        self,
+        ranked: list[OpportunityScore],
+        conflicts: list[dict[str, Any]],
+    ) -> list[ConflictRecord]:
+        """C3 分歧：与第二名分差过小时显式记录；会议冲突原样透传"""
+        records = [ConflictRecord.model_validate(c) for c in conflicts]
+        if len(ranked) >= 2:
+            gap = ranked[0].total_score - ranked[1].total_score
+            if gap < _CLOSE_CALL_GAP:
+                records.append(
+                    ConflictRecord(
+                        conflict_type=ConflictType.C3_SCORE_DIVERGENCE,
+                        parties=["business_evaluation_agent"],
+                        description=(
+                            f"Top1「{ranked[0].proposal_name}」"
+                            f"{ranked[0].total_score:.1f} 分 与 "
+                            f"「{ranked[1].proposal_name}」"
+                            f"{ranked[1].total_score:.1f} 分 "
+                            f"分差仅 {gap:.1f}，评分存在分歧"
+                        ),
+                        resolution="open",
+                        act="act4",
+                    )
+                )
+        return records
+
+    def _build_conditions(self, top: OpportunityScore) -> list[str]:
+        """风险告警 → 可执行立项条件"""
+        return [
+            f"[{w.severity}] {w.risk}（来源维度：{w.source_dimension}）"
+            for w in top.risk_warnings
+        ]

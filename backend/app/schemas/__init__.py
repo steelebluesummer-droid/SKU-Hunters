@@ -8,6 +8,7 @@ from .gtm import CountryPlan, GTMPlan
 from .ip_assessment import IPAssessment, IPCandidate
 from .pricing import PricePoint, PricingComparison
 from .proposal import ProductProposal, ProposalSet, SourceRef
+from .recommendation import Decision, ProjectRecommendation
 from .retro import DimensionGap, RetroReport
 from .review import ConflictRecord, ConflictType, ReviewIssue, ReviewResult
 from .scoring import DimensionScore, OpportunityScore, RiskWarning
@@ -24,6 +25,7 @@ __all__ = [
     "ConflictRecord",
     "ConflictType",
     "CountryPlan",
+    "Decision",
     "DimensionGap",
     "DimensionScore",
     "EvidenceMixin",
@@ -38,6 +40,7 @@ __all__ = [
     "PricePoint",
     "PricingComparison",
     "ProductProposal",
+    "ProjectRecommendation",
     "ProposalSet",
     "RetroReport",
     "ReviewIssue",
