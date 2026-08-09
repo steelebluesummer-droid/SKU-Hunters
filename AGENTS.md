@@ -1,0 +1,71 @@
+# AGENTS.md — AI 编程工具协作者指南
+
+> 本文件面向 AI 编程助手（Claude Code / Cursor / Copilot 等）。
+> 人类队友请先看各模块 README；本文件是**机器可执行的接口契约**。
+
+## 项目一句话
+
+SKU Hunters · AI Product Committee：7 个角色 Agent 模拟名创优品商品评审会，
+LangGraph 编排，FastAPI + 飞书机器人交互。代码在 `backend/`。
+
+## 硬性纪律（违反 = CI 红）
+
+1. **密钥只存在于 `.env`**，禁止硬编码 App ID / Secret / API Key（GitHub push protection 会拦截）
+2. **D1 已冻结的 schema 不得修改**（`app/schemas/` 现有文件）；新增契约 = 新增文件
+3. 所有路径用 `Path(__file__).resolve()` 锚定，禁止绝对路径
+4. 提交前本地跑：`ruff check backend/`（从仓库根）+ `pytest tests/ --cov=app`（从 backend/）
+
+## 接口 A：接入新 Agent（替换 mock）
+
+编排层在 `backend/app/engine/graph.py`。所有图节点是薄包装层，只认注册表：
+
+1. 继承 `app.agents.base_agent.BaseAgent`，实现 `async def run(self, context: dict) -> dict`
+2. 返回值必须通过对应 schema 的 `model_validate`：
+
+| 注册表键 | 返回契约 |
+|:---|:---|
+| `trend` | `FeatureMatrix` |
+| `user` | `UserSentiment` |
+| `ip` | `IPAssessment` |
+| `creative` | `ProposalSet` |
+| `business` | `{"opportunity_scores": [OpportunityScore, ...]}` |
+| `gtm` | `{"gtm_plans": [GTMPlan, ...]}` |
+
+3. 洞察官（trend/user/ip）的 `evidence_refs` 必须非空，否则节点边界拒绝
+   （例外：`confidence="unknown"` 时合法，自动记 C5 冲突——"无法判断"是合法输出）
+4. context 可用键：
+   - 所有 Agent：`brief`、`feedback`（人工修改意见，修改回退重跑时非空）
+   - creative：+ `feature_matrix`、`user_sentiment`、`ip_assessment`
+   - business：+ `weights`、`proposal_set`、`upstream_confidences`
+   - gtm：+ `proposal_set`
+5. 接入方式：改 `graph.py` 里 `AGENT_REGISTRY` 对应键的类，**其他一律不动**
+6. 禁止：Agent 返回未过 schema 的 dict；依赖 state 里未声明的键
+
+## 接口 C：消费评审事件流（飞书 handler）
+
+```python
+from app.engine.graph import run_review
+
+async for event in run_review(brief, ask_human=your_callback, session_id=None):
+    ...  # event 恒为 {"role": str, "content": str, "evidence": list[str], "score": float | None}
+```
+
+- `role` 枚举：`trend` / `user` / `ip` / `creative` / `business` / `global` /
+  `decision` / `learning` / `act1_gate` / `human_gate` / `qa`
+- `brief` 必须过 `Brief` schema：`{"category": str, "market": str, "budget_range": "low"|"mid"|"high"}`
+- `ask_human(gate_info) -> dict`，`gate_info = {"gate", "prompt", "options"}`，返回三选一：
+  - `{"action": "confirm"}`
+  - `{"action": "modify", "suggestion": str, "scope"?: str}`
+    （`scope` 仅 human_gate 用：`"business"`=只重算评分（默认）/ `"creative"`=回退重做方案）
+  - `{"action": "question", "question": str}`（qa 作答后自动回到同一门再次询问）
+- **10 秒超时由调用方实现**：`asyncio.wait_for(等待按钮回调, timeout=10)`，超时返回 `confirm`。
+  图对超时一无所知（interrupt 无限期等待是 checkpoint 可靠性特性）
+- 门事件会成对出现：先是提问（prompt），`ask_human` 返回后紧跟一条人决策回显
+
+## 排障速查
+
+| 报错 | 原因 | 解法 |
+|:---|:---|:---|
+| `InvalidUpdateError: Can receive only one value per step` | 并行节点同写共享标量键 | 并行节点只写各自 artifact 键和 reducer 键；`current_act` 由下游单点写 |
+| msgpack 反序列化告警 | 枚举/日期实例进 checkpoint | 入 state 一律 `model_dump(mode="json")` |
+| `pytest` exit code 5 | tests/ 无测试被收集 | 检查文件名 `test_*.py` 与目录结构 |
