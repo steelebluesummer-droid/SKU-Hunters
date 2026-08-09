@@ -58,10 +58,12 @@ AI 负责把会开好，人负责拍板。AI 没有"说服权"——系统被禁
 
 | 状态 | 内容 |
 |:---|:---|
-| ✅ 已实测打通 | 淘宝联想词连接器（真实消费需求信号）、B站分区排行连接器（5 分区 474 个真实视频，阳性对照"原神"命中 4 个/227 万播放验证匹配逻辑） |
+| ✅ 已实测打通 | 淘宝联想词连接器（真实消费需求信号）、B站分区排行连接器（5 分区 474 个真实视频，阳性对照"原神"命中 4 个/227 万播放验证匹配逻辑）、Google Trends 趋势官 Agent |
 | ✅ 已接入 | LLM 统一客户端（智谱/豆包/DeepSeek/通义可切换，故障自动降级规则引擎） |
-| ✅ 已冻结 | 全部输入输出契约（14 个 Schema）、圆桌五幕剧本、冲突处理规则 C1-C6 |
-| 🔨 施工中 | LangGraph 五幕编排、其余六位 Agent、前端 Dashboard |
+| ✅ 已冻结 | 全部输入输出契约（14 个 Schema，新增契约只增不改）、圆桌五幕剧本、冲突处理规则 C1-C6、API 端点约定 |
+| ✅ 已跑通 | LangGraph 五幕编排：三洞察官并行汇聚 → 双门人在回路（确定/修改/疑问）→ Decision Engine 五维合成——14 项测试锁定，CI 常绿；当前 mock 委员占位，真委员按 [AGENTS.md](AGENTS.md) 注册表热插拔 |
+| ✅ 已交付 | 飞书群机器人五件套（webhook/auth/bot/cards/handler） |
+| 🔨 施工中 | 其余五位真 Agent（换注册表即接入）、API 层接编排层、前端 Dashboard |
 | 📋 设计中 | 历史回测集（30-50 案例，爆/平/扑各 1/3，时点截取防未来信息泄露） |
 
 ## 技术栈
@@ -81,6 +83,7 @@ pip install -r requirements.txt
 
 cp .env.example .env   # 填入免费 LLM Key（智谱 GLM-4-Flash 注册即得）
 
+python scripts/demo_review.py       # 五幕评审全流程（mock 委员 + 可交互双门）
 python scripts/demo_real_data.py    # 真实数据管道：淘宝+B站双源验证
 python scripts/test_llm.py          # LLM 连通性测试（趋势官角色试跑）
 python scripts/validate_schemas.py  # 契约校验器行为验证
