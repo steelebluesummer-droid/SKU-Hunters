@@ -49,3 +49,6 @@ logs/
 # Coverage
 .coverage
 htmlcov/
+
+# D5 SQLite
+backend/data/*.db

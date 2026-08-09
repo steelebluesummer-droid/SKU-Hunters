@@ -23,11 +23,14 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
@@ -56,6 +59,13 @@ from app.schemas import (
     Weights,
     WeightTemplate,
 )
+
+# D5：SQLite checkpoint——归档后随时复盘跨重启成立。
+# 设置 CHIN_CHIN=sqlite → 写 data/checkpoints.db；否则退回 MemorySaver
+_CHECKPOINT_DB = Path(__file__).resolve().parents[3] / "data" / "checkpoints.db"
+_CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
+_checkpointer = SqliteSaver.from_conn_string(str(_CHECKPOINT_DB)) \
+    if os.environ.get("CHIN_CHIN") == "sqlite" else MemorySaver()
 
 # ── Agent 注册表：真 Agent 出炉后只改这里 ──────────────────────
 AGENT_REGISTRY: dict[str, type] = {
@@ -504,7 +514,7 @@ def build_graph() -> Any:
     g.add_edge("retro_qa_node", "retro_gate")
     g.add_conditional_edges("learning_node", _route_learning)
 
-    return g.compile(checkpointer=MemorySaver())
+    return g.compile(checkpointer=_checkpointer)
 
 
 # ══════════════════ 事件翻译 ══════════════════
