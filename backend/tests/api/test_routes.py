@@ -46,12 +46,13 @@ def _at_gate(gate: str):
 
 
 def _drain_to_end(client, session_id: str, timeout: float = 20.0):
-    """通用收尾：不管当前在哪个门，批准/结束直到会议终局"""
+    """通用收尾：不管当前在哪个门，批准/结束直到会议终局（无挂起的门）"""
     deadline = time.time() + timeout
     while time.time() < deadline:
         s = client.get(f"/api/v1/reviews/{session_id}").json()
         assert s["status"] != "failed", s.get("error")
-        if s["status"] in ("approved", "rejected", "completed"):
+        if s["status"] in ("approved", "rejected", "completed") \
+                and s["pending_gate"] is None:
             return s
         gate = (s["pending_gate"] or {}).get("gate")
         if gate in ("act1_gate", "human_gate"):
@@ -88,10 +89,15 @@ def test_full_flow_approve_to_report(client):
     _poll(client, sid, _at_gate("retro"))
     client.post(f"/api/v1/reviews/{sid}/decision", json={"action": "done"})
 
-    final = _poll(client, sid, lambda s: s["status"] == "approved")
+    final = _poll(client, sid, lambda s: s["status"] == "approved"
+                  and s["pending_gate"] is None)
     roles = [e["role"] for e in final["live_feed"]]
     assert {"trend", "user", "ip", "creative", "business", "decision",
             "learning"} <= set(roles)
+
+    # 归档快照：Gate 2 结论即建档（归档先于复盘）
+    assert final["archive"]["status"] == "archived"
+    assert final["archive"]["human_action"] == "confirm"
 
     # 建议书
     report = client.get(f"/api/v1/reviews/{sid}/report").json()
@@ -193,3 +199,36 @@ def test_report_not_ready_before_decision(client):
     _poll(client, sid, _at_gate("retro"))
     client.post(f"/api/v1/reviews/{sid}/decision", json={"action": "done"})
     _poll(client, sid, lambda s: s["status"] == "approved")
+
+
+def test_historical_retro_chat_after_archive(client):
+    """D3 历史复盘入口：归档后随时追问，问答追加 retro_logs 并累加轮数"""
+    sid = _create(client)
+
+    # 归档前追问 → 409 RETRO_NOT_READY
+    _poll(client, sid, _at_gate("act1_gate"))
+    r = client.post(f"/api/v1/reviews/{sid}/retro",
+                    json={"question": "为什么是 Top1？"})
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"]["code"] == "RETRO_NOT_READY"
+
+    # 驱动到终局（archive 在 Gate2 结论时即建档）
+    client.post(f"/api/v1/reviews/{sid}/decision",
+                json={"action": "approve", "reason": "ok"})
+    _poll(client, sid, _at_gate("human_gate"))
+    client.post(f"/api/v1/reviews/{sid}/decision",
+                json={"action": "approve", "reason": "ok"})
+    _drain_to_end(client, sid)
+
+    # 归档后随时复盘：两轮追问都落 retro_logs，轮数累加
+    for q in ("为什么第二名落选？", "下次类似品类该提高哪个权重？"):
+        r = client.post(f"/api/v1/reviews/{sid}/retro", json={"question": q})
+        assert r.status_code == 200
+        assert r.json()["answer"]
+    state = client.get(f"/api/v1/reviews/{sid}").json()
+    assert len(state["retro_logs"]) == 2
+    assert state["archive"]["retro_turns"] == 2
+
+    # 空问题 → 422
+    r = client.post(f"/api/v1/reviews/{sid}/retro", json={"question": "  "})
+    assert r.status_code == 422

@@ -54,21 +54,26 @@ async for event in run_review(brief, ask_human=your_callback, session_id=None):
   `decision` / `learning` / `act1_gate` / `human_gate` / `retro` / `qa`
 - `brief` 必须过 `Brief` schema：`{"category": str, "market": str, "budget_range": "low"|"mid"|"high"}`
 - `ask_human(gate_info) -> dict`，`gate_info = {"gate", "prompt", "options"}`。
-  门有两个半：act1_gate（方向确认）、human_gate（立项拍板）、retro（会后复盘窗，
-  不打回重做，只对话/总结教训）。返回值按门选用：
+  门有两个半：act1_gate（方向确认）、human_gate（立项拍板）、retro（首次复盘入口：
+  **归档之后**开启，不打回重做，只对话/总结教训；归档后另有 API 历史复盘入口）。
+  返回值按门选用：
   - `{"action": "confirm"}`
   - `{"action": "modify", "suggestion": str, "scope"?: str, "custom_weights"?: dict}`
     （`scope` 仅 human_gate 用：`"business"`=只重算评分（默认）/ `"creative"`=回退重做方案；
     `custom_weights` 合法时写入 state 即 reweight，权重和必须 = 1.0）
   - `{"action": "question", "question": str}`（qa 作答后自动回到同一门再次询问）
   - `{"action": "reject", "reason": str}`（仅 human_gate：否决立项 = bad case，
-    记 C4 冲突后进复盘窗，学习官照常归档——否决理由是负样本来源）
+    记 C4 冲突后**先归档**（负样本）再进复盘入口——否决理由是负样本来源）
   - retro 门专用：`{"action": "chat", "content": str}`（LLM 基于本场证据链作答，
-    无 Key 降级为产物索引）/ `{"action": "done"}`（结束复盘，学习官归档）
+    无 Key 降级为产物索引）/ `{"action": "done"}`（结束本轮复盘，轮数追加入档）
 - **10 秒超时由调用方实现**：`asyncio.wait_for(等待按钮回调, timeout=10)`，超时返回 `confirm`
   （retro 门超时返回 `done`）。图对超时一无所知（interrupt 无限期等待是 checkpoint 可靠性特性）
 - 门事件会成对出现：先是提问（prompt），`ask_human` 返回后紧跟一条人决策回显
-- `decision` 事件额外携带 `report` 键（完整《立项建议书》dict），四键契约不变
+- `decision` 事件额外携带 `report` 键（完整《立项建议书》dict）；
+  `learning` 事件额外携带 `snapshot` 键（归档快照），出现两次：建档 + 复盘轮数追加。
+  四键契约不变
+- 归档顺序：human_gate 结论 → learning_node 建档 → retro 首次复盘入口 →
+  learning_node 二过追加 retro_turns → END（learning_node 幂等，靠路由函数分流）
 
 ## 排障速查
 

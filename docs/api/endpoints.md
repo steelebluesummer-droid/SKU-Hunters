@@ -176,3 +176,45 @@ GET /weights/templates
   proposal / opportunity_score / decision / conditions / dissent_records /
   runner_ups / confidence / summary）；未就绪返回 404 `REPORT_NOT_READY`
 - `POST /decision` 响应附 `mapped` 字段（契约动作映射后的图内决策，调试用）
+
+---
+
+# D3 增补（2026-08-09，归档前置 + 历史复盘入口 · 只增不改）
+
+## 顺序调整：归档先于复盘
+
+D2 的顺序是「复盘窗 → 归档」，D3 改为「**归档 → 首次复盘入口**」：
+
+- Gate 2 结论（approve/reject）**立即建档**：`GET /reviews/{id}` 响应新增
+  `archive` 字段（快照：proposal / predicted_score / ai_decision / human_action /
+  retro_turns / status=archived|rejected），status 同步进入终态 approved/rejected
+- 归档不是封存：复盘窗降级为「首次复盘入口」（趁热复盘，可选），
+  `done` 后复盘轮数**追加**进 archive.retro_turns
+- 事件流中 learning 角色事件出现两次：首次建档、复盘追加；均附 `snapshot` 键
+
+## 历史复盘入口（新增端点 6）
+
+```
+POST /reviews/{session_id}/retro
+```
+
+归档后**随时**可追问（几天后、复审时），与图内复盘共用同一作答逻辑
+（LLM 基于本场证据链摘要，无 Key 降级为产物索引）。
+
+**Request**
+```json
+{ "question": "为什么第二名落选？" }
+```
+
+**Response 200**
+```json
+{ "session_id": "...", "question": "...", "answer": "...", "timestamp": "..." }
+```
+
+每轮问答追加进 `GET /reviews/{id}` 的 `retro_logs`，并累加 `archive.retro_turns`——
+人事后的理解与修正同样是学习官的训练信号（人机共训）。
+
+| 新错误码 | 含义 |
+|:---|:---|
+| `RETRO_NOT_READY` (409) | 会议尚未归档，暂无复盘材料 |
+| `RETRO_QUESTION_REQUIRED` (422) | question 必填 |

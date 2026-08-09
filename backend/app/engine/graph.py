@@ -6,11 +6,14 @@
                         ├─→ user_agent  ─┼─→ 🚪act1_gate ─→ creative_agent ─┬─→ business_agent ─┐
                         └─→ ip_agent    ─┘        ↕ qa                       └─→ gtm_agent     ─┴─→ decision_engine
                                                                                                         │
-                              ┌─ retro_qa ←→ 🚪retro_gate ←─ 🚪human_gate ←─────────────────────────────┘
-                              ↓            （复盘窗：chat/done，  ↕ qa
-                              └──────────→ learning_node         不打回重做）
-                                             ↓
-                                            END
+                              ┌─ retro_qa ←→ 🚪retro_gate ←─ learning_node ←─ 🚪human_gate ←──────────┘
+                              ↓            （首次复盘入口：    ↕ qa        （Gate 2 结论即归档：
+                              └──────────→ learning_node       chat/done，   bad case 同等入档）
+                                            （幂等：复盘轮数     不打回重做）
+                                             追加入档）→ END
+
+归档不是封存：learning_node 首过建档，复盘窗结束后二过把 retro_turns 追加入档；
+归档后仍可通过 API 历史复盘入口随时追问（见 routes.py POST /reviews/{id}/retro）。
 
 关键设计：
 - 真/假 Agent 零成本替换：节点是薄包装层，只认 AGENT_REGISTRY 注册表
@@ -296,16 +299,17 @@ def _make_qa_node(gate: str):
     return node
 
 
-# ── 会后复盘窗 ──────────────────────────────────
+# ── 会后复盘（归档前置：归档不是封存，是任务进入历史库）─────────────
 
 def retro_gate(state: CommitteeState) -> dict[str, Any]:
-    """🚪 复盘窗：结论已定，不再打回重做；人可自由对话、总结教训（学习官的输入）
+    """🚪 首次复盘入口：归档已完成，不打回重做；人可对话、总结教训
 
-    chat/question → retro_qa 作答后回到本窗；done/confirm → 学习官归档。
+    chat/question → retro_qa 作答后回到本窗；done → 学习官把复盘轮数追加入档。
+    归档后随时可再复盘（API 历史入口），本窗只是"任务结束时的第一次"。
     """
     decision = interrupt({
         "gate": "retro",
-        "prompt": "评审已结论。复盘窗口开启：可提问、讨论、总结教训（chat），或结束（done）",
+        "prompt": "已归档。可趁热复盘：提问、讨论、总结教训（chat），或稍后再聊（done）",
         "options": ["chat", "done"],
     })
     decision = decision or {"action": "done"}
@@ -338,12 +342,9 @@ def _state_digest(state: CommitteeState) -> str:
     return "\n".join(parts)
 
 
-def retro_qa_node(state: CommitteeState) -> dict[str, Any]:
-    """复盘作答：LLM 基于本场证据链回答；无 Key/故障时降级为产物索引"""
-    decision = state.get("human_decision") or {}
-    question = decision.get("question") or decision.get("content", "")
-    digest = _state_digest(state)
-
+def retro_answer(digest: str, question: str) -> str:
+    """复盘作答（图内 retro_qa 与 API 历史复盘入口共用）：
+    LLM 基于本场证据链回答；无 Key/故障时降级为产物索引"""
     answer = llm.complete(
         system_prompt=(
             "你是 SKU Hunters 商品评审会的复盘助手。基于给定的本场会议产物，"
@@ -358,6 +359,14 @@ def retro_qa_node(state: CommitteeState) -> dict[str, Any]:
             f"关于「{question}」：本场会议产物摘要如下——\n{digest}\n"
             f"（LLM 未配置或暂不可用，以上为原始产物索引）"
         )
+    return answer
+
+
+def retro_qa_node(state: CommitteeState) -> dict[str, Any]:
+    """复盘作答：只读 state，不污染任何 artifact"""
+    decision = state.get("human_decision") or {}
+    question = decision.get("question") or decision.get("content", "")
+    answer = retro_answer(_state_digest(state), question)
     return {
         "current_act": "retro",
         "review_logs": [{"node": "retro", "act": "retro",
@@ -366,12 +375,27 @@ def retro_qa_node(state: CommitteeState) -> dict[str, Any]:
 
 
 async def learning_node(state: CommitteeState) -> dict[str, Any]:
-    """ACT5 学习官：会内唯一动作——建档快照（复盘是离线任务）
+    """ACT5 学习官：建档（首过）/ 复盘轮数追加入档（二过）——幂等
 
     bad case（人否决）与通过案同等归档：人决策 + 复盘对话是最宝贵的训练信号。
+    归档不是封存：snapshot 先进历史库，复盘对话作为 retro_logs 后续追加。
     """
     rec = state.get("recommendation", {})
     logs = state.get("review_logs", [])
+    retro_turns = sum(1 for log in logs if log.get("node") == "retro")
+    existing = next(
+        (log.get("snapshot") for log in reversed(logs)
+         if log.get("node") == "learning" and log.get("snapshot")),
+        None,
+    )
+    if existing is not None:
+        # 二过：复盘窗结束，把对话轮数追加进档案（归档 ≠ 封存）
+        snapshot = {**existing, "retro_turns": retro_turns}
+        return {
+            "current_act": "act5",
+            "review_logs": [{"node": "learning", "act": "act5",
+                             "appended": True, "snapshot": snapshot}],
+        }
     gate2 = next(
         (log for log in reversed(logs) if log.get("node") == "human_gate"), {}
     )
@@ -381,7 +405,7 @@ async def learning_node(state: CommitteeState) -> dict[str, Any]:
         "predicted_score": rec.get("opportunity_score", {}).get("total_score"),
         "ai_decision": rec.get("decision", ""),
         "human_action": gate2.get("decision", ""),
-        "retro_turns": sum(1 for log in logs if log.get("node") == "retro"),
+        "retro_turns": retro_turns,
         "status": "rejected" if gate2.get("decision") == "reject" else "archived",
     }
     return {
@@ -412,8 +436,8 @@ def _route_human_gate(state: CommitteeState) -> str:
         return "business_agent"
     if action == "question":
         return "qa_act4_node"
-    # confirm / reject 都进复盘窗：通过案与 bad case 同等留对话机会
-    return "retro_gate"
+    # confirm / reject 都先归档（bad case 同等入档），再开首次复盘入口
+    return "learning_node"
 
 
 def _route_retro_gate(state: CommitteeState) -> str:
@@ -421,6 +445,14 @@ def _route_retro_gate(state: CommitteeState) -> str:
     if action in ("chat", "question"):
         return "retro_qa_node"
     return "learning_node"
+
+
+def _route_learning(state: CommitteeState) -> str:
+    """learning_node 幂等路由：首过（刚建档）→ 首次复盘入口；二过（追加完成）→ END"""
+    learnings = sum(
+        1 for log in state.get("review_logs", []) if log.get("node") == "learning"
+    )
+    return END if learnings >= 2 else "retro_gate"
 
 
 # ══════════════════ 建图 ══════════════════
@@ -465,12 +497,12 @@ def build_graph() -> Any:
     g.add_edge("gtm_agent", "decision_engine")
     g.add_edge("decision_engine", "human_gate")
 
-    # Gate 2 → 复盘窗 → ACT5
+    # Gate 2 → 归档 → 首次复盘入口 → 追加入档
     g.add_conditional_edges("human_gate", _route_human_gate)
     g.add_edge("qa_act4_node", "human_gate")
     g.add_conditional_edges("retro_gate", _route_retro_gate)
     g.add_edge("retro_qa_node", "retro_gate")
-    g.add_edge("learning_node", END)
+    g.add_conditional_edges("learning_node", _route_learning)
 
     return g.compile(checkpointer=MemorySaver())
 
@@ -532,17 +564,26 @@ def _translate(node_name: str, update: dict[str, Any]) -> dict[str, Any] | None:
                 "score": rec["opportunity_score"]["total_score"],
                 "report": rec}  # 完整建议书：API report 端点用，四键契约不变
     if node_name == "learning_node":
-        snap = update["review_logs"][-1].get("snapshot", {})
+        log = update["review_logs"][-1]
+        snap = log.get("snapshot", {})
+        if log.get("appended"):
+            # 二过：复盘轮数追加入档
+            return {"role": "learning",
+                    "content": (f"复盘对话 {snap.get('retro_turns', 0)} 轮已追加入档。"
+                                f"历史库开放：随时可继续复盘追问。"),
+                    "evidence": [], "score": None,
+                    "snapshot": snap}  # 归档快照：API archive 用，四键契约不变
         bad = snap.get("status") == "rejected"
         return {"role": "learning",
                 "content": (
                     f"已建档{'（bad case）' if bad else ''}："
                     f"「{snap.get('proposal', '')}」"
                     f"预测分 {snap.get('predicted_score')}，"
-                    f"AI 建议 {snap.get('ai_decision')} / 人决策 {snap.get('human_action')}，"
-                    f"复盘对话 {snap.get('retro_turns', 0)} 轮已入档。"
+                    f"AI 建议 {snap.get('ai_decision')} / 人决策 {snap.get('human_action')}。"
+                    f"归档不是封存：复盘对话将追加入档。"
                 ),
-                "evidence": [], "score": None}
+                "evidence": [], "score": None,
+                "snapshot": snap}  # 归档快照：API archive 用，四键契约不变
     if node_name == "retro_qa_node":
         answer = update["review_logs"][-1].get("answer", "")
         return {"role": "retro", "content": answer, "evidence": [], "score": None}
@@ -563,7 +604,7 @@ def _describe(decision: dict[str, Any]) -> str:
     if action == "chat":
         return f"💬 复盘：{decision.get('question') or decision.get('content', '')}"
     if action == "done":
-        return "📝 复盘结束，归档"
+        return "📝 本轮复盘结束（已归档，随时可再追问）"
     return "✅ 确定，继续"
 
 

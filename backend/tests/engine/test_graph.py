@@ -113,7 +113,7 @@ async def test_human_gate_modify_reroutes_to_business_only():
 # ── 复盘窗 + reject ─────────────────────────────
 
 async def test_retro_chat_loop_then_archive():
-    """复盘窗：chat 对话可多轮，done 后学习官归档且对话轮数入档"""
+    """首次复盘入口：chat 可多轮；done 后学习官二过，把对话轮数追加入档"""
     asked = []
 
     async def ask(gate):
@@ -130,12 +130,13 @@ async def test_retro_chat_loop_then_archive():
 
     assert roles.count("retro") >= 2      # 复盘作答事件存在
     assert roles[-1] == "learning"
-    learning = events[-1]
-    assert "复盘对话 2 轮" in learning["content"]
+    appended = events[-1]
+    assert "复盘对话 2 轮已追加入档" in appended["content"]
+    assert appended["snapshot"]["retro_turns"] == 2
 
 
 async def test_reject_archives_bad_case():
-    """reject：否决立项 → 不打回、进复盘窗 → 学习官归档为 bad case"""
+    """reject：否决立项 → 不打回、先归档为 bad case → 再开首次复盘入口"""
     async def ask(gate):
         if gate["gate"] == "human_gate":
             return {"action": "reject", "reason": "IP 窗口期赶不上 Q4 上架"}
@@ -144,13 +145,15 @@ async def test_reject_archives_bad_case():
     events = await _collect(ask_human=ask)
     roles = _roles(events)
 
-    # 否决后不重跑任何委员，直接进复盘窗
+    # 否决后不重跑任何委员，直接归档
     assert roles.count("business") == 1
-    assert "retro" in roles
+    # 归档先于复盘（归档不是封存，复盘是归档后的入口）
+    assert roles.index("learning") < roles.index("retro")
     # 归档事件标记 bad case，人决策留痕
-    learning = events[-1]
+    learning = next(e for e in events if e["role"] == "learning")
     assert "bad case" in learning["content"]
     assert "reject" in learning["content"]
+    assert learning["snapshot"]["status"] == "rejected"
 
 
 async def test_reweight_takes_effect_on_rerun():

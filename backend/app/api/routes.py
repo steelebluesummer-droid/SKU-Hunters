@@ -8,8 +8,12 @@
 - reject   → reject（否决立项 = bad case，归档为学习官负样本）
 - revise   → modify（suggestion = reason）
 - reweight → modify + scope=business + custom_weights（仅商业官重算，秒级）
-- chat     → 复盘窗对话（会后不打回重做，仅对话/总结教训）
-- done     → 结束复盘窗，学习官归档
+- chat     → 首次复盘入口对话（会后不打回重做，仅对话/总结教训）
+- done     → 结束本轮复盘，轮数追加入档
+
+D3 增补（2026-08-09）：归档前置——Gate 2 结论即建档（archive），
+归档不是封存：POST /reviews/{id}/retro 是历史复盘入口，归档后随时可追问，
+问答追加进 retro_logs 并累加 archive.retro_turns。
 """
 
 from __future__ import annotations
@@ -23,12 +27,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError
 
 from ..config import WEIGHT_TEMPLATES
-from ..engine.graph import run_review
+from ..engine.graph import retro_answer, run_review
 from ..schemas.brief import Brief, Weights
 
 router = APIRouter(prefix="/api/v1", tags=["committee"])
 
-# 演示期内存存储：session_id → 会议全景（事件流 + 门桥 + 建议书）
+# 演示期内存存储：session_id → 会议全景（事件流 + 门桥 + 建议书 + 档案）
 _SESSIONS: dict[str, dict[str, Any]] = {}
 
 # role → current_act 映射（契约 current_act 枚举）
@@ -43,13 +47,17 @@ _ROLE_ACT = {
     "qa": "act1_gate",
 }
 
+# 这些角色的发言内容构成历史复盘的素材摘要（与图内 _state_digest 对齐）
+_DIGEST_ROLES = {"trend": "趋势官", "user": "用户官", "ip": "IP官",
+                 "decision": "立项建议"}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 async def _drive(session_id: str, brief: dict[str, Any]):
-    """后台驱动一轮评审：事件入 live_feed，门挂起等 Future，建议书落 report"""
+    """后台驱动一轮评审：事件入 live_feed，门挂起等 Future，建议书/档案落库"""
     session = _SESSIONS[session_id]
 
     async def ask_human(gate_info: dict[str, Any]) -> dict[str, Any]:
@@ -68,11 +76,27 @@ async def _drive(session_id: str, brief: dict[str, Any]):
             session["current_act"] = _ROLE_ACT.get(
                 event["role"], session["current_act"]
             )
+            if speaker := _DIGEST_ROLES.get(event["role"]):
+                session["digest_parts"].append(f"{speaker}：{event['content']}")
             if report := event.get("report"):
                 session["report"] = report
-        session["status"] = {"approve": "approved", "reject": "rejected"}.get(
-            session.get("final_action"), "completed"
-        )
+            if snapshot := event.get("snapshot"):
+                if session["archive"] is None:
+                    # Gate 2 结论即归档：通过案与 bad case 同等入档
+                    session["archive"] = snapshot
+                    session["status"] = (
+                        "rejected" if snapshot.get("status") == "rejected"
+                        else "approved"
+                    )
+                else:
+                    # 复盘窗结束：轮数追加入档（归档 ≠ 封存）
+                    session["archive"]["retro_turns"] = snapshot.get(
+                        "retro_turns", 0
+                    )
+        if session["status"] not in ("approved", "rejected"):
+            session["status"] = {"approve": "approved", "reject": "rejected"}.get(
+                session.get("final_action"), "completed"
+            )
         session["current_act"] = "act5_retro"
     except Exception as e:  # noqa: BLE001 — 会议失败要可见，不能静默
         session["status"] = "failed"
@@ -99,6 +123,9 @@ async def create_review(payload: dict):
         "pending_gate": None,
         "gate_future": None,
         "report": None,
+        "archive": None,
+        "retro_logs": [],
+        "digest_parts": [],
         "final_action": None,
         "error": None,
     }
@@ -127,6 +154,8 @@ async def get_review(session_id: str):
         "live_feed": session["live_feed"],
         "pending_gate": session["pending_gate"],
         "conflicts": (session["report"] or {}).get("dissent_records", []),
+        "archive": session["archive"],
+        "retro_logs": session["retro_logs"],
         "error": session["error"],
     }
 
@@ -205,6 +234,36 @@ async def submit_decision(session_id: str, payload: dict):
     future.set_result(decision)
     return {"session_id": session_id, "status": "decision_accepted",
             "mapped": decision}
+
+
+@router.post("/reviews/{session_id}/retro")
+async def retro_chat(session_id: str, payload: dict):
+    """历史复盘入口（D3 新增）：归档后随时追问，问答追加进 retro_logs
+
+    与图内首次复盘入口共用 retro_answer：LLM 基于本场证据链摘要作答，
+    无 Key 时降级为产物索引。每轮对话累加 archive.retro_turns——
+    人后来的理解与修正，同样是学习官的训练信号。
+    """
+    session = _get_session(session_id)
+    if session["archive"] is None:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": {"code": "RETRO_NOT_READY",
+                              "message": "会议尚未归档，暂无复盘材料"}},
+        )
+    question = payload.get("question", "").strip()
+    if not question:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "RETRO_QUESTION_REQUIRED",
+                              "message": "question 必填"}},
+        )
+    digest = "\n".join(session["digest_parts"])
+    answer = retro_answer(digest, question)
+    turn = {"question": question, "answer": answer, "timestamp": _now()}
+    session["retro_logs"].append(turn)
+    session["archive"]["retro_turns"] = session["archive"].get("retro_turns", 0) + 1
+    return {"session_id": session_id, **turn}
 
 
 @router.get("/weights/templates")
