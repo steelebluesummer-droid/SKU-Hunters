@@ -1,24 +1,82 @@
-"""API 路由 — 对应 docs/api/endpoints.md 约定（D1 冻结版）
+"""API 路由 — 对应 docs/api/endpoints.md 约定（D1 冻结 + D2 增补）
 
-当前为桩实现：端点形状已固定，业务逻辑待 LangGraph 编排层接入。
-前端（组员B）可依此契约先行开发。
+编排层已接入：POST /reviews 后台驱动 run_review 事件流，
+人工决策经 asyncio.Future 桥接进图的 interrupt。
+
+动作映射（冻结契约词汇 → 图门词汇，D2 增补）：
+- approve  → confirm（理由必填，留痕）
+- reject   → reject（否决立项 = bad case，归档为学习官负样本）
+- revise   → modify（suggestion = reason）
+- reweight → modify + scope=business + custom_weights（仅商业官重算，秒级）
+- chat     → 复盘窗对话（会后不打回重做，仅对话/总结教训）
+- done     → 结束复盘窗，学习官归档
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError
 
 from ..config import WEIGHT_TEMPLATES
-from ..schemas.brief import Brief
+from ..engine.graph import run_review
+from ..schemas.brief import Brief, Weights
 
 router = APIRouter(prefix="/api/v1", tags=["committee"])
 
-# 演示期内存存储；接入编排层后替换为 LangGraph checkpoint 存储
-_SESSIONS: dict[str, dict] = {}
+# 演示期内存存储：session_id → 会议全景（事件流 + 门桥 + 建议书）
+_SESSIONS: dict[str, dict[str, Any]] = {}
+
+# role → current_act 映射（契约 current_act 枚举）
+_ROLE_ACT = {
+    "trend": "act1_insights", "user": "act1_insights", "ip": "act1_insights",
+    "act1_gate": "act1_gate",
+    "creative": "act2_ideation",
+    "business": "act3_dual_review", "global": "act3_dual_review",
+    "decision": "act4_decision",
+    "human_gate": "human_gate",
+    "retro": "act5_retro", "learning": "act5_retro",
+    "qa": "act1_gate",
+}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _drive(session_id: str, brief: dict[str, Any]):
+    """后台驱动一轮评审：事件入 live_feed，门挂起等 Future，建议书落 report"""
+    session = _SESSIONS[session_id]
+
+    async def ask_human(gate_info: dict[str, Any]) -> dict[str, Any]:
+        session["pending_gate"] = gate_info
+        session["status"] = "awaiting_human"
+        session["gate_future"] = asyncio.get_running_loop().create_future()
+        decision = await session["gate_future"]  # Web 场景不设超时，人要想多久想多久
+        session["pending_gate"] = None
+        session["status"] = "running"
+        return decision
+
+    try:
+        async for event in run_review(brief, ask_human=ask_human,
+                                      session_id=session_id):
+            session["live_feed"].append({**event, "timestamp": _now()})
+            session["current_act"] = _ROLE_ACT.get(
+                event["role"], session["current_act"]
+            )
+            if report := event.get("report"):
+                session["report"] = report
+        session["status"] = {"approve": "approved", "reject": "rejected"}.get(
+            session.get("final_action"), "completed"
+        )
+        session["current_act"] = "act5_retro"
+    except Exception as e:  # noqa: BLE001 — 会议失败要可见，不能静默
+        session["status"] = "failed"
+        session["error"] = str(e)[:500]
 
 
 @router.post("/reviews", status_code=201)
@@ -36,57 +94,71 @@ async def create_review(payload: dict):
     _SESSIONS[session_id] = {
         "brief": brief.model_dump(),
         "current_act": "brief_locked",
-        "status": "created",
-        "acts_completed": [],
+        "status": "running",
         "live_feed": [],
-        "conflicts": [],
+        "pending_gate": None,
+        "gate_future": None,
+        "report": None,
+        "final_action": None,
+        "error": None,
     }
+    asyncio.create_task(_drive(session_id, brief.model_dump()))
     return {"session_id": session_id, "status": "created"}
+
+
+def _get_session(session_id: str) -> dict[str, Any]:
+    session = _SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "SESSION_NOT_FOUND", "message": session_id}},
+        )
+    return session
 
 
 @router.get("/reviews/{session_id}")
 async def get_review(session_id: str):
     """查询会议状态（前端轮询）"""
-    session = _SESSIONS.get(session_id)
-    if not session:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": {"code": "SESSION_NOT_FOUND", "message": session_id}},
-        )
-    return {"session_id": session_id, **session}
+    session = _get_session(session_id)
+    return {
+        "session_id": session_id,
+        "current_act": session["current_act"],
+        "status": session["status"],
+        "live_feed": session["live_feed"],
+        "pending_gate": session["pending_gate"],
+        "conflicts": (session["report"] or {}).get("dissent_records", []),
+        "error": session["error"],
+    }
 
 
 @router.get("/reviews/{session_id}/report")
 async def get_report(session_id: str):
-    """获取立项建议书（到达 act4_decision 后可用）"""
-    session = _SESSIONS.get(session_id)
-    if not session:
+    """获取立项建议书（decision 事件后可用）"""
+    session = _get_session(session_id)
+    if not session["report"]:
         raise HTTPException(
             status_code=404,
-            detail={"error": {"code": "SESSION_NOT_FOUND", "message": session_id}},
+            detail={"error": {"code": "REPORT_NOT_READY",
+                              "message": "会议尚未到达决策"}},
         )
-    # TODO: 编排层接入后返回真实建议书
-    return {
-        "session_id": session_id,
-        "proposals": [],
-        "divergence_records": session.get("conflicts", []),
-        "open_questions": [],
-        "note": "编排层未接入，待 LangGraph 集成后返回真实数据",
-    }
+    return {"session_id": session_id, **session["report"]}
 
 
 @router.post("/reviews/{session_id}/decision")
 async def submit_decision(session_id: str, payload: dict):
-    """人工决策（HUMAN_GATE）"""
-    session = _SESSIONS.get(session_id)
-    if not session:
+    """人工决策：映射冻结契约动作 → 图门词汇，塞进 Future 唤醒挂起的门"""
+    session = _get_session(session_id)
+    future = session.get("gate_future")
+    if not session["pending_gate"] or future is None or future.done():
         raise HTTPException(
-            status_code=404,
-            detail={"error": {"code": "SESSION_NOT_FOUND", "message": session_id}},
+            status_code=409,
+            detail={"error": {"code": "SESSION_NOT_AT_GATE",
+                              "message": "当前不在人工决策点"}},
         )
 
     action = payload.get("action")
-    if action in ("approve", "reject") and not payload.get("reason"):
+    reason = payload.get("reason", "")
+    if action in ("approve", "reject") and not reason:
         raise HTTPException(
             status_code=422,
             detail={
@@ -96,10 +168,43 @@ async def submit_decision(session_id: str, payload: dict):
                 }
             },
         )
-    # TODO: 编排层接入后驱动 LangGraph resume
-    session["human_decision"] = payload
-    session["status"] = {"approve": "approved", "reject": "rejected"}.get(action, "revised")
-    return {"session_id": session_id, **session}
+
+    if action == "approve":
+        decision: dict[str, Any] = {"action": "confirm", "reason": reason}
+    elif action == "reject":
+        decision = {"action": "reject", "reason": reason}
+    elif action == "revise":
+        decision = {"action": "modify", "suggestion": reason,
+                    "scope": payload.get("scope", "business")}
+    elif action == "reweight":
+        try:
+            Weights.model_validate(payload.get("custom_weights") or {})
+            assert payload.get("custom_weights")
+        except (ValidationError, AssertionError):
+            raise HTTPException(
+                status_code=422,
+                detail={"error": {"code": "WEIGHT_SUM_INVALID",
+                                  "message": "五维权重之和必须为 1.0"}},
+            )
+        decision = {"action": "modify", "suggestion": reason or "重定权重",
+                    "scope": "business",
+                    "custom_weights": payload["custom_weights"]}
+    elif action == "chat":
+        decision = {"action": "chat", "content": payload.get("content", "")}
+    elif action == "done":
+        decision = {"action": "done"}
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": {"code": "ACTION_UNKNOWN",
+                              "message": f"未知动作: {action}"}},
+        )
+
+    session["final_action"] = action if action in ("approve", "reject") \
+        else session["final_action"]
+    future.set_result(decision)
+    return {"session_id": session_id, "status": "decision_accepted",
+            "mapped": decision}
 
 
 @router.get("/weights/templates")

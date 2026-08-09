@@ -51,16 +51,24 @@ async for event in run_review(brief, ask_human=your_callback, session_id=None):
 ```
 
 - `role` 枚举：`trend` / `user` / `ip` / `creative` / `business` / `global` /
-  `decision` / `learning` / `act1_gate` / `human_gate` / `qa`
+  `decision` / `learning` / `act1_gate` / `human_gate` / `retro` / `qa`
 - `brief` 必须过 `Brief` schema：`{"category": str, "market": str, "budget_range": "low"|"mid"|"high"}`
-- `ask_human(gate_info) -> dict`，`gate_info = {"gate", "prompt", "options"}`，返回三选一：
+- `ask_human(gate_info) -> dict`，`gate_info = {"gate", "prompt", "options"}`。
+  门有两个半：act1_gate（方向确认）、human_gate（立项拍板）、retro（会后复盘窗，
+  不打回重做，只对话/总结教训）。返回值按门选用：
   - `{"action": "confirm"}`
-  - `{"action": "modify", "suggestion": str, "scope"?: str}`
-    （`scope` 仅 human_gate 用：`"business"`=只重算评分（默认）/ `"creative"`=回退重做方案）
+  - `{"action": "modify", "suggestion": str, "scope"?: str, "custom_weights"?: dict}`
+    （`scope` 仅 human_gate 用：`"business"`=只重算评分（默认）/ `"creative"`=回退重做方案；
+    `custom_weights` 合法时写入 state 即 reweight，权重和必须 = 1.0）
   - `{"action": "question", "question": str}`（qa 作答后自动回到同一门再次询问）
-- **10 秒超时由调用方实现**：`asyncio.wait_for(等待按钮回调, timeout=10)`，超时返回 `confirm`。
-  图对超时一无所知（interrupt 无限期等待是 checkpoint 可靠性特性）
+  - `{"action": "reject", "reason": str}`（仅 human_gate：否决立项 = bad case，
+    记 C4 冲突后进复盘窗，学习官照常归档——否决理由是负样本来源）
+  - retro 门专用：`{"action": "chat", "content": str}`（LLM 基于本场证据链作答，
+    无 Key 降级为产物索引）/ `{"action": "done"}`（结束复盘，学习官归档）
+- **10 秒超时由调用方实现**：`asyncio.wait_for(等待按钮回调, timeout=10)`，超时返回 `confirm`
+  （retro 门超时返回 `done`）。图对超时一无所知（interrupt 无限期等待是 checkpoint 可靠性特性）
 - 门事件会成对出现：先是提问（prompt），`ask_human` 返回后紧跟一条人决策回显
+- `decision` 事件额外携带 `report` 键（完整《立项建议书》dict），四键契约不变
 
 ## 排障速查
 
@@ -68,4 +76,6 @@ async for event in run_review(brief, ask_human=your_callback, session_id=None):
 |:---|:---|:---|
 | `InvalidUpdateError: Can receive only one value per step` | 并行节点同写共享标量键 | 并行节点只写各自 artifact 键和 reducer 键；`current_act` 由下游单点写 |
 | msgpack 反序列化告警 | 枚举/日期实例进 checkpoint | 入 state 一律 `model_dump(mode="json")` |
+| 会议在门之间无限循环 | `ask_human` 每次都返回 modify | 回调侧控制：修改意见生效后人应 confirm；飞书侧 10s 超时兜底 |
+| API 后台会议不推进 | TestClient 没用 `with` | `with TestClient(app) as c:`，portal 持续运转任务才推进 |
 | `pytest` exit code 5 | tests/ 无测试被收集 | 检查文件名 `test_*.py` 与目录结构 |

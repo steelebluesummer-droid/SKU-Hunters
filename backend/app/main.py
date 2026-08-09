@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from feishu import FeishuConfig
 from feishu.webhook import create_feishu_router
 
+from app.api.routes import router as committee_router
+
 app = FastAPI(
     title="SKU Hunters — AI Product Committee",
     description="名创优品 AI 商品开发智能决策引擎",
@@ -22,6 +24,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 评审 API：POST/GET /api/v1/reviews...
+app.include_router(committee_router)
 
 # 飞书回调路由：POST /api/v1/feishu/events
 feishu_config = FeishuConfig.from_env()

@@ -78,6 +78,7 @@ async def test_gate_question_loops_back_without_rerun():
         {"action": "question", "question": "趋势增速的数据源是什么？"},
         {"action": "confirm"},
         {"action": "confirm"},
+        {"action": "done"},  # 复盘窗直接结束
     ])
 
     async def ask(gate):
@@ -107,6 +108,83 @@ async def test_human_gate_modify_reroutes_to_business_only():
 
     assert roles.count("business") == 2   # 商业官重算
     assert roles.count("creative") == 1   # 创意官不重跑
+
+
+# ── 复盘窗 + reject ─────────────────────────────
+
+async def test_retro_chat_loop_then_archive():
+    """复盘窗：chat 对话可多轮，done 后学习官归档且对话轮数入档"""
+    asked = []
+
+    async def ask(gate):
+        asked.append(gate["gate"])
+        if gate["gate"] == "retro":
+            n = asked.count("retro")
+            if n <= 2:
+                return {"action": "chat", "content": f"第 {n} 个问题"}
+            return {"action": "done"}
+        return {"action": "confirm"}
+
+    events = await _collect(ask_human=ask)
+    roles = _roles(events)
+
+    assert roles.count("retro") >= 2      # 复盘作答事件存在
+    assert roles[-1] == "learning"
+    learning = events[-1]
+    assert "复盘对话 2 轮" in learning["content"]
+
+
+async def test_reject_archives_bad_case():
+    """reject：否决立项 → 不打回、进复盘窗 → 学习官归档为 bad case"""
+    async def ask(gate):
+        if gate["gate"] == "human_gate":
+            return {"action": "reject", "reason": "IP 窗口期赶不上 Q4 上架"}
+        return {"action": "done" if gate["gate"] == "retro" else "confirm"}
+
+    events = await _collect(ask_human=ask)
+    roles = _roles(events)
+
+    # 否决后不重跑任何委员，直接进复盘窗
+    assert roles.count("business") == 1
+    assert "retro" in roles
+    # 归档事件标记 bad case，人决策留痕
+    learning = events[-1]
+    assert "bad case" in learning["content"]
+    assert "reject" in learning["content"]
+
+
+async def test_reweight_takes_effect_on_rerun():
+    """reweight（modify + custom_weights）→ 商业官按新权重重算，分数可验证"""
+    # 全部押注趋势热度：Top1 = 92×1.0 = 92.0
+    new_weights = {"trend_heat": 1.0, "user_demand": 0.0, "ip_fit": 0.0,
+                   "competition": 0.0, "history_analog": 0.0}
+
+    asked = []
+
+    async def ask(gate):
+        asked.append(gate["gate"])
+        if gate["gate"] == "human_gate" and asked.count("human_gate") == 1:
+            return {"action": "modify", "suggestion": "只看趋势",
+                    "custom_weights": new_weights}
+        if gate["gate"] == "retro":
+            return {"action": "done"}
+        return {"action": "confirm"}
+
+    events = await _collect(ask_human=ask)
+    business = [e for e in events if e["role"] == "business"]
+    assert len(business) == 2
+    assert business[-1]["score"] == pytest.approx(92.0)
+
+
+async def test_decision_event_carries_full_report():
+    """decision 事件附带完整建议书（report 键），四键契约不变"""
+    events = await _collect()
+    decision = next(e for e in events if e["role"] == "decision")
+    assert {"role", "content", "evidence", "score"} <= set(decision)
+    report = decision["report"]
+    assert report["decision"] == "approve"
+    assert report["proposal"]["name"]
+    assert "dissent_records" in report
 
 
 # ── Decision Engine 单元 ──────────────────────

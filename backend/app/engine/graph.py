@@ -6,9 +6,11 @@
                         ├─→ user_agent  ─┼─→ 🚪act1_gate ─→ creative_agent ─┬─→ business_agent ─┐
                         └─→ ip_agent    ─┘        ↕ qa                       └─→ gtm_agent     ─┴─→ decision_engine
                                                                                                         │
-                                        learning_node ←─ 🚪human_gate ←─────────────────────────────────┘
-                              ↓                                            ↕ qa
-                             END
+                              ┌─ retro_qa ←→ 🚪retro_gate ←─ 🚪human_gate ←─────────────────────────────┘
+                              ↓            （复盘窗：chat/done，  ↕ qa
+                              └──────────→ learning_node         不打回重做）
+                                             ↓
+                                            END
 
 关键设计：
 - 真/假 Agent 零成本替换：节点是薄包装层，只认 AGENT_REGISTRY 注册表
@@ -34,6 +36,7 @@ from app.agents.mock_agents import (
     MockTrendAgent,
     MockUserAgent,
 )
+from app.engine import llm
 from app.engine.decision_engine import DecisionEngine
 from app.engine.state import CommitteeState
 from app.schemas import (
@@ -218,21 +221,35 @@ async def decision_node(state: CommitteeState) -> dict[str, Any]:
 # ── 双门 ────────────────────────────────────
 
 def _gate(decision: dict[str, Any], act: str) -> dict[str, Any]:
-    """门节点公共返回：记录人工决定；修改类决定记 C4 人机冲突（人赢，留理由）"""
+    """门节点公共返回：记录人工决定；修改/否决记 C4 人机冲突（人赢，留理由）
+
+    reweight（modify + custom_weights）时把新权重写进 state，商业官重算即生效。
+    """
+    action = decision.get("action", "confirm")
     update: dict[str, Any] = {
         "human_decision": decision,
         "current_act": act,
+        "review_logs": [{"node": act, "decision": action,
+                         "detail": decision.get("suggestion")
+                         or decision.get("reason")
+                         or decision.get("question", "")}],
     }
-    if decision.get("action") == "modify":
+    if action in ("modify", "reject"):
+        reason = decision.get("suggestion") or decision.get("reason", "")
+        prefix = "人否决立项" if action == "reject" else "人工要求修改"
         update["conflicts"] = [
             ConflictRecord(
                 conflict_type=ConflictType.C4_HUMAN_AI,
                 parties=["human", "committee"],
-                description=decision.get("suggestion", "人工要求修改"),
+                description=f"{prefix}：{reason}",
                 resolution="resolved",
                 act=act,
             ).model_dump()
         ]
+    if decision.get("custom_weights"):
+        update["weights"] = Weights.model_validate(
+            decision["custom_weights"]
+        ).model_dump()
     return update
 
 
@@ -279,15 +296,93 @@ def _make_qa_node(gate: str):
     return node
 
 
+# ── 会后复盘窗 ──────────────────────────────────
+
+def retro_gate(state: CommitteeState) -> dict[str, Any]:
+    """🚪 复盘窗：结论已定，不再打回重做；人可自由对话、总结教训（学习官的输入）
+
+    chat/question → retro_qa 作答后回到本窗；done/confirm → 学习官归档。
+    """
+    decision = interrupt({
+        "gate": "retro",
+        "prompt": "评审已结论。复盘窗口开启：可提问、讨论、总结教训（chat），或结束（done）",
+        "options": ["chat", "done"],
+    })
+    decision = decision or {"action": "done"}
+    return {
+        "human_decision": decision,
+        "current_act": "retro",
+        "review_logs": [{"node": "retro_gate", "decision": decision.get("action", "done"),
+                         "detail": decision.get("question")
+                         or decision.get("content", "")}],
+    }
+
+
+def _state_digest(state: CommitteeState) -> str:
+    """把本场会议产物压成纯文本摘要，供 LLM 复盘作答"""
+    parts = []
+    if fm := state.get("feature_matrix"):
+        parts.append(f"趋势官：{fm.get('summary', '')}")
+    if us := state.get("user_sentiment"):
+        parts.append(f"用户官：{us.get('summary', '')}")
+    if ip := state.get("ip_assessment"):
+        parts.append(f"IP官：{ip.get('strategy_note', '')}")
+    for s in state.get("opportunity_scores", []):
+        parts.append(f"商业官评分：{s.get('proposal_name', '')} {s.get('total_score', 0):.1f} 分")
+    if rec := state.get("recommendation"):
+        parts.append(
+            f"立项建议：{rec.get('decision', '')}，"
+            f"Top1「{rec.get('proposal', {}).get('name', '')}」，"
+            f"{rec.get('summary', '')}"
+        )
+    return "\n".join(parts)
+
+
+def retro_qa_node(state: CommitteeState) -> dict[str, Any]:
+    """复盘作答：LLM 基于本场证据链回答；无 Key/故障时降级为产物索引"""
+    decision = state.get("human_decision") or {}
+    question = decision.get("question") or decision.get("content", "")
+    digest = _state_digest(state)
+
+    answer = llm.complete(
+        system_prompt=(
+            "你是 SKU Hunters 商品评审会的复盘助手。基于给定的本场会议产物，"
+            "回答商品经理的问题、帮助总结教训。只依据给定材料作答，禁止编造"
+            "材料中不存在的数字；材料里没有的信息直接说明。150 字以内。"
+        ),
+        user_prompt=f"【本场会议产物】\n{digest}\n\n【商品经理的问题】\n{question}",
+        max_tokens=400,
+    )
+    if answer is None:
+        answer = (
+            f"关于「{question}」：本场会议产物摘要如下——\n{digest}\n"
+            f"（LLM 未配置或暂不可用，以上为原始产物索引）"
+        )
+    return {
+        "current_act": "retro",
+        "review_logs": [{"node": "retro", "act": "retro",
+                         "question": question, "answer": answer}],
+    }
+
+
 async def learning_node(state: CommitteeState) -> dict[str, Any]:
-    """ACT5 学习官：会内唯一动作——建档快照（复盘是离线任务）"""
+    """ACT5 学习官：会内唯一动作——建档快照（复盘是离线任务）
+
+    bad case（人否决）与通过案同等归档：人决策 + 复盘对话是最宝贵的训练信号。
+    """
     rec = state.get("recommendation", {})
+    logs = state.get("review_logs", [])
+    gate2 = next(
+        (log for log in reversed(logs) if log.get("node") == "human_gate"), {}
+    )
     snapshot = {
         "session_id": state.get("session_id", ""),
         "proposal": rec.get("proposal", {}).get("name", ""),
         "predicted_score": rec.get("opportunity_score", {}).get("total_score"),
-        "decision": rec.get("decision", ""),
-        "status": "archived",
+        "ai_decision": rec.get("decision", ""),
+        "human_action": gate2.get("decision", ""),
+        "retro_turns": sum(1 for log in logs if log.get("node") == "retro"),
+        "status": "rejected" if gate2.get("decision") == "reject" else "archived",
     }
     return {
         "current_act": "act5",
@@ -317,6 +412,14 @@ def _route_human_gate(state: CommitteeState) -> str:
         return "business_agent"
     if action == "question":
         return "qa_act4_node"
+    # confirm / reject 都进复盘窗：通过案与 bad case 同等留对话机会
+    return "retro_gate"
+
+
+def _route_retro_gate(state: CommitteeState) -> str:
+    action = (state.get("human_decision") or {}).get("action", "done")
+    if action in ("chat", "question"):
+        return "retro_qa_node"
     return "learning_node"
 
 
@@ -337,6 +440,8 @@ def build_graph() -> Any:
     g.add_node("decision_engine", decision_node)
     g.add_node("human_gate", human_gate)
     g.add_node("qa_act4_node", _make_qa_node("human_gate"))
+    g.add_node("retro_gate", retro_gate)
+    g.add_node("retro_qa_node", retro_qa_node)
     g.add_node("learning_node", learning_node)
 
     g.add_edge(START, "brief_node")
@@ -360,9 +465,11 @@ def build_graph() -> Any:
     g.add_edge("gtm_agent", "decision_engine")
     g.add_edge("decision_engine", "human_gate")
 
-    # Gate 2 → ACT5
+    # Gate 2 → 复盘窗 → ACT5
     g.add_conditional_edges("human_gate", _route_human_gate)
     g.add_edge("qa_act4_node", "human_gate")
+    g.add_conditional_edges("retro_gate", _route_retro_gate)
+    g.add_edge("retro_qa_node", "retro_gate")
     g.add_edge("learning_node", END)
 
     return g.compile(checkpointer=MemorySaver())
@@ -422,16 +529,23 @@ def _translate(node_name: str, update: dict[str, Any]) -> dict[str, Any] | None:
         return {"role": "decision",
                 "content": rec["summary"],
                 "evidence": _evidence_of(rec["opportunity_score"]),
-                "score": rec["opportunity_score"]["total_score"]}
+                "score": rec["opportunity_score"]["total_score"],
+                "report": rec}  # 完整建议书：API report 端点用，四键契约不变
     if node_name == "learning_node":
         snap = update["review_logs"][-1].get("snapshot", {})
+        bad = snap.get("status") == "rejected"
         return {"role": "learning",
                 "content": (
-                    f"已建档：「{snap.get('proposal', '')}」"
-                    f"预测分 {snap.get('predicted_score')} 已快照，"
-                    f"上市后将追踪对照、定期复盘。"
+                    f"已建档{'（bad case）' if bad else ''}："
+                    f"「{snap.get('proposal', '')}」"
+                    f"预测分 {snap.get('predicted_score')}，"
+                    f"AI 建议 {snap.get('ai_decision')} / 人决策 {snap.get('human_action')}，"
+                    f"复盘对话 {snap.get('retro_turns', 0)} 轮已入档。"
                 ),
                 "evidence": [], "score": None}
+    if node_name == "retro_qa_node":
+        answer = update["review_logs"][-1].get("answer", "")
+        return {"role": "retro", "content": answer, "evidence": [], "score": None}
     if node_name.startswith("qa_"):
         answer = update["review_logs"][-1].get("answer", "")
         return {"role": "qa", "content": answer, "evidence": [], "score": None}
@@ -442,8 +556,14 @@ def _describe(decision: dict[str, Any]) -> str:
     action = decision.get("action", "confirm")
     if action == "modify":
         return f"✏️ 修改：{decision.get('suggestion', '')}（回退重跑）"
+    if action == "reject":
+        return f"❌ 否决立项：{decision.get('reason', '')}（归档为 bad case）"
     if action == "question":
         return f"❓ 疑问：{decision.get('question', '')}"
+    if action == "chat":
+        return f"💬 复盘：{decision.get('question') or decision.get('content', '')}"
+    if action == "done":
+        return "📝 复盘结束，归档"
     return "✅ 确定，继续"
 
 

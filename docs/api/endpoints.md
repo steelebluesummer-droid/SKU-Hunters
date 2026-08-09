@@ -149,3 +149,30 @@ GET /weights/templates
 | `SESSION_NOT_FOUND` | 会议不存在 |
 | `SESSION_NOT_AT_GATE` | 未到人工决策点，不能提交 decision |
 | `DECISION_REASON_REQUIRED` | approve/reject 未填理由 |
+| `REPORT_NOT_READY` | 会议尚未到达决策，建议书未生成（D2 新增） |
+
+---
+
+# D2 增补（2026-08-09，编排层接入 · 只增不改）
+
+## 动作映射（decision 端点 → 图门词汇）
+
+| 契约动作 | 图内行为 |
+|:---|:---|
+| `approve` + reason | confirm（理由留痕进 review_logs） |
+| `reject` + reason | 否决立项 = **bad case**：记 C4 人机冲突 → 进复盘窗 → 学习官照常归档（负样本） |
+| `revise` + reason | modify，可选 `scope: "business"（默认）/"creative"` |
+| `reweight` + custom_weights | modify + 新权重写入 state，仅商业官重算（秒级） |
+| `chat` + content（新增） | 会后复盘窗对话：LLM 基于本场证据链作答，全部入学习官档案 |
+| `done`（新增） | 结束复盘窗，归档 |
+
+## 状态机变化
+
+- 新增门 `retro`（会后复盘窗）：human_gate 结论（approve/reject 均可）后进入；
+  窗内只对话、不打回重做；`done` 后学习官归档
+- 终态：`approved` / `rejected`
+- `GET /reviews/{id}` 响应新增 `pending_gate`（非 null = 正在等人操作，含 gate/prompt/options）
+- `GET /reviews/{id}/report` 响应为《立项建议书》全量（ProjectRecommendation：
+  proposal / opportunity_score / decision / conditions / dissent_records /
+  runner_ups / confidence / summary）；未就绪返回 404 `REPORT_NOT_READY`
+- `POST /decision` 响应附 `mapped` 字段（契约动作映射后的图内决策，调试用）
