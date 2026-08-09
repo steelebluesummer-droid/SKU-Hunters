@@ -36,7 +36,7 @@ class GoogleTrendsConnector:
         for attempt in range(self.retries):
             try:
                 return fn(*args, **kwargs)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — 限流/网络/解析异常统一重试
                 last_err = e
                 if attempt < self.retries - 1:
                     time.sleep(2 ** (attempt + 1))

@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
+from pydantic import ValidationError
 
 from ..config import WEIGHT_TEMPLATES
 from ..schemas.brief import Brief
@@ -25,7 +26,7 @@ async def create_review(payload: dict):
     """发起评审（BRIEF_LOCKED）"""
     try:
         brief = Brief(**payload.get("brief", {}))
-    except Exception as e:
+    except ValidationError as e:
         raise HTTPException(
             status_code=422,
             detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}},

@@ -8,7 +8,7 @@ LLM 增强分析为可选层：无 API Key 时自动降级为规则引擎输出�
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import datetime, timezone
 from typing import Any
 
 from ..data.google_trends import GoogleTrendsConnector
@@ -49,7 +49,7 @@ class TrendAgent(BaseAgent):
         for kw in keywords[:5]:  # Google Trends 单次最多5个关键词
             try:
                 result = self.connector.compute_heat_index(kw, geo=geo)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — 单关键词失败不阻塞整体是刻意设计
                 # 单个关键词失败不阻塞整体，记录后继续
                 evidence.append(EvidenceRef(
                     url=f"https://trends.google.com/trends/explore?q={kw}",
@@ -85,7 +85,7 @@ class TrendAgent(BaseAgent):
             region=region_label,
             trends=trend_items,
             summary=summary,
-            analysis_date=date.today().isoformat(),
+            analysis_date=datetime.now(timezone.utc).date().isoformat(),
             evidence_refs=evidence,
         )
         return matrix.model_dump()
@@ -150,5 +150,5 @@ class TrendAgent(BaseAgent):
                 temperature=0.3,
             )
             return resp.choices[0].message.content or fallback
-        except Exception:
+        except Exception:  # noqa: BLE001 — LLM 故障刻意降级为规则输出
             return fallback

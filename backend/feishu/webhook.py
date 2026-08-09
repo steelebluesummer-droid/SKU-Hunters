@@ -2,12 +2,12 @@
 飞书 Webhook 路由 - 接收飞书消息回调和卡片事件
 集成到你的 FastAPI 应用中
 """
-from fastapi import APIRouter, Request, HTTPException
-from typing import Dict, Any
 
-from .config import FeishuConfig
+from fastapi import APIRouter, HTTPException, Request
+
 from .auth import FeishuAuth
 from .bot import FeishuBot
+from .config import FeishuConfig
 from .handler import MessageHandler
 
 

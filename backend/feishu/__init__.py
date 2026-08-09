@@ -5,8 +5,8 @@
 - 用卡片消息展示各委员发言
 """
 
-from .config import FeishuConfig
 from .bot import FeishuBot
+from .config import FeishuConfig
 from .handler import MessageHandler
 
-__all__ = ["FeishuConfig", "FeishuBot", "MessageHandler"]
+__all__ = ["FeishuBot", "FeishuConfig", "MessageHandler"]

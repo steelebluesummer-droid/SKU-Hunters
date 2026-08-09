@@ -2,9 +2,9 @@
 消息处理器 - 接收飞书消息，调度 Agent，发送结果
 目前只接了趋势官，其他 Agent 后续补充
 """
-import re
 import asyncio
-from typing import Dict, Any
+import re
+from typing import Any
 
 from .bot import FeishuBot
 
@@ -15,7 +15,7 @@ class MessageHandler:
     def __init__(self, bot: FeishuBot):
         self.bot = bot
 
-    async def handle_message(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_message(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         处理飞书消息事件
 
@@ -36,14 +36,14 @@ class MessageHandler:
         try:
             content_data = json.loads(content)
             text = content_data.get("text", "")
-        except Exception:
+        except (ValueError, AttributeError):
             text = content
 
         # 去掉 @机器人 的部分
         text = re.sub(r"@_user_1\s*", "", text).strip()
 
         # 判断指令
-        if text.startswith("评审") or text.startswith("分析"):
+        if text.startswith(("评审", "分析")):
             # 提取主题
             topic = re.sub(r"^(评审|分析)(一下|下)?", "", text).strip()
             if not topic:
@@ -64,7 +64,7 @@ class MessageHandler:
 
         return {"code": 0, "msg": "ignored"}
 
-    async def handle_card_action(self, event: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_card_action(self, event: dict[str, Any]) -> dict[str, Any]:
         """
         处理卡片按钮点击事件
         """
@@ -138,7 +138,7 @@ class MessageHandler:
                 content=content,
                 evidence=evidence,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — 任何失败都降级为占位卡片，不阻塞会议
             # 任何失败（网络/Key/数据源）都降级为占位，不阻塞会议
             self.bot.send_committee_report(
                 chat_id=chat_id,

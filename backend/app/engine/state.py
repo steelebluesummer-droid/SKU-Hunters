@@ -13,7 +13,7 @@ BRIEF_LOCKED → ACT1 → GATE → ACT2 → CHALLENGE → ACT3 → ACT4 → HUMA
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, TypedDict
 
 
 class CommitteeState(TypedDict, total=False):

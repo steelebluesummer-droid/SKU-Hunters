@@ -1,8 +1,9 @@
 """
 飞书消息发送
 """
+from typing import Any
+
 import requests
-from typing import Dict, Any, List
 
 from .auth import FeishuAuth
 from .cards import (
@@ -19,13 +20,13 @@ class FeishuBot:
         self.auth = auth
         self.base_url = "https://open.feishu.cn/open-apis/im/v1/messages"
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self.auth.get_token()}",
             "Content-Type": "application/json; charset=utf-8",
         }
 
-    def send_text(self, chat_id: str, text: str) -> Dict[str, Any]:
+    def send_text(self, chat_id: str, text: str) -> dict[str, Any]:
         """发送纯文本消息"""
         resp = requests.post(
             f"{self.base_url}?receive_id_type=chat_id",
@@ -38,7 +39,7 @@ class FeishuBot:
         )
         return resp.json()
 
-    def send_card(self, chat_id: str, card: Dict[str, Any]) -> Dict[str, Any]:
+    def send_card(self, chat_id: str, card: dict[str, Any]) -> dict[str, Any]:
         """发送交互卡片消息"""
         import json
         resp = requests.post(
@@ -59,9 +60,9 @@ class FeishuBot:
         chat_id: str,
         role: str,
         content: str,
-        evidence: List[str] = None,
-        score: float = None,
-    ) -> Dict[str, Any]:
+        evidence: list[str] | None = None,
+        score: float | None = None,
+    ) -> dict[str, Any]:
         """发送委员发言卡片"""
         card = build_committee_card(
             role=role,
@@ -71,7 +72,7 @@ class FeishuBot:
         )
         return self.send_card(chat_id, card)
 
-    def send_review_start(self, chat_id: str, topic: str) -> Dict[str, Any]:
+    def send_review_start(self, chat_id: str, topic: str) -> dict[str, Any]:
         """发送评审开始卡片"""
         card = build_start_card(topic)
         return self.send_card(chat_id, card)
@@ -82,7 +83,7 @@ class FeishuBot:
         topic: str,
         final_score: float,
         recommendation: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """发送评审总结卡片"""
         card = build_summary_card(topic, final_score, recommendation)
         return self.send_card(chat_id, card)

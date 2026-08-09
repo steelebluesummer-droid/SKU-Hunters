@@ -3,7 +3,9 @@
 自动缓存和刷新 token
 """
 import time
+
 import requests
+
 from .config import FeishuConfig
 
 
@@ -38,6 +40,6 @@ class FeishuAuth:
         )
         data = resp.json()
         if data.get("code") != 0:
-            raise Exception(f"获取飞书token失败: {data}")
+            raise RuntimeError(f"获取飞书token失败: {data}")
         self._token = data["tenant_access_token"]
         self._expire_at = time.time() + data["expire"]

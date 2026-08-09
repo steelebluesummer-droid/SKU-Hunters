@@ -5,9 +5,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.schemas import (
-    Confidence, DimensionScore, OpportunityScore, ProductProposal,
-    ProposalSet, SourceRef, Weights,
+    Confidence,
+    DimensionScore,
+    OpportunityScore,
+    ProductProposal,
+    ProposalSet,
+    SourceRef,
+    Weights,
 )
+from pydantic import ValidationError
 
 w = Weights()  # 默认 35/25/20/10/10
 
@@ -32,21 +38,21 @@ try:
         total_score=95.0, star_rating=5, upstream_confidence=Confidence.MEDIUM,
     )
     print("2. 失败：错误算术未被拦截!")
-except Exception as e:
+except ValidationError as e:
     print("2. 错误算术被拦截:", str(e).splitlines()[1].strip()[:70])
 
 # 3. 权重和不为 1 应被拒绝
 try:
     Weights(trend_heat=0.5, user_demand=0.4, ip_fit=0.2, competition=0.1, history_analog=0.1)
     print("3. 失败：错误权重未被拦截!")
-except Exception:
+except ValidationError:
     print("3. 权重和校验拦截成功")
 
 # 4. 提案数量约束（必须 3-5 个）
 try:
     ProposalSet(proposals=[])
     print("4. 失败：空提案集未被拦截!")
-except Exception:
+except ValidationError:
     print("4. 提案数量约束生效（3-5个）")
 
 # 5. source_map 三方覆盖检查

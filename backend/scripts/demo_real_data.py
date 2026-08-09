@@ -8,7 +8,6 @@
       真实消费需求信号（淘宝）+ 内容热度信号（B站）
 """
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -17,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.data.bilibili_hot import BilibiliConnector
 from app.data.taobao_suggest import TaobaoSuggestConnector
-
 
 IP_CANDIDATES = ["labubu", "chiikawa", "线条小狗"]
 

@@ -10,7 +10,7 @@ B站是 Z 世代浓度最高的中文内容平台，
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
@@ -18,7 +18,7 @@ import httpx
 class BilibiliConnector:
     """B站趋势数据连接器"""
 
-    HEADERS = {
+    HEADERS: ClassVar[dict[str, str]] = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -57,7 +57,7 @@ class BilibiliConnector:
         ]
 
     # 与潮玩/IP消费最相关的分区
-    RANKING_PARTITIONS = {
+    RANKING_PARTITIONS: ClassVar[dict[int, str]] = {
         160: "生活",
         155: "时尚",
         1: "动画",

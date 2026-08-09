@@ -3,15 +3,15 @@
 1. 测试获取 tenant_access_token
 2. 测试发送消息（需要 chat_id）
 """
-import sys
 import os
+import sys
 
 # 添加 backend 目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from feishu.config import FeishuConfig
 from feishu.auth import FeishuAuth
 from feishu.bot import FeishuBot
+from feishu.config import FeishuConfig
 
 
 def test_token():
@@ -26,10 +26,10 @@ def test_token():
 
     try:
         token = auth.get_token()
-        print(f"✅ Token 获取成功！")
+        print("✅ Token 获取成功！")
         print(f"   Token 前20位: {token[:20]}...")
         return auth
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — 手动测试脚本，打印所有错误
         print(f"❌ Token 获取失败: {e}")
         return None
 
@@ -45,20 +45,20 @@ def test_send_message(auth, chat_id):
     try:
         result = bot.send_text(chat_id, "🤖 你好！我是 SKU 委员会机器人，对接测试成功！")
         if result.get("code") == 0:
-            print(f"✅ 消息发送成功！")
+            print("✅ 消息发送成功！")
             print(f"   消息 ID: {result.get('data', {}).get('message_id', '')}")
         else:
-            print(f"❌ 消息发送失败")
+            print("❌ 消息发送失败")
             print(f"   错误码: {result.get('code')}")
             print(f"   错误信息: {result.get('msg')}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — 手动测试脚本，打印所有错误
         print(f"❌ 发送异常: {e}")
 
 
 def test_send_card(auth, chat_id):
     """测试发送卡片消息"""
     print("\n" + "=" * 50)
-    print(f"测试 3: 发送趋势官卡片")
+    print("测试 3: 发送趋势官卡片")
     print("=" * 50)
 
     bot = FeishuBot(auth)
@@ -79,12 +79,12 @@ def test_send_card(auth, chat_id):
             ],
         )
         if result.get("code") == 0:
-            print(f"✅ 卡片发送成功！")
+            print("✅ 卡片发送成功！")
         else:
-            print(f"❌ 卡片发送失败")
+            print("❌ 卡片发送失败")
             print(f"   错误码: {result.get('code')}")
             print(f"   错误信息: {result.get('msg')}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — 手动测试脚本，打印所有错误
         print(f"❌ 发送异常: {e}")
 
 

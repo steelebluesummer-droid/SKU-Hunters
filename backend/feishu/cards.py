@@ -2,8 +2,7 @@
 飞书卡片模板 - 7个委员的发言卡片
 每个委员有不同的颜色和图标
 """
-from typing import List, Dict, Any
-
+from typing import Any
 
 # 委员配置：名字、颜色、图标
 COMMITTEE_CONFIG = {
@@ -48,10 +47,10 @@ COMMITTEE_CONFIG = {
 def build_committee_card(
     role: str,
     content: str,
-    evidence: List[str] = None,
-    score: float = None,
-    extra_fields: Dict[str, str] = None,
-) -> Dict[str, Any]:
+    evidence: list[str] | None = None,
+    score: float | None = None,
+    extra_fields: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """
     生成委员发言卡片
 
@@ -156,7 +155,7 @@ def build_committee_card(
     return card
 
 
-def build_start_card(topic: str) -> Dict[str, Any]:
+def build_start_card(topic: str) -> dict[str, Any]:
     """生成评审开始卡片"""
     return {
         "config": {"wide_screen_mode": True},
@@ -184,7 +183,7 @@ def build_start_card(topic: str) -> Dict[str, Any]:
     }
 
 
-def build_summary_card(topic: str, final_score: float, recommendation: str) -> Dict[str, Any]:
+def build_summary_card(topic: str, final_score: float, recommendation: str) -> dict[str, Any]:
     """生成最终总结卡片"""
     score_color = "green" if final_score >= 80 else "orange" if final_score >= 60 else "red"
     return {

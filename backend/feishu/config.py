@@ -1,8 +1,9 @@
 """
 飞书配置
 """
-from pydantic import BaseModel
 import os
+
+from pydantic import BaseModel
 
 
 class FeishuConfig(BaseModel):

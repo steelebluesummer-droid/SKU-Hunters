@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 # 各供应商的 base_url 与推荐模型（全部为 OpenAI 兼容格式）
 PROVIDERS: dict[str, dict[str, str]] = {
@@ -95,7 +94,7 @@ def complete(
             max_tokens=max_tokens,
         )
         return resp.choices[0].message.content
-    except Exception:
+    except Exception:  # noqa: BLE001 — LLM 故障刻意降级，不阻塞会议
         # 降级纪律：LLM 故障不阻塞会议，规则引擎兜底
         return None
 
