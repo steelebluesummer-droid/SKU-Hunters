@@ -30,7 +30,7 @@ _SESSIONS: dict[str, dict[str, Any]] = {}
 _ROLE_ACT = {
     "trend": "act1_insights", "user": "act1_insights", "ip": "act1_insights",
     "act1_gate": "act1_gate",
-    "creative": "act2_ideation",
+    "creative": "act2_ideation", "challenge": "act2_challenge",
     "business": "act3_dual_review", "global": "act3_dual_review",
     "decision": "act4_decision",
     "human_gate": "human_gate",

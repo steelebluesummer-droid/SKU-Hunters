@@ -51,7 +51,9 @@ async for event in run_review(brief, ask_human=your_callback, session_id=None):
 ```
 
 - `role` 枚举：`trend` / `user` / `ip` / `creative` / `business` / `global` /
-  `decision` / `learning` / `act1_gate` / `human_gate` / `retro` / `qa`
+  `decision` / `learning` / `challenge` / `act1_gate` / `human_gate` / `retro` / `qa`
+  （`challenge` 为 ACT2_CHALLENGE 质询环节事件：三位洞察官对 ProposalSet 的结构化
+  质询，四键契约不变，evidence 为质询证据链，来源角色保留在 content 中）
 - `brief` 必须过 `Brief` schema：`{"category": str, "market": str, "budget_range": "low"|"mid"|"high"}`
 - `ask_human(gate_info) -> dict`，`gate_info = {"gate", "prompt", "options"}`。
   门有两个半：act1_gate（方向确认）、human_gate（立项拍板）、retro（首次复盘入口：

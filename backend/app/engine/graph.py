@@ -34,6 +34,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from app.agents.challenge_agents import CHALLENGE_REGISTRY
 from app.agents.mock_agents import (
     MockBusinessAgent,
     MockCreativeAgent,
@@ -47,6 +48,7 @@ from app.engine.decision_engine import DecisionEngine
 from app.engine.state import CommitteeState
 from app.schemas import (
     Brief,
+    ChallengeRecord,
     Confidence,
     ConflictRecord,
     ConflictType,
@@ -158,6 +160,29 @@ def _make_insight_node(agent_key: str, artifact_key: str, schema: type):
     return node
 
 
+def _make_challenge_node(agent_key: str):
+    """ACT2 质询节点工厂：创意官产出后，各洞察官对方案发起结构化质询"""
+    async def node(state: CommitteeState) -> dict[str, Any]:
+        agent = CHALLENGE_REGISTRY[agent_key]()
+        raw = await agent.run({
+            "brief": state["brief"],
+            "proposal_set": state["proposal_set"],
+        "challenges": state.get("challenges", []),
+            "feature_matrix": state.get("feature_matrix"),
+            "user_sentiment": state.get("user_sentiment"),
+            "ip_assessment": state.get("ip_assessment"),
+        })
+        challenges = [
+            ChallengeRecord.model_validate(c).model_dump(mode="json")
+            for c in raw["challenges"]
+        ]
+        return {
+            "challenges": challenges,
+            "review_logs": [{"node": f"{agent_key}_challenge", "act": "act2", "status": "ok"}],
+        }
+    return node
+
+
 async def creative_node(state: CommitteeState) -> dict[str, Any]:
     """ACT2 创意官：汇聚三方情报（fan-in）"""
     agent = AGENT_REGISTRY["creative"]()
@@ -187,6 +212,7 @@ async def business_node(state: CommitteeState) -> dict[str, Any]:
         "brief": state["brief"],
         "weights": state["weights"],
         "proposal_set": state["proposal_set"],
+        "challenges": state.get("challenges", []),
         "upstream_confidences": upstream,
         "feedback": _feedback(state),
     })
@@ -207,6 +233,7 @@ async def gtm_node(state: CommitteeState) -> dict[str, Any]:
     raw = await agent.run({
         "brief": state["brief"],
         "proposal_set": state["proposal_set"],
+        "challenges": state.get("challenges", []),
     })
     plans = [
         GTMPlan.model_validate(p).model_dump(mode="json") for p in raw["gtm_plans"]
@@ -219,10 +246,22 @@ async def gtm_node(state: CommitteeState) -> dict[str, Any]:
 
 async def decision_node(state: CommitteeState) -> dict[str, Any]:
     """ACT4 Decision Engine：合成立项建议书"""
+    conflicts = list(state.get("conflicts", []))
+    for c in state.get("challenges", []):
+        conflicts.append(ConflictRecord(
+            conflict_type=ConflictType.C2_QUOTE_DEVIATION,
+            parties=[c.get("source_role", "committee")],
+            description=(
+                f"[质询·{c.get('stance', '')}] "
+                f"{c.get('proposal_name', '')}：{c.get('content', '')}"
+            ),
+            resolution="open",
+            act="act2",
+        ).model_dump())
     rec = DecisionEngine().synthesize(
         proposal_set=state["proposal_set"],
         opportunity_scores=state["opportunity_scores"],
-        conflicts=state.get("conflicts", []),
+        conflicts=conflicts,
     )
     return {
         "recommendation": rec.model_dump(mode="json"),
@@ -477,6 +516,9 @@ def build_graph() -> Any:
     g.add_node("act1_gate", act1_gate)
     g.add_node("qa_act1_node", _make_qa_node("act1_gate"))
     g.add_node("creative_agent", creative_node)
+    g.add_node("trend_challenge", _make_challenge_node("trend"))
+    g.add_node("user_challenge", _make_challenge_node("user"))
+    g.add_node("ip_challenge", _make_challenge_node("ip"))
     g.add_node("business_agent", business_node)
     g.add_node("gtm_agent", gtm_node)
     g.add_node("decision_engine", decision_node)
@@ -498,9 +540,16 @@ def build_graph() -> Any:
     g.add_conditional_edges("act1_gate", _route_act1_gate)
     g.add_edge("qa_act1_node", "act1_gate")
 
-    # ACT2 → ACT3 双轨 fan-out
-    g.add_edge("creative_agent", "business_agent")
-    g.add_edge("creative_agent", "gtm_agent")
+    # ACT2 → ACT2_CHALLENGE（三洞察官质询）→ ACT3 双轨 fan-out
+    g.add_edge("creative_agent", "trend_challenge")
+    g.add_edge("creative_agent", "user_challenge")
+    g.add_edge("creative_agent", "ip_challenge")
+    g.add_edge("trend_challenge", "business_agent")
+    g.add_edge("trend_challenge", "gtm_agent")
+    g.add_edge("user_challenge", "business_agent")
+    g.add_edge("user_challenge", "gtm_agent")
+    g.add_edge("ip_challenge", "business_agent")
+    g.add_edge("ip_challenge", "gtm_agent")
 
     # ACT3 fan-in → ACT4
     g.add_edge("business_agent", "decision_engine")
@@ -529,6 +578,23 @@ def _evidence_of(artifact: dict[str, Any]) -> list[str]:
 
 def _translate(node_name: str, update: dict[str, Any]) -> dict[str, Any] | None:
     """节点 state 更新 → 飞书卡片事件 {"role","content","evidence","score"}"""
+    if node_name in ("trend_challenge", "user_challenge", "ip_challenge"):
+        src = {"trend_challenge": "趋势官", "user_challenge": "用户官",
+               "ip_challenge": "IP官"}[node_name]
+        lines = []
+        evidence = []
+        for c in update["challenges"]:
+            mark = {"endorse": "✅ 背书", "revise": "✏️ 修正", "oppose": "⛔ 反对"}
+            lines.append(
+                f"{mark.get(c['stance'], c['stance'])} 「{c['proposal_name']}」："
+                f"{c['content']}"
+            )
+            for ref in c.get("evidence_refs", []):
+                ev = f"{ref.get('title', '')}：{ref.get('snippet', '')}"
+                if ev not in evidence:
+                    evidence.append(ev)
+        return {"role": "challenge", "content": f"{src} 质询：\n" + "\n".join(lines),
+                "evidence": evidence, "score": None}
     if node_name == "trend_agent":
         a = update["feature_matrix"]
         return {"role": "trend", "content": a["summary"],

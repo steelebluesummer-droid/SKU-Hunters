@@ -41,6 +41,26 @@ COMMITTEE_CONFIG = {
         "color": "wathet",
         "subtitle": "数据分析负责人",
     },
+    "challenge": {
+        "name": "⚔️ 质询",
+        "color": "indigo",
+        "subtitle": "圆桌质询环节",
+    },
+    "decision": {
+        "name": "🎯 Decision Engine",
+        "color": "gold",
+        "subtitle": "立项建议合成",
+    },
+    "retro": {
+        "name": "📝 复盘",
+        "color": "grey",
+        "subtitle": "会后复盘",
+    },
+    "qa": {
+        "name": "💬 问答",
+        "color": "grey",
+        "subtitle": "答疑",
+    },
 }
 
 
@@ -133,7 +153,7 @@ def build_committee_card(
         "elements": [
             {
                 "tag": "plain_text",
-                "content": "SKU Hunters · AI Product Committee",
+                "content": "SKU Hunters · AI Product Committee · 演示数据（Mock Agent）",
             },
         ],
     })
@@ -243,3 +263,59 @@ def build_summary_card(topic: str, final_score: float, recommendation: str) -> d
             },
         ],
     }
+
+
+def build_gate_card(
+    gate: str,
+    prompt: str,
+    session_id: str,
+    gate_label: str = "人工决策",
+) -> dict[str, Any]:
+    """生成人工 Gate 决策卡片，按钮 value 携带 session_id 以便恢复 checkpoint。"""
+    if gate == "retro":
+        actions = [
+            {"tag": "button", "text": {"tag": "plain_text", "content": "💬 继续提问"},
+             "type": "default",
+             "value": {"session_id": session_id, "gate": gate, "action": "question"}},
+            {"tag": "button", "text": {"tag": "plain_text", "content": "📝 结束复盘"},
+             "type": "primary",
+             "value": {"session_id": session_id, "gate": gate, "action": "done"}},
+        ]
+    else:
+        actions = [
+            {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 确认"},
+             "type": "primary",
+             "value": {"session_id": session_id, "gate": gate, "action": "confirm"}},
+            {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 否决"},
+             "type": "danger",
+             "value": {"session_id": session_id, "gate": gate, "action": "reject"}},
+        ]
+
+    card = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"🚪 {gate_label}"},
+            "template": "orange" if gate != "retro" else "grey",
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**{prompt}**"}},
+            {"tag": "hr"},
+            {
+                "tag": "div",
+                "text": {"tag": "lark_md",
+                         "content": f"会议 ID：`{session_id}`\n\n"
+                                    "支持文本指令："
+                                    "`修改 <意见>` / `追问 <问题>` "
+                                    "/ `通过` / `否决 <理由>`"},
+            },
+            {"tag": "hr"},
+            {"tag": "action", "actions": actions},
+            {"tag": "hr"},
+            {
+                "tag": "note",
+                "elements": [{"tag": "plain_text",
+                              "content": "AI 建议仅供参考·演示数据（Mock Agent）"}],
+            },
+        ],
+    }
+    return card

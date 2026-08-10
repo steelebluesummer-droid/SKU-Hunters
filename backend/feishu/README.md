@@ -5,7 +5,11 @@
 - 飞书群里 @机器人 说「评审 XXX」，自动启动一轮 AI 委员会评审
 - 7 个委员用不同颜色的卡片发言，模拟圆桌讨论
 - 最后输出评审结论卡片，带「通过/否决」按钮，真人拍板
-- 目前趋势官已接入，其他委员为占位内容，后续补充
+- 已接入 LangGraph `run_review()` 事件流：委员 + 质询环节用不同颜色卡片发言
+- 卡片内容全部来自 LangGraph 事件 / Artifact，禁止硬编码角色结论与评分
+- 人工 Gate（洞察确认/立项拍板/复盘）发带 `session_id` 按钮卡片，点击后恢复同一
+  LangGraph checkpoint（不重启流程）；支持文本指令 `通过/否决/修改/追问/结束`
+- webhook 保持身份校验（fail-closed）+ event_id 幂等 + 异步快速返回
 
 ## 文件结构
 
@@ -174,3 +178,29 @@ bot.send_text("oc_xxxxxxxxxx", "hello from SKU Hunters!")
 **Q: @机器人没反应？**
 - 检查消息里是否真的 @ 了机器人（飞书会把 @ 替换成 @_user_1）
 - 检查 handler.py 里的正则是否匹配
+
+## 已知限制（生产部署前必须处理）
+
+**Gate / 会话状态仅在进程内存中（checkpoint 恢复不支持进程重启）**
+
+- `MessageHandler._sessions`、`gate_future` 都保存在内存中，LangGraph 的 checkpoint
+  （thread_id=session_id）虽然持久化在磁盘，但进程一旦重启：
+  - `_sessions` 与 `gate_future` 全部丢失；
+  - 飞书按钮携带的 `session_id` 会返回 `no pending gate`；
+  - 无法真正恢复人工 Gate。
+- **当前能力边界**：仅支持「同一进程内」恢复 checkpoint，**不支持服务重启后恢复**。
+  明天演示可接受，生产上线前必须处理。
+- **建议的修复方向**（二选一）：
+  1. 将 pending gate / session 元数据落盘持久化（如 SQLite/Redis），重启后按
+     `session_id` 重建 Gate 状态；
+  2. 按钮直接调用 LangGraph 的 `Command(resume=...)` 恢复 checkpoint，不依赖内存
+     `Future`。
+
+**鉴权（fail-closed）**
+- webhook 一律先校验 token：token 缺失或 `FEISHU_VERIFICATION_TOKEN` 未配置时直接
+  返回 403，验证通过后才返回 URL challenge。生产必须配置 `verification_token`。
+
+**发送失败状态**
+- `send_text` / `send_card` 返回非零 `code` 时抛 `BotSendError`，`_run_review` 将会话
+  置为 `failed` 并保存 `error` / `failed_stage` / `last_event`，不会错误地显示为
+  `completed`。
