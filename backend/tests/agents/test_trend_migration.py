@@ -21,6 +21,7 @@ from app.agents.trend_metrics import (
 )
 from app.data.bilibili_hot import BilibiliConnector
 from app.data.errors import ConnectorFetchError
+from app.data.google_trends import GoogleTrendsConnector
 from app.schemas.evidence import Confidence
 from app.schemas.feature import FeatureMatrix
 
@@ -428,6 +429,44 @@ class TestPartialPartitionCaveat:
         out = _run(agent)
         fm = _parse(out)
         assert any("游戏" in c and "鬼畜" in c for c in fm.caveats)
+
+
+class TestGoogleConnectorEmptyData:
+    """P1-1：Google 空 DataFrame 必须返回 no_data + None，不得伪装成 0 值"""
+
+    def test_empty_df_returns_no_data_not_zero(self):
+        import pandas as pd
+
+        c = GoogleTrendsConnector()
+        with patch.object(
+            GoogleTrendsConnector, "get_interest_over_time", return_value=pd.DataFrame()
+        ):
+            result = c.compute_heat_index("冷门到不存在的词")
+        assert result["no_data"] is True
+        assert result["level"] is None
+        assert result["growth"] is None
+        assert result["breadth"] is None
+        assert result["heat_index"] is None
+        assert result["lifecycle"] == "unknown"
+
+
+class TestExplicitMarketNoDefaultGap:
+    """P1-2：显式传入 CN 不得记录为默认市场 gap"""
+
+    def test_explicit_cn_not_recorded_as_default(self):
+        agent = TrendAgent(google_connector=FakeGoogle(), bilibili_connector=FakeBilibili())
+        out = _run(agent, market="CN")
+        fm = _parse(out)
+        assert not any("market" in c and "未指定" in c for c in fm.caveats)
+
+    def test_missing_market_recorded_as_gap(self):
+        import asyncio
+
+        agent = TrendAgent(google_connector=FakeGoogle(), bilibili_connector=FakeBilibili())
+        # brief 不含 market 且 context 也不传 market → 记录默认市场 gap
+        out = asyncio.run(agent.run({"brief": {"category": "解压玩具", "budget_range": "mid"}}))
+        fm = _parse(out)
+        assert any("market" in c and "未指定" in c for c in fm.caveats)
 
 
 class TestRegistrySwitch:

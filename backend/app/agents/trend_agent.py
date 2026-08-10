@@ -76,7 +76,12 @@ class TrendAgent(BaseAgent):
         """
         brief = context.get("brief") or {}
         category = brief.get("category") or context.get("category", "general")
-        market = brief.get("market") or context.get("market", "global")
+        # 区分"未传 market"与"显式传入"：raw_market 记录原始输入，
+        # market 解析为最终区域（缺省回退 global），避免把显式 CN 误记 gap。
+        raw_market = brief.get("market")
+        if raw_market is None:
+            raw_market = context.get("market")
+        market = raw_market if raw_market not in (None, "") else "global"
         geo = context.get("geo", "")
         keywords = context.get("keywords") or [category]
         region_label = geo or market
@@ -84,8 +89,8 @@ class TrendAgent(BaseAgent):
         data_gaps: list[str] = []
         if category in ("", "未指定"):
             data_gaps.append("category 未指定，使用兼容默认值")
-        if market == "CN" or not market:
-            data_gaps.append("market 使用默认值，未指定具体市场")
+        if raw_market in (None, ""):
+            data_gaps.append("market 未指定，使用默认值")
 
         trend_items: list[TrendItem] = []
         all_evidence: list[EvidenceRef] = []
