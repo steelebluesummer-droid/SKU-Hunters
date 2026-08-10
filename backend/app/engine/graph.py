@@ -40,9 +40,9 @@ from app.agents.mock_agents import (
     MockCreativeAgent,
     MockGTMAgent,
     MockIPAgent,
-    MockTrendAgent,
     MockUserAgent,
 )
+from app.agents.trend_agent import get_trend_agent_class
 from app.engine import llm
 from app.engine.decision_engine import DecisionEngine
 from app.engine.state import CommitteeState
@@ -70,8 +70,10 @@ _checkpointer = SqliteSaver.from_conn_string(str(_CHECKPOINT_DB)) \
     if os.environ.get("CHIN_CHIN") == "sqlite" else MemorySaver()
 
 # ── Agent 注册表：真 Agent 出炉后只改这里 ──────────────────────
+# trend 通过 get_trend_agent_class() 切换：默认 Mock（离线/确定/快），
+# 设 TREND_AGENT_PROVIDER=real 启用真实 Google+B站 趋势官（可回退 Mock）。
 AGENT_REGISTRY: dict[str, type] = {
-    "trend": MockTrendAgent,
+    "trend": get_trend_agent_class(),
     "user": MockUserAgent,
     "ip": MockIPAgent,
     "creative": MockCreativeAgent,
