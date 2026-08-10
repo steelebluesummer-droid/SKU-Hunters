@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -30,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
@@ -64,10 +65,75 @@ from app.schemas import (
 
 # D5：SQLite checkpoint——归档后随时复盘跨重启成立。
 # 设置 CHIN_CHIN=sqlite → 写 data/checkpoints.db；否则退回 MemorySaver
+#
+# 序列化安全：把 app.schemas 中会进入 state dict 的枚举类型显式注册到
+# allowed_msgpack_modules，消除 "Deserializing unregistered type" 警告，
+# 并保证 LANGGRAPH_STRICT_MSGPACK=true 严格模式下也能正常反序列化。
 _CHECKPOINT_DB = Path(__file__).resolve().parents[3] / "data" / "checkpoints.db"
 _CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
-_checkpointer = SqliteSaver.from_conn_string(str(_CHECKPOINT_DB)) \
-    if os.environ.get("CHIN_CHIN") == "sqlite" else MemorySaver()
+
+_ALLOWED_MSGPACK_TYPES: set[tuple[str, str]] = {
+    ("app.schemas.brief", "WeightTemplate"),
+    ("app.schemas.brief", "BudgetRange"),
+    ("app.schemas.challenge", "ChallengeStance"),
+    ("app.schemas.evidence", "Confidence"),
+    ("app.schemas.recommendation", "Decision"),
+    ("app.schemas.review", "ConflictType"),
+    ("app.schemas.testcase", "Outcome"),
+}
+_serde = JsonPlusSerializer(allowed_msgpack_modules=_ALLOWED_MSGPACK_TYPES)
+
+# 懒加载单例：图全走 async 路径，checkpointer 首次使用时异步初始化。
+# SQLite 用 AsyncSqliteSaver（同步 SqliteSaver 不支持 astream）；
+# 连接常驻，保证跨进程/跨重启恢复成立。
+_checkpointer: Any = None
+
+
+async def _get_checkpointer():
+    """返回 checkpointer 单例（首次调用时初始化）。
+
+    - CHIN_CHIN=sqlite → AsyncSqliteSaver 写 data/checkpoints.db
+    - 否则 → MemorySaver
+    """
+    global _checkpointer
+    if _checkpointer is None:
+        if os.environ.get("CHIN_CHIN") == "sqlite":
+            import aiosqlite
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+            # aiosqlite 的工作线程默认非 daemon，会在进程退出时被
+            # threading._shutdown 阻塞 join，导致 CLI 无法退出。
+            # connect() 返回懒连接（线程未启动），先设 daemon 再 await。
+            # 连接引用存模块级，防 GC 关闭。
+            global _SQLITE_CONN
+            _conn = aiosqlite.connect(str(_CHECKPOINT_DB))
+            _conn._thread.daemon = True
+            _SQLITE_CONN = await _conn
+            _checkpointer = AsyncSqliteSaver(_SQLITE_CONN, serde=_serde)
+        else:
+            _checkpointer = MemorySaver(serde=_serde)
+    return _checkpointer
+
+
+def _close_sqlite():
+    """解释器退出时关闭 aiosqlite 连接，终结其非 daemon 工作线程。
+
+    该线程默认非 daemon，threading._shutdown 会 join 它导致 CLI 在流程
+    结束后挂起。conn.close() 会把 close_and_stop 压入内部队列，工作线程
+    处理后退出。用独立事件循环执行（原循环此时通常已关闭）。
+    """
+    conn = globals().get("_SQLITE_CONN")
+    if conn is None:
+        return
+    try:
+        import asyncio
+
+        asyncio.run(conn.close())
+    except Exception:  # noqa: BLE001,S110 — 退出清理失败不影响主流程
+        pass
+
+
+atexit.register(_close_sqlite)
 
 # ── Agent 注册表：真 Agent 出炉后只改这里 ──────────────────────
 # trend 通过 get_trend_agent_class() 切换：默认 Mock（离线/确定/快），
@@ -508,7 +574,7 @@ def _route_learning(state: CommitteeState) -> str:
 
 # ══════════════════ 建图 ══════════════════
 
-def build_graph() -> Any:
+def build_graph(checkpointer: Any = None) -> Any:
     g = StateGraph(CommitteeState)
 
     g.add_node("brief_node", brief_node)
@@ -565,7 +631,7 @@ def build_graph() -> Any:
     g.add_edge("retro_qa_node", "retro_gate")
     g.add_conditional_edges("learning_node", _route_learning)
 
-    return g.compile(checkpointer=_checkpointer)
+    return g.compile(checkpointer=checkpointer or _checkpointer)
 
 
 # ══════════════════ 事件翻译 ══════════════════
@@ -715,7 +781,7 @@ async def run_review(
     """
     ask = ask_human or _auto_confirm
     Brief.model_validate(brief)
-    graph = build_graph()
+    graph = build_graph(checkpointer=await _get_checkpointer())
     config = {"configurable": {"thread_id": session_id or str(uuid.uuid4())}}
 
     payload: Any = {

@@ -11,6 +11,7 @@
 """
 
 import pytest
+
 from app.agents.trend_agent import TrendAgent, get_trend_agent_class
 from app.agents.trend_conflict_detector import TrendConflictDetector
 from app.agents.trend_metrics import (

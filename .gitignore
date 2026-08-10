@@ -58,3 +58,7 @@ backend/data/*.db-wal
 # virtual envs
 .venv/
 backend/.venv/
+
+# 仓库根 data/ 下的 checkpoint 附属文件
+*.db-shm
+*.db-wal
