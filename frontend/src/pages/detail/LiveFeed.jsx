@@ -3,8 +3,8 @@ import { Timeline, Tag, Card, Button, Input, Slider, Space, message, Alert, Radi
 import { CheckCircleOutlined, CloseCircleOutlined, EditOutlined, QuestionCircleOutlined, ExperimentOutlined } from '@ant-design/icons';
 import { api } from '../../api';
 
-const ROLE_ICON = { trend: '📈', user: '👤', ip: '🎯', creative: '💡', business: '💰', global: '🌍', decision: '📋', learning: '📚', qa: '💬', retro: '🔄' };
-const ROLE_LABEL = { trend: '趋势官', user: '用户官', ip: 'IP 策略官', creative: '创意官', business: '商业官', global: '全球化官', decision: '决策引擎', learning: '学习官', qa: '问答', retro: '复盘助手' };
+const ROLE_ICON = { trend: '📈', user: '👤', ip: '🎯', creative: '💡', challenge: '⚔️', business: '💰', global: '🌍', decision: '📋', learning: '📚', qa: '💬', retro: '🔄' };
+const ROLE_LABEL = { trend: '趋势官', user: '用户官', ip: 'IP 策略官', creative: '创意官', challenge: '圆桌质询', business: '商业官', global: '全球化官', decision: '决策引擎', learning: '学习官', qa: '问答', retro: '复盘助手' };
 
 const DIMS = ['趋势热度', '用户需求', 'IP 契合', '竞争格局', '历史类比'];
 const DIM_KEYS = ['trend_heat', 'user_demand', 'ip_fit', 'competition', 'history_analog'];
