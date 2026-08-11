@@ -62,3 +62,9 @@ backend/.venv/
 # 仓库根 data/ 下的 checkpoint 附属文件
 *.db-shm
 *.db-wal
+
+# 大体积冗余压缩包（design/ 已直接入库）
+design.rar
+
+# 运行时任务状态（本地持久化，不入库）
+backend/data/plans_state.json

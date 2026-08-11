@@ -1,4 +1,4 @@
-# Schema 模块 — 圆桌会议全部输入输出契约
+# Schema 模块 — 圆桌会议 + 企划工作室全部输入输出契约
 # 证据引用契约：所有 Agent 输出必须绑定 EvidenceRef
 
 from .brief import Brief, BudgetRange, Weights, WeightTemplate
@@ -7,13 +7,49 @@ from .evidence import Confidence, EvidenceMixin, EvidenceRef
 from .feature import FeatureMatrix, TrendItem
 from .gtm import CountryPlan, GTMPlan
 from .ip_assessment import IPAssessment, IPCandidate
+from .planning import (
+    CategoryRank,
+    CompetitiveMap,
+    CompetitorProduct,
+    ConsumerVoice,
+    CostCheck,
+    DataBoard,
+    EvidenceLink,
+    GapZone,
+    HeatCurve,
+    HeatCurveSeries,
+    HitProduct,
+    HotProductRank,
+    InsightBase,
+    InsightBundle,
+    IPPoolItem,
+    Opportunity,
+    PainPoint,
+    PlanBrief,
+    PlanCard,
+    PlanSummary,
+    PriceBand,
+    PricingInfo,
+    SceneDist,
+    ScheduleItem,
+    SellingPoint,
+    TrendColor,
+    TrendExpression,
+    TrendGallery,
+    TrendPattern,
+    TrendRadar,
+    TrendShape,
+    TrendSignal,
+    UserQuote,
+    VoiceTrend,
+)
 from .pricing import PricePoint, PricingComparison
 from .proposal import ProductProposal, ProposalSet, SourceRef
 from .recommendation import Decision, ProjectRecommendation
 from .retro import DimensionGap, RetroReport
 from .review import ConflictRecord, ConflictType, ReviewIssue, ReviewResult
 from .scoring import DimensionScore, OpportunityScore, RiskWarning
-from .sentiment import PainPoint, SentimentStat, UserSentiment
+from .sentiment import SentimentStat, UserSentiment
 from .swot import SWOTAnalysis, SWOTItem
 from .testcase import BacktestCase, BacktestSet, Outcome
 
@@ -22,26 +58,47 @@ __all__ = [
     "BacktestSet",
     "Brief",
     "BudgetRange",
+    "CategoryRank",
     "ChallengeRecord",
     "ChallengeStance",
+    "CompetitiveMap",
+    "CompetitorProduct",
     "Confidence",
     "ConflictRecord",
     "ConflictType",
+    "ConsumerVoice",
+    "CostCheck",
     "CountryPlan",
+    "DataBoard",
     "Decision",
     "DimensionGap",
     "DimensionScore",
+    "EvidenceLink",
     "EvidenceMixin",
     "EvidenceRef",
     "FeatureMatrix",
     "GTMPlan",
+    "GapZone",
+    "HeatCurve",
+    "HeatCurveSeries",
+    "HitProduct",
+    "HotProductRank",
     "IPAssessment",
     "IPCandidate",
+    "IPPoolItem",
+    "InsightBase",
+    "InsightBundle",
+    "Opportunity",
     "OpportunityScore",
     "Outcome",
     "PainPoint",
+    "PlanBrief",
+    "PlanCard",
+    "PlanSummary",
+    "PriceBand",
     "PricePoint",
     "PricingComparison",
+    "PricingInfo",
     "ProductProposal",
     "ProjectRecommendation",
     "ProposalSet",
@@ -51,10 +108,22 @@ __all__ = [
     "RiskWarning",
     "SWOTAnalysis",
     "SWOTItem",
+    "SceneDist",
+    "ScheduleItem",
+    "SellingPoint",
     "SentimentStat",
     "SourceRef",
+    "TrendColor",
+    "TrendExpression",
+    "TrendGallery",
     "TrendItem",
+    "TrendPattern",
+    "TrendRadar",
+    "TrendShape",
+    "TrendSignal",
+    "UserQuote",
     "UserSentiment",
+    "VoiceTrend",
     "WeightTemplate",
     "Weights",
 ]

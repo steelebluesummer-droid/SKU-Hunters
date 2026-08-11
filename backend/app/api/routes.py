@@ -38,7 +38,8 @@ _ROLE_ACT = {
     "qa": "act1_gate",
 }
 
-_DIGEST_ROLES = {"trend": "趋势官", "user": "用户官", "ip": "IP官", "decision": "立项建议"}
+_DIGEST_ROLES = {"trend": "趋势官", "user": "用户官", "ip": "IP官",
+                 "business": "商业官", "challenge": "质询", "decision": "立项建议"}
 
 
 def _now() -> str:

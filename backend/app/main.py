@@ -1,13 +1,18 @@
-"""SKU Hunters — AI Product Committee 后端服务"""
+"""SKU Hunters — AI 新品企划工作室 后端服务"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+# 启动即加载 backend/.env（LLM Key、即梦 AK/SK、飞书配置）——必须在 app.* 导入前
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+from app.api.planning import router as planning_router
 from app.api.routes import router as committee_router
 
 # 飞书机器人模块（backend/feishu/，需从 backend/ 目录启动以保证可导入）
@@ -15,9 +20,9 @@ from feishu import FeishuConfig
 from feishu.webhook import create_feishu_router
 
 app = FastAPI(
-    title="SKU Hunters — AI Product Committee",
-    description="名创优品 AI 商品开发智能决策引擎",
-    version="0.1.0",
+    title="SKU Hunters — AI 新品企划工作室",
+    description="名创优品 AI 驱动的产品开发智能决策引擎",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -28,7 +33,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 评审 API：POST/GET /api/v1/reviews...
+# 企划工作室 API：POST/GET /api/v1/plans...（v2.0 主链路）
+app.include_router(planning_router)
+
+# 评审 API（旧评审委员会链路，复盘归档阶段复用）：POST/GET /api/v1/reviews...
 app.include_router(committee_router)
 
 # 飞书回调路由：POST /api/v1/feishu/events
@@ -42,7 +50,7 @@ app.include_router(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "AI Product Committee"}
+    return {"status": "ok", "service": "AI 新品企划工作室"}
 
 
 # 生产模式：前端 build 产物由后端托管（npm run build 后一条 uvicorn 命令起全站）。
@@ -56,15 +64,14 @@ if _DIST.is_dir():
 @app.get("/")
 async def root():
     return {
-        "name": "SKU Hunters",
-        "version": "0.1.0",
-        "agents": [
-            "trend",
-            "consumer_insight",
-            "ip_strategy",
-            "product_ideation",
-            "business_evaluation",
-            "go_to_market",
-            "learning",
+        "name": "SKU Hunters · AI 新品企划工作室",
+        "version": "2.0.0",
+        "pipeline": [
+            "企划约束",
+            "五看洞察（趋势/用户/竞品 + 名创内部 + 流行元素板）",
+            "机会生成",
+            "创意设计",
+            "商品策略（成本校验回环）",
+            "新品企划卡",
         ],
     }

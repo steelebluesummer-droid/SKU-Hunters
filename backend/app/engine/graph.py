@@ -36,9 +36,9 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from app.agents.challenge_agents import CHALLENGE_REGISTRY
+from app.agents.creative_agent import get_creative_agent_class
 from app.agents.mock_agents import (
     MockBusinessAgent,
-    MockCreativeAgent,
     MockGTMAgent,
     MockIPAgent,
     MockUserAgent,
@@ -142,7 +142,7 @@ AGENT_REGISTRY: dict[str, type] = {
     "trend": get_trend_agent_class(),
     "user": MockUserAgent,
     "ip": MockIPAgent,
-    "creative": MockCreativeAgent,
+    "creative": get_creative_agent_class(),
     "business": MockBusinessAgent,
     "gtm": MockGTMAgent,
 }
@@ -439,8 +439,18 @@ def retro_gate(state: CommitteeState) -> dict[str, Any]:
     }
 
 
+_DIM_LABEL = {
+    "trend_heat": "趋势热度", "user_demand": "用户需求", "ip_fit": "IP契合",
+    "competition": "竞争格局", "history_analog": "历史类比",
+}
+
+
 def _state_digest(state: CommitteeState) -> str:
-    """把本场会议产物压成纯文本摘要，供 LLM 复盘作答"""
+    """把本场会议产物压成纯文本摘要，供 LLM 复盘作答
+
+    必须包含：权重、每个方案的五维分项、质询立场、落选方案、分歧——
+    否则"为什么落选/权重影响"类问题在材料里无据可查，助手只能说不知道。
+    """
     parts = []
     if fm := state.get("feature_matrix"):
         parts.append(f"趋势官：{fm.get('summary', '')}")
@@ -448,14 +458,45 @@ def _state_digest(state: CommitteeState) -> str:
         parts.append(f"用户官：{us.get('summary', '')}")
     if ip := state.get("ip_assessment"):
         parts.append(f"IP官：{ip.get('strategy_note', '')}")
+    if w := state.get("weights"):
+        parts.append(
+            "五维权重（本案实际使用）："
+            + "，".join(f"{_DIM_LABEL.get(k, k)} {float(w.get(k, 0)):.0%}" for k in _DIM_LABEL)
+        )
     for s in state.get("opportunity_scores", []):
-        parts.append(f"商业官评分：{s.get('proposal_name', '')} {s.get('total_score', 0):.1f} 分")
+        dims = "，".join(
+            f"{_DIM_LABEL.get(d.get('dimension'), d.get('dimension'))} {d.get('score', 0):.0f}"
+            for d in s.get("dimension_scores", [])
+        )
+        parts.append(
+            f"商业官评分：{s.get('proposal_name', '')} 总分 {s.get('total_score', 0):.1f}"
+            f"（{dims}）"
+        )
+        for r in s.get("risk_warnings", []):
+            parts.append(
+                f"  风险提示[{s.get('proposal_name', '')}]：{r.get('risk', '')}"
+                f"（来源维度：{_DIM_LABEL.get(r.get('source_dimension'), r.get('source_dimension', ''))}）"
+            )
+    for c in state.get("challenges", []):
+        stance = {"endorse": "背书", "revise": "修正", "oppose": "反对"}.get(
+            c.get("stance"), c.get("stance", "")
+        )
+        parts.append(
+            f"质询[{c.get('source_role', '')}] {stance}「{c.get('proposal_name', '')}」："
+            f"{c.get('content', '')[:60]}"
+        )
     if rec := state.get("recommendation"):
         parts.append(
             f"立项建议：{rec.get('decision', '')}，"
             f"Top1「{rec.get('proposal', {}).get('name', '')}」，"
             f"{rec.get('summary', '')}"
         )
+        for r in rec.get("runner_ups", []):
+            parts.append(f"落选方案：{r}")
+        for cond in rec.get("conditions", []):
+            parts.append(f"前置条件：{cond}")
+    for c in state.get("conflicts", []):
+        parts.append(f"分歧记录：{c.get('description', '')[:80]}")
     return "\n".join(parts)
 
 
@@ -691,8 +732,20 @@ def _translate(node_name: str, update: dict[str, Any]) -> dict[str, Any] | None:
     if node_name == "business_agent":
         scores = update["opportunity_scores"]
         top = max(scores, key=lambda s: s["total_score"])
-        lines = [f"· {s['proposal_name']}：{s['total_score']:.1f} 分"
-                 for s in scores]
+        lines = []
+        for s in scores:
+            dims = "，".join(
+                f"{_DIM_LABEL.get(d.get('dimension'), d.get('dimension'))} "
+                f"{d.get('score', 0):.0f}"
+                for d in s.get("dimension_scores", [])
+            )
+            lines.append(f"· {s['proposal_name']}：{s['total_score']:.1f} 分（{dims}）")
+        if w := (scores[0].get("weights_used") if scores else None):
+            lines.append(
+                "权重：" + "，".join(
+                    f"{_DIM_LABEL.get(k, k)} {float(w.get(k, 0)):.0%}" for k in _DIM_LABEL
+                )
+            )
         return {"role": "business",
                 "content": "五维机会值评分：\n" + "\n".join(lines),
                 "evidence": _evidence_of(top), "score": top["total_score"]}
