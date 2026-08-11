@@ -34,6 +34,10 @@ PROVIDERS: dict[str, dict[str, str]] = {
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-chat",        # V4 Flash 永久免费
     },
+    "moonshot": {
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "kimi-k3",                # Kimi K3
+    },
     "dashscope": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "model": "qwen-flash",           # 每日免费调用额度
