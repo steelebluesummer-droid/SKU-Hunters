@@ -8,11 +8,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.api.routes import router as committee_router
+
 # 飞书机器人模块（backend/feishu/，需从 backend/ 目录启动以保证可导入）
 from feishu import FeishuConfig
 from feishu.webhook import create_feishu_router
-
-from app.api.routes import router as committee_router
 
 app = FastAPI(
     title="SKU Hunters — AI Product Committee",

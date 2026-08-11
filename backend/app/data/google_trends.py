@@ -97,9 +97,12 @@ class GoogleTrendsConnector:
         """
         df = self.get_interest_over_time([keyword], timeframe=timeframe, geo=geo)
         if df.empty:
+            # 查询无数据：指标返回 None（不是 0）并显式标记 no_data。
+            # 0 是一个有效热度值，用 0 表示"无数据"会把缺失误报成正常结果。
             return {
-                "keyword": keyword, "level": 0, "growth": 0,
-                "breadth": 0, "heat_index": 0, "lifecycle": "unknown",
+                "keyword": keyword, "level": None, "growth": None,
+                "breadth": None, "heat_index": None,
+                "lifecycle": "unknown", "no_data": True,
             }
 
         series = df[keyword]
@@ -131,4 +134,5 @@ class GoogleTrendsConnector:
             "breadth": breadth,
             "heat_index": round(heat_index, 1),
             "lifecycle": lifecycle,
+            "no_data": False,
         }

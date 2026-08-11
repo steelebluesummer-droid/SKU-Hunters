@@ -2,6 +2,7 @@
 # 证据引用契约：所有 Agent 输出必须绑定 EvidenceRef
 
 from .brief import Brief, BudgetRange, Weights, WeightTemplate
+from .challenge import ChallengeRecord, ChallengeStance
 from .evidence import Confidence, EvidenceMixin, EvidenceRef
 from .feature import FeatureMatrix, TrendItem
 from .gtm import CountryPlan, GTMPlan
@@ -21,6 +22,8 @@ __all__ = [
     "BacktestSet",
     "Brief",
     "BudgetRange",
+    "ChallengeRecord",
+    "ChallengeStance",
     "Confidence",
     "ConflictRecord",
     "ConflictType",

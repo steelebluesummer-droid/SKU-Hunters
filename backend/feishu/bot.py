@@ -55,6 +55,21 @@ class FeishuBot:
 
     # ===== 便捷方法：各委员发言 =====
 
+    @staticmethod
+    def build_report_card(
+        role: str,
+        content: str,
+        evidence: list[str] | None = None,
+        score: float | None = None,
+    ) -> dict[str, Any]:
+        """构建委员发言卡片（不发送）——handler 接入 LangGraph 事件流时用"""
+        return build_committee_card(
+            role=role,
+            content=content,
+            evidence=evidence,
+            score=score,
+        )
+
     def send_committee_report(
         self,
         chat_id: str,
@@ -64,7 +79,7 @@ class FeishuBot:
         score: float | None = None,
     ) -> dict[str, Any]:
         """发送委员发言卡片"""
-        card = build_committee_card(
+        card = self.build_report_card(
             role=role,
             content=content,
             evidence=evidence,

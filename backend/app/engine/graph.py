@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -30,23 +31,25 @@ from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from app.agents.challenge_agents import CHALLENGE_REGISTRY
 from app.agents.mock_agents import (
     MockBusinessAgent,
     MockCreativeAgent,
     MockGTMAgent,
     MockIPAgent,
-    MockTrendAgent,
     MockUserAgent,
 )
+from app.agents.trend_agent import get_trend_agent_class
 from app.engine import llm
 from app.engine.decision_engine import DecisionEngine
 from app.engine.state import CommitteeState
 from app.schemas import (
     Brief,
+    ChallengeRecord,
     Confidence,
     ConflictRecord,
     ConflictType,
@@ -62,14 +65,81 @@ from app.schemas import (
 
 # D5：SQLite checkpoint——归档后随时复盘跨重启成立。
 # 设置 CHIN_CHIN=sqlite → 写 data/checkpoints.db；否则退回 MemorySaver
+#
+# 序列化安全：把 app.schemas 中会进入 state dict 的枚举类型显式注册到
+# allowed_msgpack_modules，消除 "Deserializing unregistered type" 警告，
+# 并保证 LANGGRAPH_STRICT_MSGPACK=true 严格模式下也能正常反序列化。
 _CHECKPOINT_DB = Path(__file__).resolve().parents[3] / "data" / "checkpoints.db"
 _CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
-_checkpointer = SqliteSaver.from_conn_string(str(_CHECKPOINT_DB)) \
-    if os.environ.get("CHIN_CHIN") == "sqlite" else MemorySaver()
+
+_ALLOWED_MSGPACK_TYPES: set[tuple[str, str]] = {
+    ("app.schemas.brief", "WeightTemplate"),
+    ("app.schemas.brief", "BudgetRange"),
+    ("app.schemas.challenge", "ChallengeStance"),
+    ("app.schemas.evidence", "Confidence"),
+    ("app.schemas.recommendation", "Decision"),
+    ("app.schemas.review", "ConflictType"),
+    ("app.schemas.testcase", "Outcome"),
+}
+_serde = JsonPlusSerializer(allowed_msgpack_modules=_ALLOWED_MSGPACK_TYPES)
+
+# 懒加载单例：图全走 async 路径，checkpointer 首次使用时异步初始化。
+# SQLite 用 AsyncSqliteSaver（同步 SqliteSaver 不支持 astream）；
+# 连接常驻，保证跨进程/跨重启恢复成立。
+_checkpointer: Any = None
+
+
+async def _get_checkpointer():
+    """返回 checkpointer 单例（首次调用时初始化）。
+
+    - CHIN_CHIN=sqlite → AsyncSqliteSaver 写 data/checkpoints.db
+    - 否则 → MemorySaver
+    """
+    global _checkpointer
+    if _checkpointer is None:
+        if os.environ.get("CHIN_CHIN") == "sqlite":
+            import aiosqlite
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+            # aiosqlite 的工作线程默认非 daemon，会在进程退出时被
+            # threading._shutdown 阻塞 join，导致 CLI 无法退出。
+            # connect() 返回懒连接（线程未启动），先设 daemon 再 await。
+            # 连接引用存模块级，防 GC 关闭。
+            global _SQLITE_CONN
+            _conn = aiosqlite.connect(str(_CHECKPOINT_DB))
+            _conn._thread.daemon = True
+            _SQLITE_CONN = await _conn
+            _checkpointer = AsyncSqliteSaver(_SQLITE_CONN, serde=_serde)
+        else:
+            _checkpointer = MemorySaver(serde=_serde)
+    return _checkpointer
+
+
+def _close_sqlite():
+    """解释器退出时关闭 aiosqlite 连接，终结其非 daemon 工作线程。
+
+    该线程默认非 daemon，threading._shutdown 会 join 它导致 CLI 在流程
+    结束后挂起。conn.close() 会把 close_and_stop 压入内部队列，工作线程
+    处理后退出。用独立事件循环执行（原循环此时通常已关闭）。
+    """
+    conn = globals().get("_SQLITE_CONN")
+    if conn is None:
+        return
+    try:
+        import asyncio
+
+        asyncio.run(conn.close())
+    except Exception:  # noqa: BLE001,S110 — 退出清理失败不影响主流程
+        pass
+
+
+atexit.register(_close_sqlite)
 
 # ── Agent 注册表：真 Agent 出炉后只改这里 ──────────────────────
+# trend 通过 get_trend_agent_class() 切换：默认 Mock（离线/确定/快），
+# 设 TREND_AGENT_PROVIDER=real 启用真实 Google+B站 趋势官（可回退 Mock）。
 AGENT_REGISTRY: dict[str, type] = {
-    "trend": MockTrendAgent,
+    "trend": get_trend_agent_class(),
     "user": MockUserAgent,
     "ip": MockIPAgent,
     "creative": MockCreativeAgent,
@@ -158,6 +228,29 @@ def _make_insight_node(agent_key: str, artifact_key: str, schema: type):
     return node
 
 
+def _make_challenge_node(agent_key: str):
+    """ACT2 质询节点工厂：创意官产出后，各洞察官对方案发起结构化质询"""
+    async def node(state: CommitteeState) -> dict[str, Any]:
+        agent = CHALLENGE_REGISTRY[agent_key]()
+        raw = await agent.run({
+            "brief": state["brief"],
+            "proposal_set": state["proposal_set"],
+        "challenges": state.get("challenges", []),
+            "feature_matrix": state.get("feature_matrix"),
+            "user_sentiment": state.get("user_sentiment"),
+            "ip_assessment": state.get("ip_assessment"),
+        })
+        challenges = [
+            ChallengeRecord.model_validate(c).model_dump(mode="json")
+            for c in raw["challenges"]
+        ]
+        return {
+            "challenges": challenges,
+            "review_logs": [{"node": f"{agent_key}_challenge", "act": "act2", "status": "ok"}],
+        }
+    return node
+
+
 async def creative_node(state: CommitteeState) -> dict[str, Any]:
     """ACT2 创意官：汇聚三方情报（fan-in）"""
     agent = AGENT_REGISTRY["creative"]()
@@ -187,6 +280,7 @@ async def business_node(state: CommitteeState) -> dict[str, Any]:
         "brief": state["brief"],
         "weights": state["weights"],
         "proposal_set": state["proposal_set"],
+        "challenges": state.get("challenges", []),
         "upstream_confidences": upstream,
         "feedback": _feedback(state),
     })
@@ -207,6 +301,7 @@ async def gtm_node(state: CommitteeState) -> dict[str, Any]:
     raw = await agent.run({
         "brief": state["brief"],
         "proposal_set": state["proposal_set"],
+        "challenges": state.get("challenges", []),
     })
     plans = [
         GTMPlan.model_validate(p).model_dump(mode="json") for p in raw["gtm_plans"]
@@ -219,10 +314,22 @@ async def gtm_node(state: CommitteeState) -> dict[str, Any]:
 
 async def decision_node(state: CommitteeState) -> dict[str, Any]:
     """ACT4 Decision Engine：合成立项建议书"""
+    conflicts = list(state.get("conflicts", []))
+    for c in state.get("challenges", []):
+        conflicts.append(ConflictRecord(
+            conflict_type=ConflictType.C2_QUOTE_DEVIATION,
+            parties=[c.get("source_role", "committee")],
+            description=(
+                f"[质询·{c.get('stance', '')}] "
+                f"{c.get('proposal_name', '')}：{c.get('content', '')}"
+            ),
+            resolution="open",
+            act="act2",
+        ).model_dump())
     rec = DecisionEngine().synthesize(
         proposal_set=state["proposal_set"],
         opportunity_scores=state["opportunity_scores"],
-        conflicts=state.get("conflicts", []),
+        conflicts=conflicts,
     )
     return {
         "recommendation": rec.model_dump(mode="json"),
@@ -467,7 +574,7 @@ def _route_learning(state: CommitteeState) -> str:
 
 # ══════════════════ 建图 ══════════════════
 
-def build_graph() -> Any:
+def build_graph(checkpointer: Any = None) -> Any:
     g = StateGraph(CommitteeState)
 
     g.add_node("brief_node", brief_node)
@@ -477,6 +584,9 @@ def build_graph() -> Any:
     g.add_node("act1_gate", act1_gate)
     g.add_node("qa_act1_node", _make_qa_node("act1_gate"))
     g.add_node("creative_agent", creative_node)
+    g.add_node("trend_challenge", _make_challenge_node("trend"))
+    g.add_node("user_challenge", _make_challenge_node("user"))
+    g.add_node("ip_challenge", _make_challenge_node("ip"))
     g.add_node("business_agent", business_node)
     g.add_node("gtm_agent", gtm_node)
     g.add_node("decision_engine", decision_node)
@@ -498,9 +608,16 @@ def build_graph() -> Any:
     g.add_conditional_edges("act1_gate", _route_act1_gate)
     g.add_edge("qa_act1_node", "act1_gate")
 
-    # ACT2 → ACT3 双轨 fan-out
-    g.add_edge("creative_agent", "business_agent")
-    g.add_edge("creative_agent", "gtm_agent")
+    # ACT2 → ACT2_CHALLENGE（三洞察官质询）→ ACT3 双轨 fan-out
+    g.add_edge("creative_agent", "trend_challenge")
+    g.add_edge("creative_agent", "user_challenge")
+    g.add_edge("creative_agent", "ip_challenge")
+    g.add_edge("trend_challenge", "business_agent")
+    g.add_edge("trend_challenge", "gtm_agent")
+    g.add_edge("user_challenge", "business_agent")
+    g.add_edge("user_challenge", "gtm_agent")
+    g.add_edge("ip_challenge", "business_agent")
+    g.add_edge("ip_challenge", "gtm_agent")
 
     # ACT3 fan-in → ACT4
     g.add_edge("business_agent", "decision_engine")
@@ -514,7 +631,7 @@ def build_graph() -> Any:
     g.add_edge("retro_qa_node", "retro_gate")
     g.add_conditional_edges("learning_node", _route_learning)
 
-    return g.compile(checkpointer=_checkpointer)
+    return g.compile(checkpointer=checkpointer or _checkpointer)
 
 
 # ══════════════════ 事件翻译 ══════════════════
@@ -529,6 +646,23 @@ def _evidence_of(artifact: dict[str, Any]) -> list[str]:
 
 def _translate(node_name: str, update: dict[str, Any]) -> dict[str, Any] | None:
     """节点 state 更新 → 飞书卡片事件 {"role","content","evidence","score"}"""
+    if node_name in ("trend_challenge", "user_challenge", "ip_challenge"):
+        src = {"trend_challenge": "趋势官", "user_challenge": "用户官",
+               "ip_challenge": "IP官"}[node_name]
+        lines = []
+        evidence = []
+        for c in update["challenges"]:
+            mark = {"endorse": "✅ 背书", "revise": "✏️ 修正", "oppose": "⛔ 反对"}
+            lines.append(
+                f"{mark.get(c['stance'], c['stance'])} 「{c['proposal_name']}」："
+                f"{c['content']}"
+            )
+            for ref in c.get("evidence_refs", []):
+                ev = f"{ref.get('title', '')}：{ref.get('snippet', '')}"
+                if ev not in evidence:
+                    evidence.append(ev)
+        return {"role": "challenge", "content": f"{src} 质询：\n" + "\n".join(lines),
+                "evidence": evidence, "score": None}
     if node_name == "trend_agent":
         a = update["feature_matrix"]
         return {"role": "trend", "content": a["summary"],
@@ -647,7 +781,7 @@ async def run_review(
     """
     ask = ask_human or _auto_confirm
     Brief.model_validate(brief)
-    graph = build_graph()
+    graph = build_graph(checkpointer=await _get_checkpointer())
     config = {"configurable": {"thread_id": session_id or str(uuid.uuid4())}}
 
     payload: Any = {

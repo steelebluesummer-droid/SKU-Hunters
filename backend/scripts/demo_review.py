@@ -21,7 +21,7 @@ from app.engine.graph import run_review
 
 _ROLE_LABEL = {
     "trend": "🔍 趋势官", "user": "👥 用户官", "ip": "🧸 IP官",
-    "creative": "🎨 创意官", "business": "💰 商业官", "global": "🌍 全球化官",
+    "creative": "🎨 创意官", "challenge": "⚔️ 质询", "business": "💰 商业官", "global": "🌍 全球化官",
     "decision": "🎯 Decision Engine", "learning": "📈 学习官",
     "act1_gate": "🚪 洞察确认门", "human_gate": "🚪 立项拍板门", "qa": "💬 问答",
 }
