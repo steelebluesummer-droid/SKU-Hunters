@@ -14,6 +14,7 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from app.api.planning import router as planning_router
 from app.api.routes import router as committee_router
+from app.xhs.api import router as xhs_router
 
 # 飞书机器人模块（backend/feishu/，需从 backend/ 目录启动以保证可导入）
 from feishu import FeishuConfig
@@ -38,6 +39,9 @@ app.include_router(planning_router)
 
 # 评审 API（旧评审委员会链路，复盘归档阶段复用）：POST/GET /api/v1/reviews...
 app.include_router(committee_router)
+
+# 小红书公开数据接入（第一阶段：本地导入 + 统计）：/api/v1/xhs...
+app.include_router(xhs_router)
 
 # 飞书回调路由：POST /api/v1/feishu/events
 feishu_config = FeishuConfig.from_env()
