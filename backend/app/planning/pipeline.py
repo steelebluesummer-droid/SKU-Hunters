@@ -19,7 +19,6 @@ LLM 是增强层——mode="live" 时走真实调用，失败自动降级回 fix
 from __future__ import annotations
 
 import json
-import os
 import re
 import uuid
 from datetime import datetime, timezone

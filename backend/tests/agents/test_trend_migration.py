@@ -11,7 +11,6 @@
 """
 
 import pytest
-
 from app.agents.trend_agent import TrendAgent, get_trend_agent_class
 from app.agents.trend_conflict_detector import TrendConflictDetector
 from app.agents.trend_metrics import (
@@ -396,9 +395,14 @@ class TestEmptyDataNotFaked:
 
 class TestUnknownPreserved:
     def test_lifecycle_unknown_when_only_bilibili(self):
-        """只有 B站（无 Google）时 lifecycle 保持 unknown，不判 rising"""
+        """只有 B站（无 Google）时 lifecycle 保持 unknown，不判 rising
+
+        注意：不能传 google_connector=None——构造函数会把 None 解释为
+        "创建默认真实连接器"，测试结果将取决于 Google 是否可达（网络抖动）。
+        显式传故障连接器来模拟"无 Google"。
+        """
         agent = TrendAgent(
-            google_connector=None,
+            google_connector=FakeGoogle(error=ConnectorFetchError("google_trends", "网络错误")),
             bilibili_connector=FakeBilibili(),
         )
         out = _run(agent)

@@ -5,11 +5,10 @@
 """
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from app.api.planning import router
 from app.planning import pipeline
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 VALID_BRIEF = {
     "theme": "2027夏季户外生活系列",

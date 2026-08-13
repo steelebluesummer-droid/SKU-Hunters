@@ -12,12 +12,12 @@ from fastapi.staticfiles import StaticFiles
 # 启动即加载 backend/.env（LLM Key、即梦 AK/SK、飞书配置）——必须在 app.* 导入前
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-from app.api.planning import router as planning_router
-from app.api.routes import router as committee_router
-
 # 飞书机器人模块（backend/feishu/，需从 backend/ 目录启动以保证可导入）
 from feishu import FeishuConfig
 from feishu.webhook import create_feishu_router
+
+from app.api.planning import router as planning_router
+from app.api.routes import router as committee_router
 
 app = FastAPI(
     title="SKU Hunters — AI 新品企划工作室",

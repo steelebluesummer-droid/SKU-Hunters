@@ -11,10 +11,6 @@ graph.py 将 7 个枚举注册到 JsonPlusSerializer 的 allowed_msgpack_modules
   3. 每个枚举类名确实已注册（防止将来新增枚举遗漏注册）
 """
 
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph
-from typing_extensions import TypedDict
-
 from app.engine.graph import _ALLOWED_MSGPACK_TYPES, _serde
 from app.schemas.brief import BudgetRange, WeightTemplate
 from app.schemas.challenge import ChallengeStance
@@ -22,6 +18,9 @@ from app.schemas.evidence import Confidence
 from app.schemas.recommendation import Decision
 from app.schemas.review import ConflictType
 from app.schemas.testcase import Outcome
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+from typing_extensions import TypedDict
 
 # 与 graph.py 注册表一一对应，缺一即失败
 ENUM_TYPES = [

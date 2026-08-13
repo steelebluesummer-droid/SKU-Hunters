@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv(BACKEND / ".env")
 
-from app.planning import pipeline  # noqa: E402
-from feishu.bitable_sync import _get_syncer, sync_plan_to_bitable  # noqa: E402
+from app.planning import pipeline
+from feishu.bitable_sync import _get_syncer, sync_plan_to_bitable
 
 
 def main() -> None:

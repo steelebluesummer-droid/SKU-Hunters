@@ -9,7 +9,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-
 from app.data import hot_topics
 from app.data.baidu_hot import BaiduHotConnector
 from app.data.errors import ConnectorFetchError

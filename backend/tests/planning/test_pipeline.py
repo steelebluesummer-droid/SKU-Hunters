@@ -8,9 +8,8 @@
 import json
 
 import pytest
-from pydantic import ValidationError
-
 from app.planning import fixtures, pipeline
+from pydantic import ValidationError
 
 VALID_BRIEF = {
     "theme": "2027夏季户外生活系列",

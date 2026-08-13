@@ -22,6 +22,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import ValidationError
 
 from app.planning import fixtures, pipeline
 from app.schemas.planning import PlanBrief
@@ -44,8 +45,8 @@ async def create_plan(payload: dict):
     # PlanBrief schema 校验（pydantic 保证必填字段 + 类型检查）
     try:
         PlanBrief.model_validate(brief)
-    except Exception as e:
-        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}})
+    except ValidationError as e:
+        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}}) from e
     plan = pipeline.create_plan(brief)
     return {"plan_id": plan["plan_id"], "status": plan["status"]}
 
@@ -75,8 +76,8 @@ async def aily_create_plan(payload: dict, background_tasks: BackgroundTasks):
     brief = payload.get("brief") or payload  # 兼容直接传 brief
     try:
         PlanBrief.model_validate(brief)
-    except Exception as e:
-        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}})
+    except ValidationError as e:
+        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}}) from e
     plan = pipeline.create_plan(brief)
     background_tasks.add_task(_run_aily_flow, plan)
     return {"plan_id": plan["plan_id"], "status": "running"}

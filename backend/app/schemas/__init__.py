@@ -24,7 +24,6 @@ from .planning import (
     InsightBundle,
     IPPoolItem,
     Opportunity,
-    PainPoint as PlanningPainPoint,
     PlanBrief,
     PlanCard,
     PlanSummary,
@@ -42,6 +41,9 @@ from .planning import (
     TrendSignal,
     UserQuote,
     VoiceTrend,
+)
+from .planning import (
+    PainPoint as PlanningPainPoint,
 )
 from .pricing import PricePoint, PricingComparison
 from .proposal import ProductProposal, ProposalSet, SourceRef
