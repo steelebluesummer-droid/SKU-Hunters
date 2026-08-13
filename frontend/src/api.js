@@ -57,6 +57,27 @@ export async function bootstrapRemoteFixtures(timeoutMs = 1500) {
   }
 }
 
+// 按具体任务拉取洞察：覆盖本地 mock 为该任务品类的真实五看数据
+//（后端 get_insights 按 plan 的 category 解析，见 pipeline._resolve_insight_bundle）
+export async function loadInsightsForPlan(planId) {
+  try {
+    const insights = await request(`/plans/${planId}/insights`);
+    override(local.TREND_RADAR, insights.trendRadar);
+    override(local.CONSUMER_VOICE, insights.consumerVoice);
+    override(local.COMPETITIVE_MAP, insights.competitiveMap);
+    override(local.INSIGHT_BASE, insights.insightBase);
+    override(local.TREND_GALLERY, insights.trendGallery);
+    // 机会卡也按该任务拉取（非 demo 任务不再是固定小风扇三张）
+    const opps = await request(`/plans/${planId}/opportunities`);
+    override(local.OPPORTUNITIES, opps.opportunities || []);
+    console.info(`[SKU Hunters] 洞察+机会数据源：任务 ${planId}`);
+    return insights;
+  } catch {
+    console.info('[SKU Hunters] 该任务洞察加载失败，保留现有数据');
+    return null;
+  }
+}
+
 // 选定方向 → 后端生成企划卡（含成本校验、概念图 URL）；失败返回 null 走本地模板
 export async function generatePlanCard(opportunityId, planId = 'demo') {
   try {
@@ -79,6 +100,16 @@ export async function revisePlan(message, planId = 'demo') {
     });
     return data.reply;
   } catch {
+    return null;
+  }
+}
+
+// 新建企划（NewPlan 表单 → 后端创建真实任务，返回 plan_id）
+export async function createPlan(brief) {
+  try {
+    return await request('/plans', { method: 'POST', body: { brief } });
+  } catch (e) {
+    console.error('创建企划失败', e);
     return null;
   }
 }

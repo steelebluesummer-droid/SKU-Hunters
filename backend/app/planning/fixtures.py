@@ -104,13 +104,13 @@ COMPETITIVE_MAP = {
     ],
     # x: 价格（元）, y: 设计感评分（0-10）
     "products": [
-        {"name": "小米", "price": 79, "design": 6.5},
-        {"name": "蕉下", "price": 129, "design": 8.2},
-        {"name": "无印良品", "price": 99, "design": 7.5},
-        {"name": "几素", "price": 49, "design": 5.0},
-        {"name": "素乐", "price": 59, "design": 6.0},
-        {"name": "迪士尼联名杂牌", "price": 69, "design": 7.0},
-        {"name": "名创现有款", "price": 39, "design": 5.5},
+        {"name": "小米", "price": 79, "design": 6.5, "image_url": "", "selling_point": "便携+续航，参数稳"},
+        {"name": "蕉下", "price": 129, "design": 8.2, "image_url": "", "selling_point": "高颜值+防晒场景溢价"},
+        {"name": "无印良品", "price": 99, "design": 7.5, "image_url": "", "selling_point": "极简设计，材质质感"},
+        {"name": "几素", "price": 49, "design": 5.0, "image_url": "", "selling_point": "性价比走量"},
+        {"name": "素乐", "price": 59, "design": 6.0, "image_url": "", "selling_point": "挂脖/多功能"},
+        {"name": "迪士尼联名杂牌", "price": 69, "design": 7.0, "image_url": "", "selling_point": "IP情怀溢价"},
+        {"name": "名创现有款", "price": 39, "design": 5.5, "image_url": "", "selling_point": "平价基础款"},
     ],
     "gapZone": {"x": [30, 60], "y": [7, 10], "label": "机会空白：50元以内 × 高颜值 × IP化"},
     "priceBands": [

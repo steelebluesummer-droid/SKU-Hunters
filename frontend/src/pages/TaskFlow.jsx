@@ -5,7 +5,7 @@ import InsightCockpit from '../components/InsightCockpit';
 import OpportunityCards from '../components/OpportunityCards';
 import PlanCard from '../components/PlanCard';
 import { DEMO_BRIEF } from '../mock/fanData';
-import { archivePlan, getPlan } from '../api';
+import { archivePlan, getPlan, loadInsightsForPlan } from '../api';
 
 const STEPS = ['企划约束', '洞察驾驶舱', '机会生成', '新品企划卡'];
 
@@ -21,6 +21,8 @@ export default function TaskFlow() {
 
   // 进入任务时从后端恢复进度：已选过方向（含已归档）→ 直接落到新品企划卡
   useEffect(() => {
+    // 打开任务 → 拉取该任务品类的真实五看洞察，覆盖全局 mock
+    loadInsightsForPlan(id);
     getPlan(id).then(plan => {
       if (!plan) return;
       setPlanStatus(plan.status);
@@ -37,7 +39,7 @@ export default function TaskFlow() {
         if (statusStep !== undefined) setStep(statusStep);
       }
     });
-  }, []);
+  }, [id]);
 
   const archive = async () => {
     setArchiving(true);
