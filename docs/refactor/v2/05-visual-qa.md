@@ -140,22 +140,29 @@
 |------|------|
 | `npm run build` | ✓ 通过（入口 `index-*.js` 562.80 kB，echarts 独立 chunk 1044.21 kB 按需加载） |
 | `pytest tests/ --cov=app` | ✓ **225 passed**，9 warnings，覆盖率 86% |
-| `ruff check backend/` | ⚠ 31 errors（历史基线，见下） |
+| `ruff check backend/` | ⚠ 14 errors（历史基线，Ruff 0.12.0，见下） |
 
-**ruff 历史基线**（31 errors，**本轮零新增**）：
+**ruff 历史基线**（14 errors，**本轮零新增**，Ruff 0.12.0）：
 
 | 规则 | 数量 | 说明 |
 |------|------|------|
-| UP045（non-pep604-annotation-optional） | 21 | Python 3.13 类型注解语法 |
-| RUF100（unused-noqa） | 5 | 遗留 noqa 清理 |
-| I001（unsorted-imports） | 2 | import 排序 |
-| DTZ006（call-datetime-fromtimestamp） | 1 | 时区调用 |
-| SIM118（in-dict-keys） | 1 | 简化写法 |
-| UP028（yield-in-for-loop） | 1 | 生成器写法 |
+| E402（module-import-not-at-top-of-file） | 9 | import 未置于文件顶部 |
+| E701（multiple-statements-on-one-line） | 4 | 单行多语句 |
+| E731（lambda-assignment） | 1 | lambda 赋值给变量 |
 
-涉及文件：`backend/app/xhs/schemas.py`（14）、`app/xhs/api.py`（7）、`app/main.py`（6）、`app/xhs/stats.py`（2）、`tests/xhs/test_api.py`（1）、`app/xhs/ingestor.py`（1）。
+涉及文件：
 
-**本轮未新增证明**：Stage 7 仅修改 `frontend/src/features/plan-card/PlanCard.jsx` 与 `frontend/src/shared/components/StateCard.jsx` 两个前端文件，未触碰任何 `backend/` 文件，故上述 31 处均为历史基线，本轮零新增。未擅自修改无关后端文件。
+| 文件 | 数量 |
+|------|------|
+| `backend/app/store.py` | 4 |
+| `backend/scripts/e2e_bitable_archive.py` | 3 |
+| `backend/scripts/feishu_e2e_demo.py` | 2 |
+| `backend/tests/agents/test_trend_migration.py` | 2 |
+| `backend/app/api/routes.py` | 1 |
+| `backend/scripts/demo_review.py` | 1 |
+| `backend/scripts/test_llm.py` | 1 |
+
+**本轮未新增证明**：Stage 7 仅修改 `frontend/src/features/plan-card/PlanCard.jsx` 与 `frontend/src/shared/components/StateCard.jsx` 两个前端文件，未触碰任何 `backend/` 文件，故上述 14 处均为可复现的历史基线，本轮零新增。未擅自修改无关后端文件。
 
 ---
 
@@ -171,7 +178,7 @@
 
 ## 9. 已接受偏差
 
-1. **ruff 31 处历史基线**：均为后端 `xhs` 模块与 `main.py` 的类型注解 / noqa / import 排序问题，非本轮引入，记录在案、未擅自修复（避免扩大范围触碰无关后端文件）。
+1. **ruff 14 处历史基线**：均为后端 `app/api/routes.py`、`app/store.py`、`scripts/` 与 `tests/agents/` 的 import 位置 / 单行多语句 / lambda 赋值问题（E402×9、E701×4、E731×1），非本轮引入，记录在案、未擅自修复（避免扩大范围触碰无关后端文件）。
 2. **full_page 截图拼接伪影**：TaskCenter 在 375 下全页截图（高度 3274px）时，底部卡片出现「文字看似重叠」的拼接伪影；滚动到底部逐屏截图后确认实际渲染正常，属截图工具对超长页面的拼接局限，非真实布局缺陷。
 3. **其他浏览器冒烟未执行**：本机仅 Chromium 可用，Edge / Firefox 冒烟标记为「未执行」。
 4. **权限模型 N/A**：系统无 RBAC 权限模型，归档只读由 `status === 'archived'` 状态驱动，不涉及权限校验。
