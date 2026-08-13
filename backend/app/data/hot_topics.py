@@ -15,11 +15,13 @@ from typing import Any
 
 from .baidu_hot import BaiduHotConnector
 from .errors import ConnectorFetchError
+from .tiktok_trends import TiktokTrendsConnector
 from .weibo_hot import WeiboHotConnector
 
 SOURCES = {
     "weibo": WeiboHotConnector,
     "baidu": BaiduHotConnector,
+    "tiktok": TiktokTrendsConnector,  # 海外社媒（112 国口径），国内网络受限时记入 failed_sources
 }
 
 

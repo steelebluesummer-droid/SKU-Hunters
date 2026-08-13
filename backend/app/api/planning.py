@@ -19,7 +19,9 @@ brief 传 mode="live" 走真实 LLM + 即梦出图（失败自动降级）。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -300,3 +302,18 @@ async def trend_gallery(topic: str = "小风扇"):
 async def data_board():
     # 大盘看板 = 品类热度/声量/热销榜 + 价格带分布（来自竞品矩阵），前端单次取全
     return {**fixtures.DATA_BOARD, "priceBands": fixtures.COMPETITIVE_MAP["priceBands"]}
+
+
+_TREND_SCAN_FILE = Path(__file__).resolve().parents[2] / "data" / "trend_scan_snapshot.json"
+
+
+@router.get("/trend-scan")
+async def trend_scan():
+    """趋势价值打分快照（scripts/trend_scan.py 生成）
+
+    非破坏式集成：主链路不依赖本端点；快照存在则返回趋势卡 +
+    思考过程日志，供前端/答辩展示"四维打分是真算法"。
+    """
+    if not _TREND_SCAN_FILE.exists():
+        return {"available": False, "message": "尚未生成，运行 scripts/trend_scan.py"}
+    return {"available": True, **json.loads(_TREND_SCAN_FILE.read_text(encoding="utf-8"))}

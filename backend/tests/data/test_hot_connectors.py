@@ -12,6 +12,7 @@ import pytest
 from app.data import hot_topics
 from app.data.baidu_hot import BaiduHotConnector
 from app.data.errors import ConnectorFetchError
+from app.data.tiktok_trends import TiktokTrendsConnector
 from app.data.weibo_hot import WeiboHotConnector
 
 
@@ -94,21 +95,61 @@ def test_baidu_respects_limit(monkeypatch):
     assert len(BaiduHotConnector().get_hot_search(limit=3)) == 3
 
 
+# ── TikTok Creative Center ──────────────────────────────
+
+
+def test_tiktok_parses_hashtag_board(monkeypatch):
+    _mock_httpx(monkeypatch, {
+        "code": 0,
+        "data": {"list": [
+            {"hashtag_name": "summervibes", "video_views": 123456789},
+            {"hashtag_name": "  ", "video_views": 1},      # 空词条应被过滤
+            {"hashtag_name": "kuromi", "video_views": 987654},
+        ]},
+    })
+    items = TiktokTrendsConnector().get_trending_hashtags("US")
+    assert [i["word"] for i in items] == ["summervibes", "kuromi"]
+    assert items[0]["heat"] == 123456789
+    assert items[0]["country"] == "US"
+    assert "creativecenter" in items[0]["url"]
+
+
+def test_tiktok_raises_on_business_error(monkeypatch):
+    _mock_httpx(monkeypatch, {"code": 40100, "msg": "blocked"})
+    with pytest.raises(ConnectorFetchError, match="tiktok"):
+        TiktokTrendsConnector().get_trending_hashtags()
+
+
+def test_tiktok_raises_on_http_error(monkeypatch):
+    _mock_httpx(monkeypatch, status_ok=False)
+    with pytest.raises(ConnectorFetchError, match="tiktok"):
+        TiktokTrendsConnector().get_trending_hashtags()
+
+
+def test_tiktok_empty_board_is_not_error(monkeypatch):
+    _mock_httpx(monkeypatch, {"code": 0, "data": {"list": []}})
+    assert TiktokTrendsConnector().get_trending_hashtags() == []
+
+
 # ── 聚合器 ──────────────────────────────────────────────
 
 
 def test_aggregator_isolates_single_source_failure(monkeypatch):
     monkeypatch.setattr(hot_topics.WeiboHotConnector, "get_hot_search",
                         lambda self: [{"word": "露营热", "heat": 1, "rank": 1, "url": ""}])
+    monkeypatch.setattr(hot_topics.TiktokTrendsConnector, "get_hot_search",
+                        lambda self: [{"word": "camping", "heat": 1, "rank": 1,
+                                       "url": "", "country": "US"}])
 
     def boom(self):
         raise ConnectorFetchError("baidu", "HTTP 502")
 
     monkeypatch.setattr(hot_topics.BaiduHotConnector, "get_hot_search", boom)
     payload = hot_topics.fetch_all()
-    assert payload["scanned_sources"] == ["weibo"]
+    assert payload["scanned_sources"] == ["weibo", "tiktok"]
     assert payload["failed_sources"] == [{"source": "baidu", "detail": "HTTP 502"}]
     assert payload["items"][0]["source"] == "weibo"
+    assert payload["items"][1]["source"] == "tiktok"
 
 
 def test_aggregator_raises_when_all_sources_fail(monkeypatch):
@@ -118,8 +159,12 @@ def test_aggregator_raises_when_all_sources_fail(monkeypatch):
     def boom_baidu(self):
         raise ConnectorFetchError("baidu", "HTTP 502")
 
+    def boom_tiktok(self):
+        raise ConnectorFetchError("tiktok", "网络受限")
+
     monkeypatch.setattr(hot_topics.WeiboHotConnector, "get_hot_search", boom_weibo)
     monkeypatch.setattr(hot_topics.BaiduHotConnector, "get_hot_search", boom_baidu)
+    monkeypatch.setattr(hot_topics.TiktokTrendsConnector, "get_hot_search", boom_tiktok)
     with pytest.raises(ConnectorFetchError, match="全部热搜源失败"):
         hot_topics.fetch_all()
 
