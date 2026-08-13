@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Card, Row, Col, Tag, Popover, Button } from 'antd';
-import ProcessLog from './ProcessLog';
+import ProcessLog from '../../shared/components/ProcessLog';
 
 // 机会生成：3 张方向卡，每张挂依据链（可回溯洞察），人选定 1 张进入企划生成
 // props 驱动：数据由 TaskFlow 拉取后传入，不再 import 全局 mock

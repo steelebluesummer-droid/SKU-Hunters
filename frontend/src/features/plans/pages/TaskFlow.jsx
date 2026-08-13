@@ -11,8 +11,8 @@ import { Steps, Card, Descriptions, Tag, Button, message, Spin } from 'antd';
 
 // 洞察驾驶舱含 ECharts，属实测重模块，按已批准方案做流程内二级懒加载
 const InsightCockpit = lazy(() => import('../../insights/InsightCockpit'));
-import OpportunityCards from '../../../components/OpportunityCards';
-import PlanCard from '../../../components/PlanCard';
+import OpportunityCards from '../../opportunities/OpportunityCards';
+import PlanCard from '../../plan-card/PlanCard';
 import StateCard from '../../../shared/components/StateCard';
 import SourceTag from '../../../shared/components/SourceTag';
 import usePlanWorkspace from '../hooks/usePlanWorkspace';
@@ -109,6 +109,10 @@ export default function TaskFlow() {
     ? 'success'
     : (ws.pendingAction === 'opportunities' ? 'loading' : (ws.error ? 'error' : 'idle'));
 
+  const planCardState = ws.planCard
+    ? 'success'
+    : (ws.pendingAction === 'plan-card' ? 'loading' : (ws.error ? 'error' : 'idle'));
+
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -200,10 +204,12 @@ export default function TaskFlow() {
       {step === 3 && (
         <div>
           <PlanCard
+            card={ws.planCard}
             opportunity={ws.opportunities?.find((o) => o.id === selectedOpp)}
-            existingCard={ws.planCard}
-            planId={id}
             brief={brief}
+            status={planCardState}
+            onGenerate={ws.actions.generatePlanCard}
+            onRevise={ws.actions.revise}
           />
           <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
             {isArchived ? (
