@@ -27,8 +27,8 @@ const STATUS_META = {
 export default function TaskCard({ task, onClick }) {
   const meta = STATUS_META[task.status] || STATUS_META.brief_locked;
   const isArchived = task.status === 'archived';
-  // 数据来源：demo 任务以 plan_id 识别；其余按 mode（后端 list 暂无 mode 时回退 fixture）
-  const runSource = task.plan_id === 'demo' ? 'demo' : task.mode || 'fixture';
+  // 数据来源：demo 任务以 plan_id 识别；其余按 mode，mode 缺失时显示「来源未知」，不误标 fixture
+  const runSource = task.plan_id === 'demo' ? 'demo' : task.mode || 'unknown';
   const created = (task.created_at || '').slice(0, 10);
 
   return (

@@ -83,6 +83,14 @@ def test_list_plans_returns_summaries_sorted_desc():
     assert set(ids) == {p1["plan_id"], p2["plan_id"]}
     assert all("theme" in p and "status" in p for p in plans)
 
+def test_list_plans_includes_mode_metadata():
+    """列表摘要必须暴露 mode，供前端 SourceTag 标注数据来源（fixture/live/demo）"""
+    plan = _make_plan()
+    plans = pipeline.list_plans()
+    summary = next(p for p in plans if p["plan_id"] == plan["plan_id"])
+    assert "mode" in summary
+    assert summary["mode"] == "fixture"
+
 # ── ② 五看洞察 ───────────────────────────────────────────
 
 def test_get_insights_returns_five_blocks():

@@ -12,6 +12,7 @@ const RUN_SOURCE_META = {
   snapshot: { label: '快照', color: 'blue' },
   fixture: { label: '冻结样本', color: 'cyan' },
   demo: { label: '演示兜底', color: 'default' },
+  unknown: { label: '来源未知', color: 'default' },
 };
 
 const EVIDENCE_TYPE_META = {

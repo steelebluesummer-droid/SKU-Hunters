@@ -17,7 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.schemas.planning import PlanBrief, PlanSummary
+from app.schemas.planning import PlanBrief
+from app.schemas.planning_api_v2 import PlanSummaryV2
 
 # ── 键名工具（前后端契约转换）────────────────────────────
 
@@ -120,13 +121,14 @@ def list_plans() -> list[dict[str, Any]]:
     with _lock:
         plans = sorted(_PLANS.values(), key=lambda p: p["created_at"], reverse=True)
     summaries = [
-        PlanSummary(
+        PlanSummaryV2(
             plan_id=p["plan_id"],
             theme=p["brief"].get("theme", ""),
             category=p["brief"].get("category", ""),
             audience=p["brief"].get("audience", ""),
             status=p["status"],
             created_at=p["created_at"],
+            mode=p["mode"],
         )
         for p in plans
     ]

@@ -27,6 +27,7 @@ from pydantic import ValidationError
 from app.planning import fixtures, pipeline
 from app.planning.service import StateTransitionError
 from app.schemas.planning import PlanBrief
+from app.schemas.planning_api_v2 import PlanListResponseV2
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ async def aily_create_plan(payload: dict, background_tasks: BackgroundTasks):
     background_tasks.add_task(_run_aily_flow, plan)
     return {"plan_id": plan["plan_id"], "status": "running"}
 
-@router.get("/plans")
+@router.get("/plans", response_model=PlanListResponseV2)
 async def list_plans():
     return {"plans": pipeline.list_plans()}
 
