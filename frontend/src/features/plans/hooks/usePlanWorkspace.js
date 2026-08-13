@@ -15,6 +15,7 @@ import {
   generateOpportunities,
   generatePlanCard,
   getPlan,
+  reviewPlan,
   revisePlan,
 } from '../../../api/plans';
 import { getInsights, getOpportunities } from '../../../api/insights';
@@ -35,6 +36,7 @@ export default function usePlanWorkspace(planId) {
   const [opportunities, setOpportunities] = useState(null);
   const [opportunitiesLog, setOpportunitiesLog] = useState([]);
   const [reviseLogs, setReviseLogs] = useState([]);
+  const [reviewLogs, setReviewLogs] = useState([]);
 
   // ── UI 状态 ───────────────────────────────────────────
   const [loading, setLoading] = useState(true);       // 初始加载中
@@ -145,6 +147,22 @@ export default function usePlanWorkspace(planId) {
     }
   }, [planId]);
 
+  // ── 复盘追问（只读，归档后）────────────────────────
+  const runReview = useCallback(async (question) => {
+    setPendingAction('review');
+    setError(null);
+    try {
+      const data = await reviewPlan(question, planId);
+      setReviewLogs((logs) => [...logs, { question, answer: data.answer }]);
+      return data;
+    } catch (e) {
+      setError(e);
+      throw e;
+    } finally {
+      setPendingAction(null);
+    }
+  }, [planId]);
+
   // ── 归档 ──────────────────────────────────────────────
   const runArchive = useCallback(async () => {
     setPendingAction('archive');
@@ -166,9 +184,10 @@ export default function usePlanWorkspace(planId) {
     generateOpportunities: runGenerateOpportunities,
     generatePlanCard: runGeneratePlanCard,
     revise: runRevise,
+    review: runReview,
     archive: runArchive,
     reload: loadPlan,
-  }), [runGenerateInsights, runGenerateOpportunities, runGeneratePlanCard, runRevise, runArchive, loadPlan]);
+  }), [runGenerateInsights, runGenerateOpportunities, runGeneratePlanCard, runRevise, runReview, runArchive, loadPlan]);
 
   return {
     plan,
@@ -176,6 +195,7 @@ export default function usePlanWorkspace(planId) {
     opportunities,
     opportunitiesLog,
     reviseLogs,
+    reviewLogs,
     status,
     source,
     brief,

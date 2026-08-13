@@ -22,7 +22,7 @@ export default function App() {
   const selected = pathname.startsWith('/tasks') || pathname.startsWith('/new') ? '/' : '/' + (pathname.split('/')[1] || '');
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider width={200} style={{ background: '#fff' }}>
+      <Sider width={200} breakpoint="lg" collapsedWidth={0} style={{ background: '#fff' }}>
         <div style={{ height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>
           SKU Hunters · 企划工作室
         </div>

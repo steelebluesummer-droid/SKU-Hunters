@@ -34,7 +34,7 @@ function TrendRadar({ trendRadar = {} }) {
   };
   return (
     <Row gutter={16}>
-      <Col span={14}>
+      <Col xs={24} md={14}>
         {(trendRadar.signals || []).map(s => (
           <Card key={s.name} size="small" style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -48,7 +48,7 @@ function TrendRadar({ trendRadar = {} }) {
           </Card>
         ))}
       </Col>
-      <Col span={10}>
+      <Col xs={24} md={10}>
         <ReactECharts option={heatOption} style={{ height: 240 }} />
         <div style={{ marginTop: 8 }}>
           {(trendRadar.hotWords || []).map(w => <Tag key={w} color="purple" style={{ marginBottom: 4 }}>{w}</Tag>)}
@@ -72,7 +72,7 @@ function ConsumerVoice({ consumerVoice = {} }) {
   };
   return (
     <Row gutter={16}>
-      <Col span={9}>
+      <Col xs={24} md={9}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>TOP 痛点</div>
         {painPoints.map((p, i) => (
           <div key={p.text} style={{ marginBottom: 8 }}>
@@ -83,7 +83,7 @@ function ConsumerVoice({ consumerVoice = {} }) {
         <div style={{ fontSize: 13, fontWeight: 600, margin: '12px 0 8px' }}>使用场景分布</div>
         <ReactECharts option={sceneOption} style={{ height: 200 }} />
       </Col>
-      <Col span={15}>
+      <Col xs={24} md={15}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>消费者原声</div>
         {(consumerVoice.quotes || []).map(q => (
           <div key={q.text} className="quote-card">
@@ -123,10 +123,10 @@ function CompetitiveMap({ competitiveMap = {} }) {
   const priceBands = competitiveMap.priceBands || [];
   return (<>
     <Row gutter={16}>
-      <Col span={14}>
+      <Col xs={24} md={14}>
         <ReactECharts option={scatterOption} style={{ height: 300 }} />
       </Col>
-      <Col span={10}>
+      <Col xs={24} md={10}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>价格带分布</div>
         {priceBands.map(b => (
           <div key={b.band} style={{ marginBottom: 6, fontSize: 12 }}>
@@ -193,7 +193,7 @@ export default function InsightCockpit({ insights }) {
       <InsightModule title="Competitive Map · 竞品分析" log={competitiveMap.processLog}><CompetitiveMap competitiveMap={competitiveMap} /></InsightModule>
 
       <Row gutter={16}>
-        <Col span={12}>
+        <Col xs={24} md={12}>
           <Card title={<span>名创内部资产<span style={MODULE_TAG}>策展数据</span></span>} size="small">
             {(insightBase.hitProducts || []).slice(0, 2).map(p => (
               <div key={p.name} style={{ marginBottom: 8, fontSize: 13 }}>
@@ -204,7 +204,7 @@ export default function InsightCockpit({ insights }) {
             <Link to="/insight-base"><Button type="link" size="small" style={{ padding: 0 }}>查看完整 Insight Base <ArrowRightOutlined /></Button></Link>
           </Card>
         </Col>
-        <Col span={12}>
+        <Col xs={24} md={12}>
           <Card title={<span>流行元素<span style={MODULE_TAG}>策展数据</span></span>} size="small">
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               {(trendGallery.colors || []).slice(0, 5).map(c => (

@@ -20,16 +20,20 @@ export default function OpportunityCards({ opportunities = [], selected, onSelec
         </Card>
         <Row gutter={16}>
           {opportunities.map(o => (
-            <Col span={8} key={o.id}>
+            <Col xs={24} sm={24} md={8} key={o.id}>
               <Card
                 className={`opp-card ${selected === o.id ? 'selected' : ''}`}
+                tabIndex={0}
+                role="button"
+                aria-pressed={selected === o.id}
                 onClick={() => onSelect(o.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(o.id); } }}
                 title={<span style={{ fontSize: 16 }}>{o.emoji} {o.title}</span>}
                 extra={<Tag color="purple">{o.direction}</Tag>}
               >
                 <p style={{ fontSize: 13, minHeight: 42 }}>{o.pitch}</p>
                 <div style={{ marginBottom: 8 }}>
-                  {(o.keywords || []).map(k => <Tag key={k}>{k}</Tag>)}
+                  {(o.keywords || []).map(k => <Tag key={k} style={{ whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '100%', height: 'auto', lineHeight: '1.6' }}>{k}</Tag>)}
                 </div>
                 <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>建议价格带：<b>{o.priceBand}</b></div>
                 <div style={{ borderTop: '1px dashed #eee', paddingTop: 8 }}>

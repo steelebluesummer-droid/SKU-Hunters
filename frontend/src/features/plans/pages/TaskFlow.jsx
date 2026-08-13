@@ -1,8 +1,12 @@
 /* ============================================================
  * SKU Hunters · TaskFlow（4 步流程编排，薄壳）
  * 状态编排收敛在 usePlanWorkspace；本页只做 step 切换 + 渲染。
- * step 0/1 已迁到新架构（原子动作 + features/insights/InsightCockpit）；
- * step 2/3 暂引用旧 components/（opportunities / plan-card 待后续切片迁移）。
+ * 四个 step 均已迁到新架构：
+ *   0 企划约束 → 1 洞察驾驶舱（features/insights/InsightCockpit）
+ *   2 机会生成（features/opportunities/OpportunityCards）
+ *   3 新品企划卡（features/plan-card/PlanCard）
+ * 访问控制：按 plan.status 计算 maxAccessibleStep，越权跳步无效；
+ * 归档（archived）后全流程只读，改稿沟通切换为「复盘追问」。
  * ============================================================ */
 
 import { lazy, Suspense, useEffect, useState } from 'react';
@@ -19,7 +23,7 @@ import usePlanWorkspace from '../hooks/usePlanWorkspace';
 
 const STEPS = ['企划约束', '洞察驾驶舱', '机会生成', '新品企划卡'];
 
-const STATUS_STEP = { brief_locked: 0, insights_ready: 1, opportunities_ready: 2, plan_card_ready: 3 };
+const STATUS_STEP = { brief_locked: 0, insights_ready: 1, opportunities_ready: 2, plan_card_ready: 3, archived: 3 };
 
 export default function TaskFlow() {
   const nav = useNavigate();
@@ -43,6 +47,9 @@ export default function TaskFlow() {
   }, [ws.plan?.plan_id, ws.plan?.status, ws.plan?.selected_opportunity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isArchived = ws.status === 'archived';
+  // 最大可访问 step：未解锁步骤不可跳转（archived 只读，仍可回看 0-3）
+  const maxAccessibleStep = STATUS_STEP[ws.status] ?? 0;
+  const handleStepChange = (next) => { if (next <= maxAccessibleStep) setStep(next); };
 
   // ── 原子动作：确认约束 → 生成洞察 ──────────────────────
   const onGenerateInsights = async () => {
@@ -122,14 +129,14 @@ export default function TaskFlow() {
 
       <Steps
         current={step}
-        onChange={isArchived ? setStep : setStep}
+        onChange={handleStepChange}
         items={STEPS.map((s) => ({ title: s }))}
         style={{ marginBottom: 24, maxWidth: 720 }}
       />
 
       {step === 0 && brief && (
         <Card title="企划约束（由商品经理下达）" style={{ maxWidth: 720 }}>
-          <Descriptions column={2} size="small">
+          <Descriptions column={{ xs: 1, md: 2 }} size="small">
             <Descriptions.Item label="企划主题">{brief.theme}</Descriptions.Item>
             <Descriptions.Item label="品类">{brief.category}</Descriptions.Item>
             <Descriptions.Item label="目标市场">{brief.market}</Descriptions.Item>
@@ -143,6 +150,7 @@ export default function TaskFlow() {
           <Button
             type="primary"
             style={{ marginTop: 16 }}
+            disabled={isArchived}
             loading={ws.pendingAction === 'insights'}
             onClick={onGenerateInsights}
           >
@@ -168,7 +176,7 @@ export default function TaskFlow() {
           <Button
             type="primary"
             style={{ marginTop: 16 }}
-            disabled={!ws.insights}
+            disabled={!ws.insights || isArchived}
             loading={ws.pendingAction === 'opportunities'}
             onClick={onGenerateOpportunities}
           >
@@ -192,7 +200,7 @@ export default function TaskFlow() {
           <Button
             type="primary"
             style={{ marginTop: 16 }}
-            disabled={!selectedOpp}
+            disabled={!selectedOpp || isArchived}
             loading={ws.pendingAction === 'plan-card'}
             onClick={onGeneratePlanCard}
           >
@@ -208,13 +216,15 @@ export default function TaskFlow() {
             opportunity={ws.opportunities?.find((o) => o.id === selectedOpp)}
             brief={brief}
             status={planCardState}
+            isArchived={isArchived}
             onGenerate={ws.actions.generatePlanCard}
             onRevise={ws.actions.revise}
+            onReview={ws.actions.review}
           />
           <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
             {isArchived ? (
               <>
-                <Tag>已归档 · 复盘追问可用右下角改稿沟通</Tag>
+                <Tag>已归档 · 只读复盘，不可再改稿</Tag>
                 <Button onClick={() => nav('/')}>返回任务中心</Button>
               </>
             ) : (
