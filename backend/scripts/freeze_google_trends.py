@@ -44,7 +44,7 @@ def main() -> None:
     with open(RAW_CSV, encoding="utf-8-sig") as f:
         rows = list(csv.reader(f))
     header_idx = next(
-        i for i, r in enumerate(rows) if r and r[0].strip() in ("天", "周", "Day", "Week")
+        i for i, r in enumerate(rows) if r and r[0].strip() in ("日", "天", "周", "Day", "Week")
     )
     header = [h.strip() for h in rows[header_idx]]
     data_rows = [r for r in rows[header_idx + 1 :] if r and r[0].strip()]
