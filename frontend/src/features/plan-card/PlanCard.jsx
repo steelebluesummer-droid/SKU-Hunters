@@ -76,7 +76,7 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
   };
 
   if (status === 'loading') {
-    return <div style={{ textAlign: 'center', padding: 60 }} aria-busy="true"><Spin size="large" /></div>;
+    return <div style={{ textAlign: 'center', padding: 60 }} role="status" aria-busy="true"><Spin size="large" /></div>;
   }
 
   if (status === 'error' && !card) {

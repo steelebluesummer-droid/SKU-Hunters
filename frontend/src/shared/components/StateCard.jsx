@@ -16,7 +16,7 @@ export default function StateCard({ status, onRetry, emptyText = '暂无数据',
   switch (status) {
     case 'loading':
       return (
-        <div style={{ textAlign: 'center', padding: 48 }} aria-busy="true">
+        <div style={{ textAlign: 'center', padding: 48 }} role="status" aria-busy="true">
           <Spin />
         </div>
       );
