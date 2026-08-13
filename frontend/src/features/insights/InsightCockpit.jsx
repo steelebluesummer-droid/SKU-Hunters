@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Card, Row, Col, Tag, Progress, Button } from 'antd';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import ProcessLog from './ProcessLog';
+import ProcessLog from '../../shared/components/ProcessLog';
 
 const MODULE_TAG = { fontSize: 11, color: '#b7a8f5', marginLeft: 8 };
 

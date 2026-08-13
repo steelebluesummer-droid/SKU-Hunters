@@ -3,7 +3,7 @@ import { Layout, Menu } from 'antd';
 import { HomeOutlined, BarChartOutlined, ShopOutlined, BgColorsOutlined } from '@ant-design/icons';
 import Home from './pages/Home';
 import NewPlan from './pages/NewPlan';
-import TaskFlow from './pages/TaskFlow';
+import TaskFlow from './features/plans/pages/TaskFlow';
 import DataBoard from './pages/DataBoard';
 import InsightBase from './pages/InsightBase';
 import TrendGallery from './pages/TrendGallery';

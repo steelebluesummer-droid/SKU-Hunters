@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Row, Col, Tag, Button, Empty, Statistic, Divider } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { DEMO_BRIEF } from '../mock/fanData';
+import { Card, Row, Col, Tag, Button, Empty, Statistic, Divider, Alert, Spin } from 'antd';
+import { PlusOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { listPlans } from '../api';
 
 // 后端 status → 列表展示
@@ -15,18 +14,6 @@ const STATUS_MAP = {
 };
 
 const STEP_LABELS = ['企划约束', '洞察驾驶舱', '机会生成', '新品企划卡', '归档'];
-
-// 后端不在线时的本地兜底任务
-const FALLBACK_TASKS = [
-  {
-    plan_id: 'demo',
-    theme: DEMO_BRIEF.theme,
-    category: DEMO_BRIEF.category,
-    audience: DEMO_BRIEF.audience,
-    status: 'plan_card_ready',
-    created_at: '',
-  },
-];
 
 /** 企划任务卡片 */
 function TaskCard({ task, onClick }) {
@@ -56,21 +43,24 @@ function TaskCard({ task, onClick }) {
   );
 }
 
-/** 任务中心：企划任务列表（优先读后端真实状态，后端不在线走本地兜底） */
+/** 任务中心：企划任务列表（只读真实后端数据，失败显式报错并提供重试） */
 export default function Home() {
   const nav = useNavigate();
-  const [tasks, setTasks] = useState(FALLBACK_TASKS);
+  const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = () => {
+    setLoading(true);
+    setError(null);
+    listPlans()
+      .then(data => setTasks(Array.isArray(data?.plans) ? data.plans : []))
+      .catch(e => setError(e?.message || '任务列表加载失败'))
+      .finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    listPlans().then(plans => {
-      if (plans && plans.length > 0) {
-        setTasks(plans.map(p => ({
-          ...p,
-          audience: p.audience || DEMO_BRIEF.audience,
-        })));
-      }
-    }).finally(() => setLoading(false));
+    load();
   }, []);
 
   const activeTasks = tasks.filter(t => t.status !== 'archived');
@@ -84,51 +74,71 @@ export default function Home() {
         <Button type="primary" icon={<PlusOutlined />} onClick={() => nav('/new')}>新建企划</Button>
       </div>
 
-      {/* 概览统计 */}
-      {!loading && (
-        <Row gutter={16} style={{ marginBottom: 20 }}>
-          <Col span={6}>
-            <Card size="small">
-              <Statistic title="进行中" value={activeTasks.length} prefix={<ClockCircleOutlined />} valueStyle={{ color: '#7c5cfc' }} />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small">
-              <Statistic title="已归档" value={archivedTasks.length} prefix={<CheckCircleOutlined />} valueStyle={{ color: '#999' }} />
-            </Card>
-          </Col>
-        </Row>
+      {/* 加载 / 错误状态 */}
+      {loading && (
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+          <Spin tip="正在加载任务列表…" />
+        </div>
       )}
 
-      {/* 进行中任务 */}
-      <Divider orientation="left" style={{ fontSize: 14, margin: '8px 0 16px' }}>
-        <ClockCircleOutlined style={{ marginRight: 6 }} />进行中
-      </Divider>
-      {activeTasks.length === 0 ? (
-        <Empty description="暂无进行中的企划任务" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '24px 0' }} />
-      ) : (
-        <Row gutter={[16, 16]}>
-          {activeTasks.map(t => (
-            <Col span={8} key={t.plan_id}>
-              <TaskCard task={t} onClick={() => nav(`/tasks/${t.plan_id}`)} />
-            </Col>
-          ))}
-        </Row>
+      {!loading && error && (
+        <Alert
+          type="error"
+          showIcon
+          message="无法连接后端服务"
+          description={error}
+          action={<Button size="small" icon={<ReloadOutlined />} onClick={load}>重试</Button>}
+          style={{ marginBottom: 20 }}
+        />
       )}
 
-      {/* 已归档任务 */}
-      {archivedTasks.length > 0 && (
+      {!loading && !error && (
         <>
-          <Divider orientation="left" style={{ fontSize: 14, margin: '24px 0 16px' }}>
-            <CheckCircleOutlined style={{ marginRight: 6 }} />已归档
-          </Divider>
-          <Row gutter={[16, 16]}>
-            {archivedTasks.map(t => (
-              <Col span={8} key={t.plan_id}>
-                <TaskCard task={t} onClick={() => nav(`/tasks/${t.plan_id}`)} />
-              </Col>
-            ))}
+          {/* 概览统计 */}
+          <Row gutter={16} style={{ marginBottom: 20 }}>
+            <Col span={6}>
+              <Card size="small">
+                <Statistic title="进行中" value={activeTasks.length} prefix={<ClockCircleOutlined />} valueStyle={{ color: '#7c5cfc' }} />
+              </Card>
+            </Col>
+            <Col span={6}>
+              <Card size="small">
+                <Statistic title="已归档" value={archivedTasks.length} prefix={<CheckCircleOutlined />} valueStyle={{ color: '#999' }} />
+              </Card>
+            </Col>
           </Row>
+
+          {/* 进行中任务 */}
+          <Divider orientation="left" style={{ fontSize: 14, margin: '8px 0 16px' }}>
+            <ClockCircleOutlined style={{ marginRight: 6 }} />进行中
+          </Divider>
+          {activeTasks.length === 0 ? (
+            <Empty description="暂无进行中的企划任务" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '24px 0' }} />
+          ) : (
+            <Row gutter={[16, 16]}>
+              {activeTasks.map(t => (
+                <Col span={8} key={t.plan_id}>
+                  <TaskCard task={t} onClick={() => nav(`/tasks/${t.plan_id}`)} />
+                </Col>
+              ))}
+            </Row>
+          )}
+
+          {/* 已归档任务 */}
+          {archivedTasks.length > 0 && (
+            <>
+              <Divider orientation="left" style={{ fontSize: 14, margin: '24px 0 16px' }}>
+                <CheckCircleOutlined style={{ marginRight: 6 }} />已归档
+              </Divider>
+              <Row gutter={[16, 16]}>
+                {archivedTasks.map(t => (
+                  <Col span={8} key={t.plan_id}>
+                    <TaskCard task={t} onClick={() => nav(`/tasks/${t.plan_id}`)} />
+                  </Col>
+                ))}
+              </Row>
+            </>
+          )}
         </>
       )}
     </div>

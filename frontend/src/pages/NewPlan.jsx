@@ -21,12 +21,16 @@ export default function NewPlan() {
       goals: values.goals || [],
     };
     message.loading({ content: '正在创建企划…', key: 'create' });
-    const res = await createPlan(brief);
-    if (res && res.plan_id) {
-      message.success({ content: '企划已创建，进入洞察', key: 'create' });
-      nav(`/tasks/${res.plan_id}`);
-    } else {
-      message.error({ content: '创建失败：后端可能不在线', key: 'create' });
+    try {
+      const res = await createPlan(brief);
+      if (res && res.plan_id) {
+        message.success({ content: '企划已创建，进入洞察', key: 'create' });
+        nav(`/tasks/${res.plan_id}`);
+      } else {
+        message.error({ content: '创建失败：后端未返回 plan_id', key: 'create' });
+      }
+    } catch (e) {
+      message.error({ content: `创建失败：${e?.message || '请检查后端服务是否在线'}`, key: 'create' });
     }
   };
 
