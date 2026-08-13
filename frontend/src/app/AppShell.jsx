@@ -42,7 +42,8 @@ const MENU_ITEMS = [
 const BRAND = 'SKU Hunters · 企划工作室';
 
 function selectedKey(pathname) {
-  if (pathname.startsWith('/tasks') || pathname.startsWith('/new')) return pathname;
+  if (pathname.startsWith('/tasks/')) return '/'; // 任务详情页选中「任务中心」
+  if (pathname.startsWith('/new')) return '/new';
   return '/' + (pathname.split('/')[1] || '');
 }
 
@@ -71,7 +72,7 @@ export default function AppShell() {
     <Layout style={{ minHeight: '100vh' }}>
       {/* 桌面侧栏（≥768px） */}
       {isDesktop && (
-        <Sider width={200} style={{ background: '#fff' }}>
+        <Sider width={200} style={{ background: 'var(--color-surface)' }}>
           <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>
             {BRAND}
           </div>
@@ -84,12 +85,12 @@ export default function AppShell() {
         {!isDesktop && (
           <Header
             style={{
-              background: '#fff',
+              background: 'var(--color-surface)',
               padding: '0 16px',
               display: 'flex',
               alignItems: 'center',
               gap: 12,
-              borderBottom: '1px solid #f0f0f0',
+              borderBottom: '1px solid var(--color-border)',
               position: 'sticky',
               top: 0,
               zIndex: 10,
@@ -105,7 +106,7 @@ export default function AppShell() {
           </Header>
         )}
 
-        <Content style={{ padding: isDesktop ? 24 : 16, background: '#f5f5f5' }}>
+        <Content style={{ padding: isDesktop ? 24 : 16, background: 'var(--color-bg)' }}>
           <div style={{ maxWidth: 1200, margin: '0 auto' }}>
             <Outlet />
           </div>
