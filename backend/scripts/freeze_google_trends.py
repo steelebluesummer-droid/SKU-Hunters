@@ -25,7 +25,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 RAW_CSV = DATA_DIR / "google_trends_raw.csv"
 OUT_JSON = DATA_DIR / "google_trends_snapshot.json"
 
-KEYWORDS = ["小风扇", "露营", "库洛米"]
+KEYWORDS = ["风扇", "露营", "库洛米"]
 
 
 def _parse_value(raw: str) -> float:
