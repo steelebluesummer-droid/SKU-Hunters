@@ -69,3 +69,6 @@ design.rar
 # 运行时任务状态（本地持久化，不入库）
 backend/data/plans_state.json
 backend/data/state/
+
+# 前端验收截图与临时脚本（本地证据，不入库；Stage 7 统一收编代表性截图）
+preview/

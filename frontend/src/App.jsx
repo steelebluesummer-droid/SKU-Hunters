@@ -1,8 +1,8 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import { Layout, Menu } from 'antd';
 import { HomeOutlined, BarChartOutlined, ShopOutlined, BgColorsOutlined } from '@ant-design/icons';
-import Home from './pages/Home';
-import NewPlan from './pages/NewPlan';
+import TaskCenter from './features/plans/pages/TaskCenter';
+import NewPlan from './features/plans/pages/NewPlan';
 import TaskFlow from './features/plans/pages/TaskFlow';
 import DataBoard from './pages/DataBoard';
 import InsightBase from './pages/InsightBase';
@@ -30,7 +30,7 @@ export default function App() {
       </Sider>
       <Content style={{ padding: 24, background: '#f5f5f5' }}>
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<TaskCenter />} />
           <Route path="/new" element={<NewPlan />} />
           <Route path="/tasks/:id" element={<TaskFlow />} />
           <Route path="/dashboard" element={<DataBoard />} />
