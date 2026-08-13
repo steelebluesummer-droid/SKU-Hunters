@@ -56,13 +56,19 @@ def _short_ip(name: str) -> str:
 
 def _opportunities_from_bundle(category: str, bundle: dict, brief: dict) -> list[dict]:
     """从真实五看洞察派生 3 张机会卡（IP/痛点/场景三方向）"""
-    tr = bundle["trendRadar"]; cv = bundle["consumerVoice"]
-    cm = bundle["competitiveMap"]; ib = bundle["insightBase"]; tg = bundle["trendGallery"]
-    signals = tr.get("signals", []); pains = cv.get("painPoints", [])
-    scenes = cv.get("scenes", []); ip_pool = ib.get("ipPool", [])
+    tr = bundle["trendRadar"]
+    cv = bundle["consumerVoice"]
+    cm = bundle["competitiveMap"]
+    ib = bundle["insightBase"]
+    tg = bundle["trendGallery"]
+    signals = tr.get("signals", [])
+    pains = cv.get("painPoints", [])
+    scenes = cv.get("scenes", [])
+    ip_pool = ib.get("ipPool", [])
     gap = cm.get("gapZone") or {}
     gap_label = gap.get("label", "") if isinstance(gap, dict) else str(gap)
-    colors = tg.get("colors", []); exprs = tg.get("expressions", [])
+    colors = tg.get("colors", [])
+    exprs = tg.get("expressions", [])
 
     color0 = colors[0].get("name") if colors and isinstance(colors[0], dict) else (colors[0] if colors else "")
     expr0 = exprs[0].get("name") if exprs and isinstance(exprs[0], dict) else (exprs[0] if exprs else "")

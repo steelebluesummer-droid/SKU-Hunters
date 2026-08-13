@@ -5,10 +5,12 @@
  * step 2/3 暂引用旧 components/（opportunities / plan-card 待后续切片迁移）。
  * ============================================================ */
 
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Steps, Card, Descriptions, Tag, Button, message } from 'antd';
-import InsightCockpit from '../../insights/InsightCockpit';
+import { Steps, Card, Descriptions, Tag, Button, message, Spin } from 'antd';
+
+// 洞察驾驶舱含 ECharts，属实测重模块，按已批准方案做流程内二级懒加载
+const InsightCockpit = lazy(() => import('../../insights/InsightCockpit'));
 import OpportunityCards from '../../../components/OpportunityCards';
 import PlanCard from '../../../components/PlanCard';
 import StateCard from '../../../shared/components/StateCard';
@@ -148,7 +150,16 @@ export default function TaskFlow() {
       {step === 1 && (
         <div>
           <StateCard status={insightState} onRetry={onGenerateInsights} emptyText="暂无洞察数据">
-            {ws.insights && <InsightCockpit insights={ws.insights} />}
+            <Suspense
+              fallback={
+                <div style={{ textAlign: 'center', padding: 48 }} role="status" aria-busy="true">
+                  <Spin />
+                  <div style={{ marginTop: 8, color: 'var(--color-text-muted)' }}>正在加载洞察模块…</div>
+                </div>
+              }
+            >
+              {ws.insights && <InsightCockpit insights={ws.insights} />}
+            </Suspense>
           </StateCard>
           <Button
             type="primary"
