@@ -7,7 +7,7 @@
  * ============================================================ */
 
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useBlocker } from 'react-router-dom';
 import { Form, Select, Input, InputNumber, Button, Card, Checkbox, Row, Col, Alert, Modal } from 'antd';
 import { createPlan } from '../../../api/plans';
 import { fromForm } from '../../../shared/utils/normalizeBrief';
@@ -55,6 +55,22 @@ export default function NewPlan() {
   const [dirty, setDirty] = useState(false);
   const [pageError, setPageError] = useState(null);
 
+  // 应用内导航守卫：dirty 时任何导航（侧栏/后退/取消）都需确认
+  const blocker = useBlocker(dirty);
+
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      Modal.confirm({
+        title: '离开此页面？',
+        content: '你填写的内容尚未保存，离开后将丢失。',
+        okText: '离开',
+        cancelText: '继续填写',
+        onOk: () => blocker.proceed(),
+        onCancel: () => blocker.reset(),
+      });
+    }
+  }, [blocker]);
+
   // 浏览器刷新/关闭：有未保存修改时提示
   useEffect(() => {
     const handler = (e) => {
@@ -67,22 +83,8 @@ export default function NewPlan() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [dirty]);
 
-  const goBack = () => nav('/');
-
-  // 取消 / 返回：有未保存修改时弹离开确认
-  const handleCancel = () => {
-    if (dirty) {
-      Modal.confirm({
-        title: '离开此页面？',
-        content: '你填写的内容尚未保存，离开后将丢失。',
-        okText: '离开',
-        cancelText: '继续填写',
-        onOk: goBack,
-      });
-    } else {
-      goBack();
-    }
-  };
+  // 取消：dirty 时由 useBlocker 自动弹确认拦截，非 dirty 直接返回
+  const handleCancel = () => nav('/');
 
   const onFinish = async (values) => {
     if (submitting) return; // 防重复提交
