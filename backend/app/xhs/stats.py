@@ -129,8 +129,7 @@ def top_notes(conn: sqlite3.Connection, metric: str = "likes",
               n: int = 5, keyword: str | None = None) -> list[dict]:
     if metric not in ("likes", "collects", "comments", "interactions"):
         raise ValueError(f"不支持的 metric: {metric}（likes/collects/comments/interactions）")
-    cols = ("likes", "collects", "comments")
-    q = f"SELECT * FROM xhs_notes"
+    q = "SELECT * FROM xhs_notes"
     args: list = []
     if keyword:
         q += " WHERE query_keyword=?"

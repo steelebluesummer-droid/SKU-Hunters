@@ -12,16 +12,13 @@ from fastapi.staticfiles import StaticFiles
 # 启动即加载 backend/.env（LLM Key、即梦 AK/SK、飞书配置）——必须在 app.* 导入前
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-from app.api.planning import router as planning_router
-from app.api.routes import router as committee_router
-from app.xhs.api import router as xhs_router
+from app.api.planning import router as planning_router  # noqa: E402
+from app.api.routes import router as committee_router  # noqa: E402
+from app.xhs.api import router as xhs_router  # noqa: E402
 
 # 飞书机器人模块（backend/feishu/，需从 backend/ 目录启动以保证可导入）
-from feishu import FeishuConfig
-from feishu.webhook import create_feishu_router
-
-from app.api.planning import router as planning_router
-from app.api.routes import router as committee_router
+from feishu import FeishuConfig  # noqa: E402
+from feishu.webhook import create_feishu_router  # noqa: E402
 
 app = FastAPI(
     title="SKU Hunters — AI 新品企划工作室",
@@ -64,8 +61,23 @@ async def health():
 # 注意：mount("/") 会遮蔽下面的 root() 发现页——dist 存在时 "/" 即前端首页，符合预期；
 # dist 不存在（纯 API 模式）时 root() 照常工作。mount 必须在所有 API 路由之后注册。
 _DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+
+
+class SPAStaticFiles(StaticFiles):
+    """SPA 回退：React Router 深层路由（/tasks/demo、/dashboard 等）直接刷新时
+    StaticFiles 默认按文件路径查找会 404，这里把 404 回退到 index.html，
+    由前端 Router 接管渲染。API 路由均在 mount 之前注册，不受影响。
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 404:
+            response = await super().get_response("index.html", scope)
+        return response
+
+
 if _DIST.is_dir():
-    app.mount("/", StaticFiles(directory=_DIST, html=True), name="frontend")
+    app.mount("/", SPAStaticFiles(directory=_DIST, html=True), name="frontend")
 
 
 @app.get("/")

@@ -37,7 +37,7 @@ def test_competitive_map_has_images():
     cm = L.get_insight_bundle("保温杯")["competitiveMap"]
     assert len(cm["products"]) >= 5
     # 采集数据里竞品带图
-    assert any(p["image_url"] for p in cm["products"])
+    assert any(p["imageUrl"] for p in cm["products"])
     assert all(p["design"] >= 0 for p in cm["products"])
 
 

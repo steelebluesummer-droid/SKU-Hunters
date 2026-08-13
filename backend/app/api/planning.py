@@ -25,6 +25,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
 from app.planning import fixtures, pipeline
+from app.planning.service import StateTransitionError
 from app.schemas.planning import PlanBrief
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,11 @@ def _get_plan_or_404(plan_id: str) -> dict[str, Any]:
     if plan is None:
         raise HTTPException(404, detail={"error": {"code": "PLAN_NOT_FOUND", "message": plan_id}})
     return plan
+
+
+def _state_transition_error(e: StateTransitionError) -> HTTPException:
+    """状态机非法转移 → 409（原子动作前置状态校验失败）"""
+    return HTTPException(409, detail={"error": {"code": "INVALID_TRANSITION", "message": str(e)}})
 
 
 @router.post("/plans", status_code=201)
@@ -58,8 +64,8 @@ def _run_aily_flow(plan: dict[str, Any]) -> None:
     跑完由后端主动推消息（fail-soft，推送失败不影响任务状态）。
     """
     try:
-        pipeline.get_insights(plan)
-        opportunities = pipeline.get_opportunities(plan)
+        pipeline.generate_insights(plan)
+        opportunities = pipeline.generate_opportunities(plan)
         from feishu.notify import notify_opportunities_ready
         notify_opportunities_ready(plan, opportunities)
     except Exception:
@@ -117,13 +123,95 @@ async def get_opportunities(plan_id: str):
     }
 
 
+# 流程推进的状态机（GET 只读不改业务状态；推进由本 POST 显式触发）
+_STATUS_ORDER = ["brief_locked", "insights_ready", "opportunities_ready", "plan_card_ready"]
+
+@router.post("/plans/{plan_id}/advance")
+async def advance_plan(plan_id: str, payload: dict):
+    """显式推进流程状态（brief_locked → insights_ready → opportunities_ready → plan_card_ready）
+
+    取代旧实现里 GET /insights、/opportunities 顺带推进状态的反模式：
+    GET 只读、可重试、幂等，不再产生状态副作用。
+    """
+    plan = _get_plan_or_404(plan_id)
+    target = (payload.get("to") or payload.get("status") or "").strip()
+    if target not in _STATUS_ORDER:
+        raise HTTPException(422, detail={"error": {"code": "INVALID_STATUS", "message": target or "(空)"}})
+    current = plan.get("status", "brief_locked")
+    if current == "archived":
+        raise HTTPException(409, detail={"error": {"code": "PLAN_ARCHIVED", "message": "已归档，不可推进"}})
+    if _STATUS_ORDER.index(target) <= _STATUS_ORDER.index(current):
+        raise HTTPException(409, detail={"error": {"code": "INVALID_TRANSITION", "message": f"{current} -> {target}"}})
+    plan["status"] = target
+    return {"plan_id": plan_id, "status": target}
+
+# ── 原子业务动作（Stage 5）：生成 + 落盘 + 推进状态一次完成 ────────
+# 取代「advance + GET」两请求组合，消除「状态已推进但产物未生成」半完成态。
+# 旧 advance / plan-card / archive 端点保留为兼容入口（见下方旧端点）。
+
+@router.post("/plans/{plan_id}/actions/generate-insights")
+async def action_generate_insights(plan_id: str):
+    plan = _get_plan_or_404(plan_id)
+    try:
+        insights = pipeline.generate_insights(plan)
+    except StateTransitionError as e:
+        raise _state_transition_error(e)
+    return {"plan_id": plan_id, "status": plan["status"], "insights": insights}
+
+
+@router.post("/plans/{plan_id}/actions/generate-opportunities")
+async def action_generate_opportunities(plan_id: str):
+    plan = _get_plan_or_404(plan_id)
+    try:
+        opportunities = pipeline.generate_opportunities(plan)
+    except StateTransitionError as e:
+        raise _state_transition_error(e)
+    return {
+        "plan_id": plan_id,
+        "status": plan["status"],
+        "opportunities": opportunities,
+        "processLog": fixtures.OPPORTUNITY_LOG,
+    }
+
+
+@router.post("/plans/{plan_id}/actions/generate-plan-card")
+async def action_generate_plan_card(plan_id: str, payload: dict):
+    plan = _get_plan_or_404(plan_id)
+    opportunity_id = payload.get("opportunity_id")
+    if not opportunity_id:
+        raise HTTPException(422, detail={"error": {"code": "OPPORTUNITY_REQUIRED", "message": "opportunity_id 必填"}})
+    try:
+        card = pipeline.generate_plan_card(plan, opportunity_id)
+    except StateTransitionError as e:
+        raise _state_transition_error(e)
+    if card is None:
+        raise HTTPException(404, detail={"error": {"code": "OPPORTUNITY_NOT_FOUND", "message": opportunity_id}})
+    return {"plan_id": plan_id, "status": plan["status"], "plan_card": card}
+
+
+@router.post("/plans/{plan_id}/actions/archive")
+async def action_archive(plan_id: str, background_tasks: BackgroundTasks):
+    plan = _get_plan_or_404(plan_id)
+    try:
+        pipeline.archive_plan(plan)
+    except StateTransitionError as e:
+        raise _state_transition_error(e)
+    except ValueError as e:
+        raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": str(e)}})
+    background_tasks.add_task(_run_archive_hooks, plan)
+    return {"plan_id": plan_id, "status": plan["status"], "archived_at": plan["archived_at"]}
+
+
 @router.post("/plans/{plan_id}/plan-card")
 async def generate_plan_card(plan_id: str, payload: dict):
     plan = _get_plan_or_404(plan_id)
     opportunity_id = payload.get("opportunity_id")
     if not opportunity_id:
         raise HTTPException(422, detail={"error": {"code": "OPPORTUNITY_REQUIRED", "message": "opportunity_id 必填"}})
-    card = pipeline.generate_plan_card(plan, opportunity_id)
+    try:
+        card = pipeline.generate_plan_card(plan, opportunity_id)
+    except StateTransitionError as e:
+        raise _state_transition_error(e)
     if card is None:
         raise HTTPException(404, detail={"error": {"code": "OPPORTUNITY_NOT_FOUND", "message": opportunity_id}})
     return {"plan_id": plan_id, "plan_card": card}
@@ -137,7 +225,10 @@ async def revise_plan(plan_id: str, payload: dict):
         raise HTTPException(422, detail={"error": {"code": "MESSAGE_REQUIRED", "message": "message 必填"}})
     if plan.get("plan_card") is None:
         raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": "请先生成企划卡"}})
-    return {"plan_id": plan_id, **pipeline.revise_plan(plan, message)}
+    try:
+        return {"plan_id": plan_id, **pipeline.revise_plan(plan, message)}
+    except StateTransitionError as e:
+        raise _state_transition_error(e)
 
 
 def _run_archive_hooks(plan: dict[str, Any]) -> None:
@@ -161,11 +252,23 @@ async def archive_plan(plan_id: str, background_tasks: BackgroundTasks):
     plan = _get_plan_or_404(plan_id)
     try:
         pipeline.archive_plan(plan)
+    except StateTransitionError as e:
+        raise _state_transition_error(e)
     except ValueError as e:
         raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": str(e)}})
     # 事件驱动同步挪后台：归档立即返回，多维表格写入 + 卡片推送随后执行
     background_tasks.add_task(_run_archive_hooks, plan)
     return {"plan_id": plan_id, "status": plan["status"], "archived_at": plan["archived_at"]}
+
+
+@router.post("/plans/{plan_id}/review")
+async def review_plan(plan_id: str, payload: dict):
+    """复盘追问（只读）：归档后基于企划卡回答追问，不修改 plan"""
+    plan = _get_plan_or_404(plan_id)
+    question = (payload.get("question") or "").strip()
+    if not question:
+        raise HTTPException(422, detail={"error": {"code": "QUESTION_REQUIRED", "message": "question 必填"}})
+    return {"plan_id": plan_id, **pipeline.review_plan(plan, question)}
 
 
 # ── 策展数据独立页（非 Agent 现搜，提前策展）────────────────────
@@ -191,4 +294,5 @@ async def trend_gallery(topic: str = "小风扇"):
 
 @router.get("/data-board")
 async def data_board():
-    return fixtures.DATA_BOARD
+    # 大盘看板 = 品类热度/声量/热销榜 + 价格带分布（来自竞品矩阵），前端单次取全
+    return {**fixtures.DATA_BOARD, "priceBands": fixtures.COMPETITIVE_MAP["priceBands"]}

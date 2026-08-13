@@ -19,7 +19,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-EVIDENCE_ROOT = Path(__file__).resolve().parents[1] / "evidence_sources" / "social"
+# 数据分目录：社媒证据迁移到 backend/data/evidence/social（旧路径向后兼容）
+_NEW_EVIDENCE_ROOT = Path(__file__).resolve().parents[3] / "data" / "evidence" / "social"
+_OLD_EVIDENCE_ROOT = Path(__file__).resolve().parents[1] / "evidence_sources" / "social"
+EVIDENCE_ROOT = _NEW_EVIDENCE_ROOT if _NEW_EVIDENCE_ROOT.is_dir() else _OLD_EVIDENCE_ROOT
 
 
 def _first_number(s: Any, default: float = 0.0) -> float:
@@ -31,6 +34,34 @@ def _first_number(s: Any, default: float = 0.0) -> float:
 def _weight_value(w: Any) -> int:
     """场景权重 → 数值（高80/中50/低20），无则给0"""
     return {"高": 80, "中": 50, "低": 20, "high": 80, "mid": 50, "low": 20}.get(str(w), 0)
+
+
+# 常见流行色名 → hex 映射表（采集侧只给色名，loader 负责补 hex，避免前端色板空白）
+_COLOR_HEX_MAP = {
+    "奶油黄": "#F5E6B8", "薄荷绿": "#B8E6D0", "樱花粉": "#FAD1DC",
+    "玻璃蓝": "#CDE7F0", "薰衣草紫": "#D9CCF0", "蜜瓜橙": "#F8D5B0",
+    "雾粉紫": "#DCC8E8", "灰紫": "#C8C0D0", "海岸青": "#B8D8D0",
+    "鼠尾草灰": "#C8C8C0", "蜜桃玫粉": "#F5C8D8", "蜜橙冰沙": "#F5D0B0",
+    "莫兰迪": "#C8C0B8", "多巴胺": "#F5A0B0", "大地色": "#C8B090",
+    "牛油果绿": "#B8C8A0", "雾霾蓝": "#A8B8C8", "燕麦色": "#E0D8C8",
+    "焦糖": "#C8A070", "奶咖": "#D8C0A8", "橄榄绿": "#A8B080",
+}
+
+# 确定性兜底调色板（颜色名未命中时按顺序取，保证同一名字永远同一色）
+_FALLBACK_PALETTE = [
+    "#B8E6D0", "#FAD1DC", "#CDE7F0", "#D9CCF0", "#F5E6B8", "#F8D5B0",
+    "#DCC8E8", "#C8D8E8", "#E8D0C0", "#C8E0C8",
+]
+
+
+def _resolve_color_hex(name: str, idx: int) -> str:
+    """颜色名 → hex：命中映射表优先，否则按索引取确定性兜底色（永不为空）"""
+    if not name:
+        return _FALLBACK_PALETTE[idx % len(_FALLBACK_PALETTE)]
+    for key, hexv in _COLOR_HEX_MAP.items():
+        if key in name or name in key:
+            return hexv
+    return _FALLBACK_PALETTE[idx % len(_FALLBACK_PALETTE)]
 
 
 class SocialEvidenceLoader:
@@ -145,8 +176,8 @@ class SocialEvidenceLoader:
                 "name": p["name"],
                 "price": _first_number(p.get("price", 0)),
                 "design": _first_number(p.get("design", 5)),
-                "image_url": p.get("image_url", ""),
-                "selling_point": p.get("selling_point", ""),
+                "imageUrl": p.get("image_url", ""),
+                "sellingPoint": p.get("selling_point", ""),
             }
             for p in d.get("products", [])
         ]
@@ -155,7 +186,7 @@ class SocialEvidenceLoader:
             "processLog": [f"加载 {topic} 竞品样本，构建价格×设计感矩阵"],
             "products": products,
             # 采集侧未给坐标，x/y 置空；前端展示 label，坐标为 0 不影响文字
-            "gapZone": {"x": [], "y": [], "label": gap} if gap else None,
+            "gapZone": {"x": [30, 60], "y": [7, 10], "label": gap or "差异化机会空白"} if gap else None,
             "priceBands": [
                 {"band": b.get("band", ""), "pct": int(_first_number(b.get("pct", 0), 0))}
                 for b in d.get("price_bands", [])
@@ -193,7 +224,10 @@ class SocialEvidenceLoader:
         d = self.load(topic).get("trend_gallery", {})
         return {
             "processLog": [f"加载 {topic} 当季流行设计元素"],
-            "colors": [{"name": c, "hex": "", "source": ""} for c in d.get("colors", [])],
+            "colors": [
+                {"name": c, "hex": _resolve_color_hex(c, i), "source": ""}
+                for i, c in enumerate(d.get("colors", []))
+            ],
             "patterns": [{"name": p, "source": "", "note": ""} for p in d.get("patterns", [])],
             "shapes": [{"name": s, "source": "", "note": ""} for s in d.get("shapes", [])],
             "expressions": [{"name": e, "emoji": "", "note": ""} for e in d.get("expressions", [])],
