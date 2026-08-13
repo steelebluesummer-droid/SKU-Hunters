@@ -97,6 +97,8 @@ class CompetitorProduct(BaseModel):
     """竞品数据点"""
     name: str
     price: float
+    image_url: str = ""        # 竞品商品图（OpenClaw 采集，可对账）
+    selling_point: str = ""    # 核心卖点/特点
     design: float = Field(ge=0, le=10, description="设计感评分 0-10")
 
 

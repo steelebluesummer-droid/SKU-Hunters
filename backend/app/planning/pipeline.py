@@ -134,42 +134,149 @@ def list_plans() -> list[dict[str, Any]]:
 # ── ② 五看洞察 ─────────────────────────────────────────────
 
 def get_insights(plan: dict[str, Any]) -> dict[str, Any]:
-    """三洞察 Agent 产物 + 两块策展数据摘要，经 InsightBundle schema 校验
+    """五看洞察：有社媒证据则返回真实数据（SocialEvidenceLoader），否则回退 fixtures
 
-    fixture 模式直接返回冻结分析结果；process_log 字段是前端
-    渐进过程日志的文本源（live 模式将由 Agent 真实过程填充）。
+    真实数据键名与 fixtures 同构（camelCase），前端零改动即可消费。
     """
     # 归档过的任务不降级状态（只读接口不得覆盖归档状态）
     if plan.get("status") != "archived":
         plan["status"] = "insights_ready"
-    # 契约校验：确保 fixture 数据符合 InsightBundle schema（不改变输出格式）
-    _ = InsightBundle.model_validate(_snake_keys({
-        "trendRadar": fixtures.TREND_RADAR,
-        "consumerVoice": fixtures.CONSUMER_VOICE,
-        "competitiveMap": fixtures.COMPETITIVE_MAP,
-        "insightBase": fixtures.INSIGHT_BASE,
-        "trendGallery": fixtures.TREND_GALLERY,
-    }))
-    return {
-        "trendRadar": fixtures.TREND_RADAR,
-        "consumerVoice": fixtures.CONSUMER_VOICE,
-        "competitiveMap": fixtures.COMPETITIVE_MAP,
-        "insightBase": fixtures.INSIGHT_BASE,
-        "trendGallery": fixtures.TREND_GALLERY,
-    }
+    bundle = _resolve_insight_bundle(plan["brief"].get("category", ""))
+    # 契约校验：确保数据符合 InsightBundle schema（不改变输出格式）
+    _ = InsightBundle.model_validate(_snake_keys(bundle))
+    return bundle
 
 
-# ── ③ 机会生成（环节，非人格化 Agent）────────────────────────
+def _resolve_insight_bundle(category: str) -> dict[str, Any]:
+    """按品类取社媒真实证据；无对应数据回退冻结 fixtures（process_log 兼容）"""
+    try:
+        from app.insights.loaders.social_evidence import SocialEvidenceLoader
+        bundle = SocialEvidenceLoader().get_insight_bundle(category)
+        bundle["trendRadar"]["heatCurve"] = _load_heat_curve()
+        return bundle
+    except FileNotFoundError:
+        return {
+            "trendRadar": fixtures.TREND_RADAR,
+            "consumerVoice": fixtures.CONSUMER_VOICE,
+            "competitiveMap": fixtures.COMPETITIVE_MAP,
+            "insightBase": fixtures.INSIGHT_BASE,
+            "trendGallery": fixtures.TREND_GALLERY,
+        }
+
+
+def _load_heat_curve() -> dict[str, Any] | None:
+    """从 Google Trends 冻结快照注入热度曲线（存在才注入，否则前端留空）"""
+    try:
+        path = Path(__file__).resolve().parents[2] / "data" / "google_trends_snapshot.json"
+        if not path.is_file():
+            return None
+        snap = json.loads(path.read_text(encoding="utf-8"))
+        return {"weeks": snap["weeks"], "series": snap["series"]}
+    except Exception:
+        return None
 
 def get_opportunities(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    """机会生成：洞察 → 3 张方向卡（每张挂四方依据链），经 Opportunity schema 校验"""
+    """机会生成：洞察 → 3 张方向卡（每张挂四方依据链），经 Opportunity schema 校验
+
+    有该品类的社媒证据则按其真实洞察生成方向卡，否则回退冻结 fixtures。
+    """
     # 归档过的任务不降级状态（只读接口不得覆盖归档状态）
     if plan.get("status") != "archived":
         plan["status"] = "opportunities_ready"
-    # 契约校验（不改变输出格式）
-    for o in fixtures.OPPORTUNITIES:
+    category = plan["brief"].get("category", "")
+    try:
+        bundle = _resolve_insight_bundle(category)
+        opps = _opportunities_from_bundle(category, bundle)
+        if not opps:
+            return fixtures.OPPORTUNITIES
+    except FileNotFoundError:
+        return fixtures.OPPORTUNITIES
+    for o in opps:
         _ = Opportunity.model_validate(_snake_keys(o))
-    return fixtures.OPPORTUNITIES
+    return opps
+
+
+def _opportunities_from_bundle(category: str, bundle: dict) -> list[dict]:
+    """从真实五看洞察派生 3 张机会卡（IP/痛点/场景三方向）"""
+    tr = bundle["trendRadar"]; cv = bundle["consumerVoice"]
+    cm = bundle["competitiveMap"]; ib = bundle["insightBase"]; tg = bundle["trendGallery"]
+    signals = tr.get("signals", []); pains = cv.get("painPoints", [])
+    scenes = cv.get("scenes", []); ip_pool = ib.get("ipPool", [])
+    gap = cm.get("gapZone") or {}
+    gap_label = gap.get("label", "") if isinstance(gap, dict) else str(gap)
+    colors = tg.get("colors", []); exprs = tg.get("expressions", [])
+
+    color0 = colors[0].get("name") if colors and isinstance(colors[0], dict) else (colors[0] if colors else "")
+    expr0 = exprs[0].get("name") if exprs and isinstance(exprs[0], dict) else (exprs[0] if exprs else "")
+    sig0 = signals[0] if signals else None
+    sig1 = signals[1] if len(signals) > 1 else None
+    pain0 = pains[0] if pains else None
+    scene0 = scenes[0].get("name") if scenes else "日常"
+    price_band = "49-99 元"
+    for pb in cm.get("priceBands", []):
+        if pb.get("band"):
+            price_band = pb.get("price") or price_band
+            break
+
+    def ev(frm: str, text: str) -> dict:
+        return {"from": frm, "text": text}
+
+    opps: list[dict] = []
+
+    # ① IP 联名款
+    if ip_pool:
+        # 压缩 IP 名避免挤爆窄卡片（取品牌主体，如"三丽鸥"）
+        ip_name = str(ip_pool[0].get("name", ""))
+        ip_short = (re.split(r"[（(]", ip_name)[0] or ip_name).strip()[:8]
+        opps.append({
+            "id": "ip-licensing", "emoji": "🎀",
+            "title": f"{category} × {ip_short} 联名款",
+            "direction": "IP联名风",
+            "pitch": f"借势「{ip_short}」情绪势能，做{category}里的社交货币款",
+            "priceBand": price_band,
+            "keywords": [ip_short, color0, "联名限定"],
+            "evidence": [
+                ev("名创内部", f"IP 池：{ip_short}（{ip_pool[0].get('why','')[:50]}）"),
+                ev("趋势洞察", f"{sig0['name']}（{sig0['metric']}）" if sig0 else ""),
+                ev("流行元素", f"当季配色 {color0}"),
+                ev("竞品分析", gap_label[:50] if gap_label else "差异化机会空白"),
+            ],
+        })
+
+    # ② 痛点解决/功能升级款
+    if pain0 or sig0:
+        opps.append({
+            "id": "pain-solution", "emoji": "💡",
+            "title": f"{category}痛点解决升级款",
+            "direction": "功能实用风",
+            "pitch": f"直击「{pain0['text'][:22] if pain0 else '体验'}」痛点，做差异化功能",
+            "priceBand": price_band,
+            "keywords": [(pain0["text"][:12] if pain0 else ""), "品质升级"],
+            "evidence": [
+                ev("用户洞察", f"高频痛点：{pain0['text']}（{pain0['count']}条）" if pain0 else ""),
+                ev("趋势洞察", f"{sig1['name']}（{sig1['metric']}）" if sig1 else ""),
+                ev("竞品分析", gap_label[:50] if gap_label else "差异化机会空白"),
+                ev("流行元素", f"当季配色 {color0 or '—'}"),
+            ],
+        })
+
+    # ③ 场景情绪款
+    opps.append({
+        "id": "scene-emotion", "emoji": "✨",
+        "title": f"{category}场景情绪款",
+        "direction": "场景情绪风",
+        "pitch": f"围绕「{scene0}」场景，用{expr0 or '情绪'}叙事做差异化",
+        "priceBand": price_band,
+        "keywords": [scene0, expr0, color0],
+        "evidence": [
+            ev("用户洞察", f"高频场景：{scene0}"),
+            ev("流行元素", f"风格关键词：{expr0 or '—'}"),
+            ev("竞品分析", gap_label[:50] if gap_label else "差异化机会空白"),
+            ev("趋势洞察", f"{sig0['name']}（{sig0['metric']}）" if sig0 else ""),
+        ],
+    })
+
+    return [o for o in opps if o]
 
 
 # ── ⑤ 商品策略：成本校验 ────────────────────────────────────

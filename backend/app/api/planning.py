@@ -170,14 +170,23 @@ async def archive_plan(plan_id: str, background_tasks: BackgroundTasks):
 
 # ── 策展数据独立页（非 Agent 现搜，提前策展）────────────────────
 
+def _load_curated_module(topic: str, key: str, fallback: dict):
+    """策展数据：有社媒证据取真实数据，否则回退 fixtures"""
+    try:
+        from app.insights.loaders.social_evidence import SocialEvidenceLoader
+        return SocialEvidenceLoader().get_insight_bundle(topic)[key]
+    except FileNotFoundError:
+        return fallback
+
+
 @router.get("/insight-base")
-async def insight_base():
-    return fixtures.INSIGHT_BASE
+async def insight_base(topic: str = "小风扇"):
+    return _load_curated_module(topic, "insightBase", fixtures.INSIGHT_BASE)
 
 
 @router.get("/trend-gallery")
-async def trend_gallery():
-    return fixtures.TREND_GALLERY
+async def trend_gallery(topic: str = "小风扇"):
+    return _load_curated_module(topic, "trendGallery", fixtures.TREND_GALLERY)
 
 
 @router.get("/data-board")

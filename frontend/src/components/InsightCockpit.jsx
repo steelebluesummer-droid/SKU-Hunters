@@ -116,7 +116,7 @@ function CompetitiveMap() {
     }],
   };
   const maxPct = Math.max(...COMPETITIVE_MAP.priceBands.map(b => b.pct));
-  return (
+  return (<>
     <Row gutter={16}>
       <Col span={14}>
         <ReactECharts option={scatterOption} style={{ height: 300 }} />
@@ -140,6 +140,32 @@ function CompetitiveMap() {
         </Card>
       </Col>
     </Row>
+      <CompetitorGallery />
+      </>
+  );
+}
+
+// 竞品图板：图片 + 价格 + 卖点卡片墙（图源 OpenClaw 采集，可对账）
+function CompetitorGallery() {
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>竞品图板（图片 / 价格 / 卖点）</div>
+      <Row gutter={[12, 12]}>
+        {COMPETITIVE_MAP.products.map(p => (
+          <Col key={p.name} xs={12} sm={8} md={6} lg={4}>
+            <Card size="small" cover={
+              p.imageUrl
+                ? <img src={p.imageUrl} alt={p.name} style={{ height: 100, objectFit: 'cover' }} />
+                : <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f7f7f8', color: '#999', fontSize: 12 }}>{p.name.slice(0, 2)}</div>
+            }>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
+              <div style={{ fontSize: 12, color: '#e60012' }}>¥{p.price} · 设计 {p.design}</div>
+              <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{p.sellingPoint || '—'}</div>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    </div>
   );
 }
 

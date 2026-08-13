@@ -1,15 +1,33 @@
 import { useNavigate } from 'react-router-dom';
 import { Form, Select, Input, InputNumber, Button, Card, Checkbox, message } from 'antd';
 import { DEMO_BRIEF } from '../mock/fanData';
+import { createPlan } from '../api';
 
 // 企划启动：约束输入（对应名创"年度品类规划 → 企划案"的约束下达）
 export default function NewPlan() {
   const nav = useNavigate();
 
-  const onFinish = () => {
-    // mock 阶段：无论填什么都进入演示任务；后续接后端 POST /plans
-    message.success('企划任务已创建，正在生成洞察…');
-    nav('/tasks/demo');
+  const onFinish = async (values) => {
+    // 接后端：按表单创建真实任务（品类决定洞察数据源，见 get_insights）
+    const brief = {
+      theme: values.theme,
+      category: values.category,
+      market: values.market || DEMO_BRIEF.market,
+      audience: values.audience || '',
+      price_range: [values.priceMin ?? DEMO_BRIEF.priceRange[0], values.priceMax ?? DEMO_BRIEF.priceRange[1]],
+      cost_limit: values.costLimit ?? DEMO_BRIEF.costLimit,
+      ip_strategy: values.ipStrategy || [],
+      launch_window: values.launchWindow || '',
+      goals: values.goals || [],
+    };
+    message.loading({ content: '正在创建企划…', key: 'create' });
+    const res = await createPlan(brief);
+    if (res && res.plan_id) {
+      message.success({ content: '企划已创建，进入洞察', key: 'create' });
+      nav(`/tasks/${res.plan_id}`);
+    } else {
+      message.error({ content: '创建失败：后端可能不在线', key: 'create' });
+    }
   };
 
   return (
@@ -32,7 +50,7 @@ export default function NewPlan() {
           <Input placeholder="如 2027夏季户外生活系列" />
         </Form.Item>
         <Form.Item label="品类" name="category" rules={[{ required: true, message: '必填' }]}>
-          <Select options={['小风扇', '保温杯', '香薰', '桌面摆件'].map(c => ({ value: c, label: c }))} />
+          <Select options={['小风扇', '保温杯', '香薰', '桌面摆件', '雨伞', '冰袖'].map(c => ({ value: c, label: c }))} />
         </Form.Item>
         <Form.Item label="目标市场" name="market">
           <Select options={['中国大陆', '东南亚', '日本', '欧美'].map(m => ({ value: m, label: m }))} />
