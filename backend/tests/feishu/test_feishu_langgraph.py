@@ -14,7 +14,6 @@ import asyncio
 import time
 
 import pytest
-
 from feishu.cards import build_committee_card
 from feishu.handler import MessageHandler
 from feishu.webhook import is_event_processed

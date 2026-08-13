@@ -20,6 +20,9 @@ from app.xhs.api import router as xhs_router
 from feishu import FeishuConfig
 from feishu.webhook import create_feishu_router
 
+from app.api.planning import router as planning_router
+from app.api.routes import router as committee_router
+
 app = FastAPI(
     title="SKU Hunters — AI 新品企划工作室",
     description="名创优品 AI 驱动的产品开发智能决策引擎",

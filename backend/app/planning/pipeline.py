@@ -19,7 +19,6 @@ LLM 是增强层——mode="live" 时走真实调用，失败自动降级回 fix
 from __future__ import annotations
 
 import json
-import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -96,7 +95,8 @@ def _now() -> str:
 
 def create_plan(brief: dict[str, Any]) -> dict[str, Any]:
     """① 企划约束：冻结人工输入，经 PlanBrief schema 校验后建档"""
-    validated = PlanBrief.model_validate(brief)
+    # 先归一化键名（前端/DEMO_BRIEF 是 camelCase，PlanBrief 无别名会静默丢字段）
+    validated = PlanBrief.model_validate(_snake_keys(brief))
     plan_id = f"plan_{datetime.now(timezone.utc):%Y%m%d}_{uuid.uuid4().hex[:4]}"
     plan = {
         "plan_id": plan_id,
@@ -234,6 +234,16 @@ def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, A
     # 成本校验（CostCheck schema → pydantic 保证算术一致性）
     check = cost_check(template, cost_limit)
 
+    # 思考过程呈现（导师专项意见）：模板冻结的创意/策略推理 +
+    # 末行成本校验为管线实时计算结果（真管线：数字随约束输入变化）
+    process_log = list(template.get("strategyLog", []))
+    if check.price is not None:
+        process_log.append(
+            f"成本校验：定价 {check.price:g} 元 / 成本上限 {check.cost_limit:g} 元 → {check.reason}"
+        )
+    else:
+        process_log.append(f"成本校验：{check.reason}")
+
     # ── 组装企划卡（camelCase，与前端契约一致）──
     card = {
         "name": template["name"],
@@ -246,6 +256,7 @@ def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, A
         "pricing": template["pricing"],
         "schedule": template["schedule"],
         "validation": template["validation"],
+        "processLog": process_log,
         "costCheck": check.model_dump(),
         "opportunityId": opportunity_id,
         "source": "fixture" if plan["mode"] == "fixture" else "live",
@@ -304,7 +315,11 @@ def revise_plan(plan: dict[str, Any], message: str) -> dict[str, Any]:
 # ── 归档 ───────────────────────────────────────────────────
 
 def archive_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    """复盘归档：企划卡定稿后归档入历史库（归档不是封存，后续可复盘追问）"""
+    """复盘归档：企划卡定稿后归档入历史库（归档不是封存，后续可复盘追问）
+
+    飞书同步（多维表格 + 通知卡片）由 API 层挂 BackgroundTasks 执行，
+    归档响应不等飞书（见 api/planning.py _run_archive_hooks）。
+    """
     if plan.get("plan_card") is None:
         raise ValueError("企划卡尚未生成，不能归档")
     plan["status"] = "archived"
@@ -321,13 +336,19 @@ def seed_demo() -> None:
         return
 
     saved = _load_state()
-    if "demo" in saved:
-        _PLANS["demo"] = saved["demo"]
-        return
+    if saved:
+        # 恢复全部持久化任务（不只是 demo）——否则重启后 Aily 创建的任务 404
+        # 旧状态文件 brief 可能是 camelCase，恢复时统一归一化为 snake_case
+        for p in saved.values():
+            p["brief"] = PlanBrief.model_validate(_snake_keys(p.get("brief") or {})).model_dump()
+        _PLANS.update(saved)
+        if "demo" in _PLANS:
+            return
 
     _PLANS["demo"] = {
         "plan_id": "demo",
-        "brief": fixtures.DEMO_BRIEF,
+        # 与 create_plan 同路径归一化：camelCase fixtures → snake_case brief
+        "brief": PlanBrief.model_validate(_snake_keys(fixtures.DEMO_BRIEF)).model_dump(),
         "mode": "fixture",
         "created_at": _now(),
         "status": "brief_locked",

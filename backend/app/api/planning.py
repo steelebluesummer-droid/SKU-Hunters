@@ -18,12 +18,16 @@ brief 传 mode="live" 走真实 LLM + 即梦出图（失败自动降级）。
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import ValidationError
 
 from app.planning import fixtures, pipeline
 from app.schemas.planning import PlanBrief
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["planning"])
 
@@ -41,11 +45,42 @@ async def create_plan(payload: dict):
     # PlanBrief schema 校验（pydantic 保证必填字段 + 类型检查）
     try:
         PlanBrief.model_validate(brief)
-    except Exception as e:
-        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}})
+    except ValidationError as e:
+        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}}) from e
     plan = pipeline.create_plan(brief)
     return {"plan_id": plan["plan_id"], "status": plan["status"]}
 
+
+def _run_aily_flow(plan: dict[str, Any]) -> None:
+    """Aily 发起后的后台流程：五看洞察 → 机会卡 → 推飞书卡片
+
+    Aily 插件调用有超时限制（10-30s），不能同步等 pipeline，
+    跑完由后端主动推消息（fail-soft，推送失败不影响任务状态）。
+    """
+    try:
+        pipeline.get_insights(plan)
+        opportunities = pipeline.get_opportunities(plan)
+        from feishu.notify import notify_opportunities_ready
+        notify_opportunities_ready(plan, opportunities)
+    except Exception:
+        logger.exception("Aily 后台流程异常，plan_id=%s", plan.get("plan_id"))
+
+
+@router.post("/plans/aily-create", status_code=202)
+async def aily_create_plan(payload: dict, background_tasks: BackgroundTasks):
+    """Aily 轻入口：对话收集 PlanBrief → 立即返回，后台跑 pipeline
+
+    入参与 POST /plans 一致（PlanBrief 字段），出参立即返回 plan_id；
+    机会卡生成后推送飞书消息卡片（摘要 + 跳转前端选定方向）。
+    """
+    brief = payload.get("brief") or payload  # 兼容直接传 brief
+    try:
+        PlanBrief.model_validate(brief)
+    except ValidationError as e:
+        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}}) from e
+    plan = pipeline.create_plan(brief)
+    background_tasks.add_task(_run_aily_flow, plan)
+    return {"plan_id": plan["plan_id"], "status": "running"}
 
 @router.get("/plans")
 async def list_plans():
@@ -75,7 +110,11 @@ async def get_insights(plan_id: str):
 @router.get("/plans/{plan_id}/opportunities")
 async def get_opportunities(plan_id: str):
     plan = _get_plan_or_404(plan_id)
-    return {"plan_id": plan_id, "opportunities": pipeline.get_opportunities(plan)}
+    return {
+        "plan_id": plan_id,
+        "opportunities": pipeline.get_opportunities(plan),
+        "processLog": fixtures.OPPORTUNITY_LOG,  # 机会生成思考过程（导师专项：呈现推理过程）
+    }
 
 
 @router.post("/plans/{plan_id}/plan-card")
@@ -101,13 +140,31 @@ async def revise_plan(plan_id: str, payload: dict):
     return {"plan_id": plan_id, **pipeline.revise_plan(plan, message)}
 
 
+def _run_archive_hooks(plan: dict[str, Any]) -> None:
+    """归档后的飞书同步：①写入多维表格（企划资产库）②推归档卡片到通知群
+
+    挂后台执行，归档响应不等飞书（演示现场不转圈）；
+    fail-soft：任一失败只记日志，归档本身已落盘。
+    """
+    try:
+        from feishu.bitable_sync import sync_plan_to_bitable
+        from feishu.notify import notify_plan_archived
+        sync_plan_to_bitable(plan)
+        notify_plan_archived(plan)
+    except Exception:
+        logger.exception("归档后飞书同步异常（归档本身不受影响），plan_id=%s",
+                         plan.get("plan_id"))
+
+
 @router.post("/plans/{plan_id}/archive")
-async def archive_plan(plan_id: str):
+async def archive_plan(plan_id: str, background_tasks: BackgroundTasks):
     plan = _get_plan_or_404(plan_id)
     try:
         pipeline.archive_plan(plan)
     except ValueError as e:
         raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": str(e)}})
+    # 事件驱动同步挪后台：归档立即返回，多维表格写入 + 卡片推送随后执行
+    background_tasks.add_task(_run_archive_hooks, plan)
     return {"plan_id": plan_id, "status": plan["status"], "archived_at": plan["archived_at"]}
 
 

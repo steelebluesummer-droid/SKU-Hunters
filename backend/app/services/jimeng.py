@@ -49,7 +49,7 @@ def _sign(key: bytes, msg: str) -> bytes:
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
 
-def _signed_request(ak: str, sk: str, action: str, body: dict) -> "object":
+def _signed_request(ak: str, sk: str, action: str, body: dict) -> object:
     """构造签名后的 POST 请求对象（httpx.Request），调用方负责发送"""
     import httpx
 

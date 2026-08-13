@@ -37,6 +37,7 @@ class FeishuAuth:
                 "app_id": self.config.app_id,
                 "app_secret": self.config.app_secret,
             },
+            timeout=10,  # 防止飞书挂死时请求方被无限拖住
         )
         data = resp.json()
         if data.get("code") != 0:

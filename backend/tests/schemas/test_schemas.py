@@ -5,8 +5,6 @@
 """
 
 import pytest
-from pydantic import ValidationError
-
 from app.schemas import (
     Confidence,
     DimensionScore,
@@ -16,6 +14,7 @@ from app.schemas import (
     SourceRef,
     Weights,
 )
+from pydantic import ValidationError
 
 
 def _make_dims() -> list[DimensionScore]:

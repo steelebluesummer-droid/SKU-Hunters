@@ -1,160 +1,189 @@
-# 飞书 AI 功能使用指南
+# 飞书 AI 联动方案（v2 · AI 新品企划工作室）
 
-本指南说明如何在 SKU Hunters 项目中利用飞书 AI 能力，提升开发效率和产品价值。
+> 本文档替代 v1 评审会口径。v1 中的"七委员圆桌""Aily 编排委员会流程"等内容已废弃，
+> 现有编排逻辑在 LangGraph pipeline 中实现（`backend/app/planning/pipeline.py`），飞书侧不重复建设。
+> 字段事实以 `backend/app/schemas/planning.py` 与 `backend/app/api/planning.py` 为准。
 
-## 一、飞书 AI 能力全景
+## 一、核心定位
 
-| 能力 | 用途 | 在本项目中的角色 |
-|:---|:---|:---|
-| **企业豆包（AI 助手）** | 智能问答、内容生成、代码辅助 | Agent 推理引擎、报告生成、方案撰写 |
-| **飞书 Aily（智能体平台）** | 可视化创建 AI 业务流程 | 商品委员会工作流编排、审批流程 |
-| **多维表格智能体** | 数据驱动的自动化分析 | 商品数据查询、进度同步、实时看板 |
-| **妙记（会议纪要）** | 语音转文字 + AI 摘要 | 团队周会记录、需求评审纪要 |
-| **飞书知识库** | 企业知识管理 + RAG 检索 | 知识底座：存储商品知识、IP信息、历史数据 |
-| **飞书妙搭（低代码）** | 快速搭建业务应用 | 商品立项 Dashboard、数据分析看板 |
+**前端是生产车间，飞书是传达室 + 档案室。**
 
-## 二、核心功能详解
+六步链路（约束 → 五看洞察 → 机会卡 → 创意 → 策略 → 企划卡）全部在前端深度生产，
+飞书只负责三件事：**发起、告知、存档**。
 
-### 2.1 企业豆包 — Agent 推理引擎
+> 一句话：企划在工作室里深度生产，在飞书里轻量流转——
+> AI 负责把方案做到 80 分，组织在飞书里完成剩下的 20 分和所有留痕。
 
-**定位**：作为 AI 商品委员会 7 个 Agent 的核心推理引擎。
+## 二、四个飞书产品的角色边界
 
-**使用方式**：
+### 2.1 企业豆包 → 模型供给层（后置，不占前端界面）
 
-```python
-# 通过飞书开放 API 调用企业豆包
-import requests
+- 后端已有 LLM 供应商抽象（`backend/.env.example` 预置 deepseek / moonshot），
+  豆包（火山引擎方舟）是同一位置的可替换 provider
+- 价值在叙事：名创落地时跑在字节系合规底座上顺理成章
+- **当前阶段不实现**，LLM 抽象层预留 provider 接口位即可
+- 前端不出现任何"豆包对话窗"，避免与六步链路抢交互
 
-FEISHU_APP_ID = "your_app_id"
-FEISHU_APP_SECRET = "your_app_secret"
+### 2.2 飞书 Aily → 轻入口（只做发起，不做查询）
 
-def get_tenant_token():
-    """获取飞书 tenant_access_token"""
-    url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-    resp = requests.post(url, json={
-        "app_id": FEISHU_APP_ID,
-        "app_secret": FEISHU_APP_SECRET
-    })
-    return resp.json().get("tenant_access_token")
+**职责：**
+- 对话式收集 PlanBrief 字段，调后端 `POST /api/v1/plans`（`api/planning.py:38`）触发企划 pipeline
+- pipeline 完成后，由**后端**推送飞书消息卡片（Aily 不负责回调）
 
-def call_agent_llm(prompt: str, agent_role: str) -> str:
-    """调用企业豆包进行 Agent 推理"""
-    token = get_tenant_token()
-    url = "https://open.feishu.cn/open-apis/ai/llm/completions"
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    system_prompt = f"你是一名{agent_role}，请基于以下信息进行分析..."
-    
-    resp = requests.post(url, json={
-        "prompt": prompt,
-        "system_prompt": system_prompt,
-        "temperature": 0.3,
-        "stream": False
-    }, headers=headers)
-    return resp.json().get("choices", [{}])[0].get("text", "")
+**不做：**
+- 五看洞察驾驶舱、机会卡对比、企划卡改稿等深度交互 → 跳回前端
+- "小风扇那版改到第几版了"等事后查询 → 一期不实现
+
+**PlanBrief 字段清单（以 `schemas/planning.py:20-32` 为准）：**
+
+| 字段 | 必填 | 默认值 / 说明 |
+|------|------|--------------|
+| theme 企划主题 | ✅ | — |
+| category 品类 | ✅ | — |
+| market 目标市场 | ❌ | 默认"中国大陆" |
+| audience 目标人群 | ❌ | — |
+| price_range 价格带 | ❌ | 默认 [39, 99]（元） |
+| cost_limit 成本上限 | ❌ | 默认 25 元，商品策略校验回环用（注意是成本上限，非预算上限） |
+| ip_strategy IP 策略 | ❌ | 列表，如 ["三丽鸥"] |
+| launch_window 上新窗口 | ❌ | — |
+| goals 商业目标 | ❌ | 列表 |
+| mode | 🔒 | 系统字段（fixture/live），Aily 不暴露，由后端控制 |
+
+无"渠道"字段，Aily 脚本不要设计该 slot。
+
+**对话模式：** 2 个必填 slot 先收，7 个可选 slot 带默认值、可渐进追问。
+用户说"帮我做个 2027 夏季小风扇企划，价格带 39-99"即可触发，缺的字段用默认值。
+
+### 2.3 多维表格 → 企划资产库（副本，事件驱动同步）
+
+**定位：** 面向组织的历史企划资产视图，不是主存储。
+前端主存储为后端任务状态（`pipeline.py` JSON 持久化），多维表格是副本，供检索、复用、统计。
+
+**同步机制：** 事件驱动，不是定时任务。
+- 前端点"归档"→ `POST /api/v1/plans/{plan_id}/archive`（`api/planning.py:104`）
+  → `archive_plan()`（`pipeline.py:306`）置 `status="archived"` + `archived_at`
+- 钩子在此时触发：将该任务同步写入多维表格，新增一行
+- 归档动作本身是手动的，演示时点"归档"即可看到飞书侧实时出现新行，无需定时器
+
+**表结构（一期，字段来源已核实）：**
+
+| 多维表格字段 | 来源 | 说明 |
+|-------------|------|------|
+| plan_id | pipeline 任务字典 | 唯一标识（注意：不在 PlanCard schema 上） |
+| theme | PlanBrief.theme | 企划主题 |
+| category | PlanBrief.category | 品类 |
+| market | PlanBrief.market | 目标市场 |
+| price_range | PlanBrief.price_range | 价格带 |
+| ip_strategy | PlanBrief.ip_strategy | IP 策略 |
+| launch_window | PlanBrief.launch_window | 上新窗口 |
+| concept | PlanCard.concept | 核心概念 |
+| pricing | PlanCard.pricing | 嵌套对象，拍平：`price`（如 "59 元"）+ `reason` 两列 |
+| schedule | PlanCard.schedule | 嵌套列表，拍平为多行文本（每行 `time action`） |
+| status | pipeline 任务字典 | 固定为 "archived" |
+| archived_at | pipeline 任务字典 | 归档时间 |
+| source_plan_id | PlanCard.source_plan_id | 复用来源（基于哪张归档卡），空为原创 |
+| 过会纪要 | 智能纪要回写 | 见 2.4 |
+
+**复用率视图（一期，多维表格内分组/透视零代码配置）：**
+- 按 category 统计历史企划卡数量（分组计数）
+- 按 archived_at 统计归档时间分布（按月/季度）
+- 被引用次数：按 source_plan_id 分组计数，统计每张归档卡被多少后续企划复用
+
+**一期配套开发项（否则被引用次数全为 0）：**
+- `POST /api/v1/plans` 的 brief 增加可选 `source_plan_id` 参数
+  （`create_plan()` 在 `pipeline.py:97`，组装 PlanCard 时透传到 `source_plan_id`）
+- 前端/Aily 发起企划时支持选填"基于哪张归档卡"
+
+### 2.4 智能纪要 → 人机接力留痕（手动关联）
+
+**叙事：** AI 产出企划卡初稿 → 人类团队在飞书开短会过卡 →
+智能纪要记录讨论 → 回挂到该企划卡在多维表格的档案（"过会纪要"字段）
+→ 下次做类似品类时 AI 可参考历史过会意见（归档不是封存，`archive_plan` 后仍可复盘追问）。
+
+**关联方式（一期，手动）：**
+- 会议命名规范：`【{theme}】{category}企划过会`
+  - 示例：`【2027夏季户外生活系列】小风扇企划过会`
+- 后端定时拉取妙记列表，正则匹配 theme 关键词
+- 匹配成功后，将纪要摘要写入对应多维表格行的"过会纪要"字段
+
+**注意：**
+- 现有系统无企划卡编号规则（只有 plan_id，预置演示任务 id 为 "demo"），
+  命名不使用虚构编号，锚定 theme + category
+- 纪要回写需飞书妙记读取权限，企业落地时需管理员授权
+- 演示用提前准备好一场命名规范的会议 + 已回写的纪要
+
+## 三、前端与飞书的分工原则（不拥挤）
+
+1. **六步链路一步都不进飞书**——生产动作全部在前端，飞书没有任何环节是"做企划"
+2. **每个产出物一个主存储地**：
+   - 企划卡全文主在前端，飞书消息只推三行摘要 + 跳转按钮
+   - 历史企划库主在多维表格，前端任务中心只列"我发起的"
+3. **Aily 只做一句话能说完的事**——凡是需要看图、对比、改稿的，一律链接跳回前端
+4. **AI 入口收起来**：企业豆包/Aily 不占主布局，通过飞书侧入口或前端悬浮按钮触发
+
+## 四、关键链路时序
+
+### 4.1 Aily 发起企划 → pipeline 异步执行 → 飞书消息回调
+
+```
+用户（飞书Aily）  后端              飞书IM
+    |              |                 |
+    |--收集字段-->|                 |
+    |              |--POST /plans----|
+    |              |  (创建任务)      |
+    |<--"已开始"--|                 |
+    |              |                 |
+    |         pipeline执行(六步链路)  |
+    |              |                 |
+    |              |--推送消息卡片---->|
+    |              |   (摘要+跳转前端) |
+    |<--点击卡片跳转前端--------------|
 ```
 
-**场景示例**：
-- 趋势官：调用豆包分析 TikTok 趋势数据，生成趋势报告
-- 商业官：调用豆包评估商品机会值，输出五维评分
-- 创意官：调用豆包综合多方输入，生成商品创意方案
+注意：pipeline 完成后的消息推送由**后端主动调飞书 API**，不是 Aily 回调。
+Aily 插件调用有超时限制（10-30s），无法同步等待 pipeline 完成。
 
-### 2.2 飞书 Aily — 可视化工作流编排
+### 4.2 企划卡归档 → 多维表格同步
 
-**定位**：将 AI 商品委员会的协作流程可视化，无需编写复杂编排代码。
-
-**使用步骤**：
-
-1. **创建智能体**：在飞书 Aily 平台创建一个新的智能体
-2. **定义流程**：拖拽式搭建商品委员会工作流
-   ```
-   [趋势数据输入] → [趋势官分析] → [用户官分析] → [IP官分析]
-        ↓
-   [创意官综合] → [商业官评估] → [全球化官评估]
-        ↓
-   [Decision Engine] → [立项建议书输出]
-   ```
-3. **配置 Agent**：每个节点绑定企业豆包，配置角色提示词
-4. **发布使用**：将智能体发布到飞书工作台，商品经理可直接使用
-
-**价值**：降低技术门槛，商品经理可直接在工作流中调整 Agent 参数。
-
-### 2.3 多维表格智能体 — 商品数据看板
-
-**定位**：实时商品数据查询与进度同步。
-
-**使用方式**：
-
-1. 创建"商品立项"多维表格，包含字段：
-   - 商品名称、品类、目标市场、机会值评分
-   - 推荐等级、状态（待评审/已通过/已打样/已上市）
-   - 各 Agent 分析摘要、证据链接
-2. 配置智能体：当状态变更时，自动触发通知
-3. 进群协作：将多维表格智能体拉入项目群，可通过自然语言查询
-   - "帮我查一下当前机会值80分以上的商品有哪些"
-   - "泰国市场最近评审通过了几款商品"
-
-### 2.4 飞书知识库 — RAG 知识底座
-
-**定位**：存储历史商品数据、IP 信息、市场报告，供 Agent 检索。
-
-**使用方式**：
-
-```python
-# 通过飞书开放 API 搜索知识库
-def search_knowledge_base(query: str, page_size: int = 10) -> list:
-    """搜索飞书知识库"""
-    token = get_tenant_token()
-    url = "https://open.feishu.cn/open-apis/wiki/v2/search"
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    resp = requests.post(url, json={
-        "query": query,
-        "page_size": page_size
-    }, headers=headers)
-    return resp.json().get("items", [])
+```
+用户（前端）      后端             多维表格
+    |--归档-->POST /plans/{id}/archive
+    |           status="archived"
+    |           archived_at=now
+    |              |--钩子同步------>|
+    |              |   新增一行     |
+    |<--归档成功--|                 |
 ```
 
-**知识库内容建议**：
-- 名创优品历史爆品案例库
-- IP 合作信息与授权库
-- 各国市场消费偏好报告
-- 商品开发 SOP 文档
+### 4.3 智能纪要回写
 
-## 三、开发环境配置
-
-### 3.1 获取飞书开发者凭证
-
-1. 访问 [飞书开放平台](https://open.feishu.cn/)
-2. 创建企业自建应用 → 获取 App ID 和 App Secret
-3. 开启所需权限：
-   - 智能助手：`ai.llm`
-   - 知识库：`wiki:wiki`
-   - 多维表格：`bitable:app`
-   - 云文档：`docx:document`
-
-### 3.2 环境变量配置
-
-```bash
-# .env 文件
-FEISHU_APP_ID=cli_xxxxxxxxxxxx
-FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
-FEISHU_KNOWLEDGE_BASE_ID=xxxxx
+```
+飞书会议(录制)   后端(定时任务)     多维表格
+    |--生成妙记-->|                 |
+    |           拉取妙记列表        |
+    |           正则匹配theme       |
+    |              |--写入"过会纪要"->|
 ```
 
-## 四、在比赛方案中的展示建议
+## 五、实施优先级
 
-### 方案文档中需体现的内容
+| 优先级 | 模块 | 说明 |
+|--------|------|------|
+| P0 | 多维表格资产库（事件驱动同步） | 最硬的联动点，看得见摸得着 |
+| P0 | Aily 发起企划（异步链路） | 入口直观，评委可互动 |
+| P1 | 创建企划支持 source_plan_id（API + 前端选填） | 复用率统计的数据来源 |
+| P1 | 智能纪要手动关联回写 | 叙事最亮，可用 mock 演示 |
+| P1 | 多维表格复用率视图（品类计数 + 归档分布 + 被引用次数） | 零代码配置，演示加分 |
+| P2 | 企业豆包 provider | 后置，只留接口位 |
+| P2 | Aily 事后查询 | 一期不实现 |
 
-| 飞书能力 | 展示方式 | 建议截图/演示 |
-|:---|:---|:---|
-| 企业豆包 | Agent 推理过程截图 | 展示 Agent 调用豆包生成分析的过程 |
-| Aily 工作流 | 商品委员会工作流拓扑图 | 拖拽式流程编排截图 |
-| 多维表格 | 商品立项看板 | 多维表格展示商品状态流转 |
-| 知识库 | RAG 检索效果 | 知识库中存储的商品数据截图 |
+## 六、与 v1 的主要差异
 
-### 加分项
-
-- 演示视频中包含飞书 AI 功能实际操作
-- 展示多维表格智能体与群聊的交互过程
-- 展示 Aily 工作流编排的灵活性和可调整性
+| 维度 | v1（已废弃） | v2（当前） |
+|------|-------------|-----------|
+| 核心场景 | 七委员评审会圆桌 | AI 新品企划工作室六步链路 |
+| Aily 角色 | 编排委员会工作流 | 轻入口，只做发起 |
+| 编排实现 | Aily 拖拽编排 | LangGraph pipeline（后端） |
+| 多维表格 | 未明确 | 企划资产库，事件驱动同步 |
+| 智能纪要 | AI 开会记录 | 人机接力留痕，手动关联 |
+| 妙搭 | 管理后台 | 不使用 |

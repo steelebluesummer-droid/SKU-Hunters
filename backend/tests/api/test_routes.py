@@ -6,10 +6,9 @@
 import time
 
 import pytest
+from app.api.routes import router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from app.api.routes import router
 
 app = FastAPI()
 app.include_router(router)

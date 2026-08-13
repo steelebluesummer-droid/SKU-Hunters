@@ -10,10 +10,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
-
 
 # ══════════════════  ① 企划约束  ══════════════════
 
@@ -264,9 +261,11 @@ class PlanCard(BaseModel):
     pricing: PricingInfo = Field(default_factory=PricingInfo)
     schedule: list[ScheduleItem] = Field(default_factory=list)
     validation: list[str] = Field(default_factory=list)  # 上市验证指标
+    process_log: list[str] = Field(default_factory=list)  # 创意/商品策略思考过程（导师专项：呈现推理过程）
     cost_check: CostCheck | None = None
     opportunity_id: str = ""
     source: str = "fixture"      # fixture | live
+    source_plan_id: str = ""     # 复用来源：基于哪张归档企划卡做的企划（plan_id），空为原创
 
 
 # ══════════════════  数据看板  ══════════════════
