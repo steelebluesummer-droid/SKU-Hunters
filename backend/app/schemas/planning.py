@@ -264,6 +264,7 @@ class PlanCard(BaseModel):
     pricing: PricingInfo = Field(default_factory=PricingInfo)
     schedule: list[ScheduleItem] = Field(default_factory=list)
     validation: list[str] = Field(default_factory=list)  # 上市验证指标
+    process_log: list[str] = Field(default_factory=list)  # 创意/商品策略思考过程（导师专项：呈现推理过程）
     cost_check: CostCheck | None = None
     opportunity_id: str = ""
     source: str = "fixture"      # fixture | live

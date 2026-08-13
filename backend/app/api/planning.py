@@ -109,7 +109,11 @@ async def get_insights(plan_id: str):
 @router.get("/plans/{plan_id}/opportunities")
 async def get_opportunities(plan_id: str):
     plan = _get_plan_or_404(plan_id)
-    return {"plan_id": plan_id, "opportunities": pipeline.get_opportunities(plan)}
+    return {
+        "plan_id": plan_id,
+        "opportunities": pipeline.get_opportunities(plan),
+        "processLog": fixtures.OPPORTUNITY_LOG,  # 机会生成思考过程（导师专项：呈现推理过程）
+    }
 
 
 @router.post("/plans/{plan_id}/plan-card")

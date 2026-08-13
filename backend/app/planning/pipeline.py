@@ -235,6 +235,16 @@ def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, A
     # 成本校验（CostCheck schema → pydantic 保证算术一致性）
     check = cost_check(template, cost_limit)
 
+    # 思考过程呈现（导师专项意见）：模板冻结的创意/策略推理 +
+    # 末行成本校验为管线实时计算结果（真管线：数字随约束输入变化）
+    process_log = list(template.get("strategyLog", []))
+    if check.price is not None:
+        process_log.append(
+            f"成本校验：定价 {check.price:g} 元 / 成本上限 {check.cost_limit:g} 元 → {check.reason}"
+        )
+    else:
+        process_log.append(f"成本校验：{check.reason}")
+
     # ── 组装企划卡（camelCase，与前端契约一致）──
     card = {
         "name": template["name"],
@@ -247,6 +257,7 @@ def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, A
         "pricing": template["pricing"],
         "schedule": template["schedule"],
         "validation": template["validation"],
+        "processLog": process_log,
         "costCheck": check.model_dump(),
         "opportunityId": opportunity_id,
         "source": "fixture" if plan["mode"] == "fixture" else "live",

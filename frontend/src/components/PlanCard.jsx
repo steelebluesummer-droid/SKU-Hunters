@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { Card, Row, Col, Tag, Timeline, Input, Button, List, Spin, Space } from 'antd';
 import { SendOutlined, LoadingOutlined } from '@ant-design/icons';
+import ProcessLog from './ProcessLog';
 import { PLAN_TEMPLATES, OPPORTUNITIES, DEMO_BRIEF } from '../mock/fanData';
 import { generatePlanCard, revisePlan } from '../api';
 
@@ -20,22 +21,25 @@ const QUICK_SUGGESTIONS = [
 ];
 
 /** 新品企划卡：创意设计 + 商品策略 + 对话式改稿 */
-export default function PlanCard({ opportunityId, existingCard, planId = 'demo' }) {
+export default function PlanCard({ opportunityId, existingCard, planId = 'demo', brief = DEMO_BRIEF }) {
   const opp = OPPORTUNITIES.find(o => o.id === opportunityId);
   const [plan, setPlan] = useState(existingCard || PLAN_TEMPLATES[opportunityId]);
   const [chats, setChats] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [logDone, setLogDone] = useState(false);
   const chatEnd = useRef(null);
 
   useEffect(() => {
     // 已有企划卡数据（归档后回看 / 恢复进度）→ 直接展示，不重新生成
     if (existingCard) {
       setPlan(existingCard);
+      setLogDone(false);
       return;
     }
     setPlan(PLAN_TEMPLATES[opportunityId]);
     setChats([]);
+    setLogDone(false);
     generatePlanCard(opportunityId, planId).then(card => { if (card) setPlan(card); });
   }, [opportunityId, existingCard, planId]);
 
@@ -58,10 +62,18 @@ export default function PlanCard({ opportunityId, existingCard, planId = 'demo' 
 
   return (
     <div>
+      {/* ═══ 创意设计 + 商品策略 · 思考过程（导师专项：呈现推理过程）═══ */}
+      {plan.processLog && (
+        <Card size="small" title="企划生成 · 思考过程" style={{ marginBottom: 16, background: '#f6f3ff', border: '1px solid #d9ccff' }}>
+          <ProcessLog key={opportunityId} lines={plan.processLog} onDone={() => setLogDone(true)} />
+        </Card>
+      )}
+
       {/* ═══ 企划卡主体 ═══ */}
+      <div style={{ opacity: !plan.processLog || logDone ? 1 : 0, transition: 'opacity 0.5s', pointerEvents: !plan.processLog || logDone ? 'auto' : 'none' }}>
       <Card>
         <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
-          {DEMO_BRIEF.theme} · {DEMO_BRIEF.category} · 价格带 {DEMO_BRIEF.priceRange[0]}-{DEMO_BRIEF.priceRange[1]} 元 · 成本 ≤{DEMO_BRIEF.costLimit} 元
+          {brief.theme} · {brief.category} · 价格带 {brief.priceRange[0]}-{brief.priceRange[1]} 元 · 成本 ≤{brief.costLimit} 元
         </div>
         <h1 style={{ margin: '0 0 4px' }}>{opp?.emoji} {plan.name}</h1>
         <p style={{ color: '#666' }}>{plan.concept}</p>
@@ -118,6 +130,7 @@ export default function PlanCard({ opportunityId, existingCard, planId = 'demo' 
           </Col>
         </Row>
       </Card>
+      </div>
 
       {/* ═══ 改稿沟通 ═══ */}
       <Card title="💬 改稿沟通" size="small" style={{ marginTop: 16 }}>

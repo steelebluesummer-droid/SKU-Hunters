@@ -1,10 +1,18 @@
+import { useState } from 'react';
 import { Card, Row, Col, Tag, Popover, Button } from 'antd';
-import { OPPORTUNITIES } from '../mock/fanData';
+import ProcessLog from './ProcessLog';
+import { OPPORTUNITIES, OPPORTUNITY_LOG } from '../mock/fanData';
 
 // 机会生成：3 张方向卡，每张挂依据链（可回溯洞察），人选定 1 张进入企划生成
+// 思考过程（导师专项意见）：先逐行呈现推理过程，日志跑完后方向卡淡入
 export default function OpportunityCards({ selected, onSelect }) {
+  const [logDone, setLogDone] = useState(false);
   return (
     <div>
+      <Card size="small" title="机会生成 · 思考过程" style={{ marginBottom: 16, background: '#f6f3ff', border: '1px solid #d9ccff' }}>
+        <ProcessLog lines={OPPORTUNITY_LOG} onDone={() => setLogDone(true)} />
+      </Card>
+      <div style={{ opacity: logDone ? 1 : 0, transition: 'opacity 0.5s', pointerEvents: logDone ? 'auto' : 'none' }}>
       <Card size="small" style={{ marginBottom: 16, background: '#f6f3ff', border: '1px solid #d9ccff' }}>
         <b style={{ color: '#7a5fd0' }}>机会生成：</b>
         综合趋势信号 ×4、用户痛点 ×4、竞品空白 ×1、名创资产与流行元素，收敛出 3 个方向——每个方向的依据可点击回溯。
@@ -40,6 +48,7 @@ export default function OpportunityCards({ selected, onSelect }) {
           </Col>
         ))}
       </Row>
+      </div>
     </div>
   );
 }
