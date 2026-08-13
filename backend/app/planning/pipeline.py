@@ -31,7 +31,7 @@ from app.planning.cost_rules import (  # noqa: F401
     cost_check,
 )
 
-# 洞察解析
+# 洞察解析（包含远端 8ed47ed 的具体异常捕获实现）
 from app.planning.insight_resolver import (  # noqa: F401
     _load_heat_curve,
     _resolve_insight_bundle,
