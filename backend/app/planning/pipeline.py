@@ -96,7 +96,8 @@ def _now() -> str:
 
 def create_plan(brief: dict[str, Any]) -> dict[str, Any]:
     """① 企划约束：冻结人工输入，经 PlanBrief schema 校验后建档"""
-    validated = PlanBrief.model_validate(brief)
+    # 先归一化键名（前端/DEMO_BRIEF 是 camelCase，PlanBrief 无别名会静默丢字段）
+    validated = PlanBrief.model_validate(_snake_keys(brief))
     plan_id = f"plan_{datetime.now(timezone.utc):%Y%m%d}_{uuid.uuid4().hex[:4]}"
     plan = {
         "plan_id": plan_id,
@@ -304,7 +305,11 @@ def revise_plan(plan: dict[str, Any], message: str) -> dict[str, Any]:
 # ── 归档 ───────────────────────────────────────────────────
 
 def archive_plan(plan: dict[str, Any]) -> dict[str, Any]:
-    """复盘归档：企划卡定稿后归档入历史库（归档不是封存，后续可复盘追问）"""
+    """复盘归档：企划卡定稿后归档入历史库（归档不是封存，后续可复盘追问）
+
+    飞书同步（多维表格 + 通知卡片）由 API 层挂 BackgroundTasks 执行，
+    归档响应不等飞书（见 api/planning.py _run_archive_hooks）。
+    """
     if plan.get("plan_card") is None:
         raise ValueError("企划卡尚未生成，不能归档")
     plan["status"] = "archived"
@@ -321,13 +326,19 @@ def seed_demo() -> None:
         return
 
     saved = _load_state()
-    if "demo" in saved:
-        _PLANS["demo"] = saved["demo"]
-        return
+    if saved:
+        # 恢复全部持久化任务（不只是 demo）——否则重启后 Aily 创建的任务 404
+        # 旧状态文件 brief 可能是 camelCase，恢复时统一归一化为 snake_case
+        for p in saved.values():
+            p["brief"] = PlanBrief.model_validate(_snake_keys(p.get("brief") or {})).model_dump()
+        _PLANS.update(saved)
+        if "demo" in _PLANS:
+            return
 
     _PLANS["demo"] = {
         "plan_id": "demo",
-        "brief": fixtures.DEMO_BRIEF,
+        # 与 create_plan 同路径归一化：camelCase fixtures → snake_case brief
+        "brief": PlanBrief.model_validate(_snake_keys(fixtures.DEMO_BRIEF)).model_dump(),
         "mode": "fixture",
         "created_at": _now(),
         "status": "brief_locked",

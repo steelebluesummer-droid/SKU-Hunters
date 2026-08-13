@@ -267,6 +267,7 @@ class PlanCard(BaseModel):
     cost_check: CostCheck | None = None
     opportunity_id: str = ""
     source: str = "fixture"      # fixture | live
+    source_plan_id: str = ""     # 复用来源：基于哪张归档企划卡做的企划（plan_id），空为原创
 
 
 # ══════════════════  数据看板  ══════════════════

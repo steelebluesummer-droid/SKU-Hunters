@@ -20,7 +20,7 @@ const QUICK_SUGGESTIONS = [
 ];
 
 /** 新品企划卡：创意设计 + 商品策略 + 对话式改稿 */
-export default function PlanCard({ opportunityId, existingCard }) {
+export default function PlanCard({ opportunityId, existingCard, planId = 'demo' }) {
   const opp = OPPORTUNITIES.find(o => o.id === opportunityId);
   const [plan, setPlan] = useState(existingCard || PLAN_TEMPLATES[opportunityId]);
   const [chats, setChats] = useState([]);
@@ -36,8 +36,8 @@ export default function PlanCard({ opportunityId, existingCard }) {
     }
     setPlan(PLAN_TEMPLATES[opportunityId]);
     setChats([]);
-    generatePlanCard(opportunityId).then(card => { if (card) setPlan(card); });
-  }, [opportunityId, existingCard]);
+    generatePlanCard(opportunityId, planId).then(card => { if (card) setPlan(card); });
+  }, [opportunityId, existingCard, planId]);
 
   // 自动滚到底部
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }); }, [chats]);
@@ -50,7 +50,7 @@ export default function PlanCard({ opportunityId, existingCard }) {
     setInput('');
     setSending(true);
     setChats(cs => [...cs, { role: 'user', text: message }]);
-    const reply = await revisePlan(message) ??
+    const reply = await revisePlan(message, planId) ??
       '已收到修改意见。正式版将由创意设计模块调整方案，商品策略模块复核成本与价格带，概念图同步重新生成。（演示环境为冻结数据）';
     setChats(cs => [...cs, { role: 'ai', text: reply }]);
     setSending(false);

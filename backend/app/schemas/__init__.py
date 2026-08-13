@@ -24,7 +24,7 @@ from .planning import (
     InsightBundle,
     IPPoolItem,
     Opportunity,
-    PainPoint,
+    PainPoint as PlanningPainPoint,
     PlanBrief,
     PlanCard,
     PlanSummary,
@@ -49,7 +49,7 @@ from .recommendation import Decision, ProjectRecommendation
 from .retro import DimensionGap, RetroReport
 from .review import ConflictRecord, ConflictType, ReviewIssue, ReviewResult
 from .scoring import DimensionScore, OpportunityScore, RiskWarning
-from .sentiment import SentimentStat, UserSentiment
+from .sentiment import PainPoint, SentimentStat, UserSentiment
 from .swot import SWOTAnalysis, SWOTItem
 from .testcase import BacktestCase, BacktestSet, Outcome
 
@@ -95,6 +95,7 @@ __all__ = [
     "PlanBrief",
     "PlanCard",
     "PlanSummary",
+    "PlanningPainPoint",
     "PriceBand",
     "PricePoint",
     "PricingComparison",

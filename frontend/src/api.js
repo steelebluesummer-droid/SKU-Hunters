@@ -58,9 +58,9 @@ export async function bootstrapRemoteFixtures(timeoutMs = 1500) {
 }
 
 // 选定方向 → 后端生成企划卡（含成本校验、概念图 URL）；失败返回 null 走本地模板
-export async function generatePlanCard(opportunityId) {
+export async function generatePlanCard(opportunityId, planId = 'demo') {
   try {
-    const data = await request('/plans/demo/plan-card', {
+    const data = await request(`/plans/${planId}/plan-card`, {
       method: 'POST',
       body: { opportunity_id: opportunityId },
     });
@@ -71,9 +71,9 @@ export async function generatePlanCard(opportunityId) {
 }
 
 // 改稿沟通 → 后端 LLM 作答；失败返回 null 走本地固定回执
-export async function revisePlan(message) {
+export async function revisePlan(message, planId = 'demo') {
   try {
-    const data = await request('/plans/demo/revise', {
+    const data = await request(`/plans/${planId}/revise`, {
       method: 'POST',
       body: { message },
     });
@@ -94,18 +94,18 @@ export async function listPlans() {
 }
 
 // 任务详情（含进度与已选方向）；失败返回 null
-export async function getPlan() {
+export async function getPlan(planId = 'demo') {
   try {
-    return await request('/plans/demo');
+    return await request(`/plans/${planId}`);
   } catch {
     return null;
   }
 }
 
 // 归档企划案；失败返回 null（前端按本地状态兜底）
-export async function archivePlan() {
+export async function archivePlan(planId = 'demo') {
   try {
-    const data = await request('/plans/demo/archive', { method: 'POST', body: {} });
+    const data = await request(`/plans/${planId}/archive`, { method: 'POST', body: {} });
     return data.status;
   } catch {
     return null;

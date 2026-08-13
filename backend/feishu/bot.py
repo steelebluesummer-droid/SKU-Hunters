@@ -12,6 +12,9 @@ from .cards import (
     build_summary_card,
 )
 
+# 飞书 API 正常响应 <2s；10s 无响应视为对端挂死，防止请求方被拖死
+_REQ_TIMEOUT = 10
+
 
 class FeishuBot:
     """飞书机器人消息发送器"""
@@ -36,6 +39,7 @@ class FeishuBot:
                 "msg_type": "text",
                 "content": '{"text": "' + text + '"}',
             },
+            timeout=_REQ_TIMEOUT,
         )
         return resp.json()
 
@@ -50,6 +54,7 @@ class FeishuBot:
                 "msg_type": "interactive",
                 "content": json.dumps(card),
             },
+            timeout=_REQ_TIMEOUT,
         )
         return resp.json()
 

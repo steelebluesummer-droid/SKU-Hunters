@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Steps, Card, Descriptions, Tag, Button, message } from 'antd';
 import InsightCockpit from '../components/InsightCockpit';
 import OpportunityCards from '../components/OpportunityCards';
@@ -17,10 +17,11 @@ export default function TaskFlow() {
   const [existingCard, setExistingCard] = useState(null);  // 已有企划卡（归档后回看）
   const [archiving, setArchiving] = useState(false);
   const nav = useNavigate();
+  const { id } = useParams();  // URL 中的任务 id（/tasks/:id），不再是固定 demo
 
   // 进入任务时从后端恢复进度：已选过方向（含已归档）→ 直接落到新品企划卡
   useEffect(() => {
-    getPlan().then(plan => {
+    getPlan(id).then(plan => {
       if (!plan) return;
       setPlanStatus(plan.status);
       if (plan.selected_opportunity) {
@@ -30,13 +31,17 @@ export default function TaskFlow() {
         if (plan.plan_card) {
           setExistingCard(plan.plan_card);
         }
+      } else {
+        // 未选方向：按后端状态恢复到对应步骤（如 Aily 发起的任务已跑完洞察+机会 → 落到机会生成）
+        const statusStep = { insights_ready: 1, opportunities_ready: 2 }[plan.status];
+        if (statusStep !== undefined) setStep(statusStep);
       }
     });
   }, []);
 
   const archive = async () => {
     setArchiving(true);
-    const status = await archivePlan();
+    const status = await archivePlan(id);
     setArchiving(false);
     if (status === 'archived') {
       message.success('已归档：企划案进入历史库，可随时复盘追问');
@@ -94,7 +99,7 @@ export default function TaskFlow() {
 
       {step === 3 && (
         <div>
-          <PlanCard opportunityId={selectedOpp} existingCard={existingCard} />
+          <PlanCard opportunityId={selectedOpp} existingCard={existingCard} planId={id} />
           <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
             {planStatus === 'archived' ? (
               <>
