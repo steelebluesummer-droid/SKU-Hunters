@@ -172,7 +172,7 @@ def _load_heat_curve() -> dict[str, Any] | None:
             return None
         snap = json.loads(path.read_text(encoding="utf-8"))
         return {"weeks": snap["weeks"], "series": snap["series"]}
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError):
         return None
 
 def get_opportunities(plan: dict[str, Any]) -> list[dict[str, Any]]:
