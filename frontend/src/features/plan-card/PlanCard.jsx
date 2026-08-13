@@ -4,11 +4,11 @@ import { SendOutlined, LoadingOutlined } from '@ant-design/icons';
 import ProcessLog from '../../shared/components/ProcessLog';
 
 const GRADIENTS = {
-  'ip-collect': 'linear-gradient(135deg, #f3e6ff 0%, #e0ccfa 50%, #fad1dc 100%)',
-  'healing-nature': 'linear-gradient(135deg, #e0f5ec 0%, #cde7f0 60%, #b8e6d0 100%)',
-  'outdoor-clip': 'linear-gradient(135deg, #fdf3e0 0%, #f8d5b0 55%, #f5e6b8 100%)',
+  'ip-collect': 'var(--grad-ip-collect)',
+  'healing-nature': 'var(--grad-healing-nature)',
+  'outdoor-clip': 'var(--grad-outdoor-clip)',
 };
-const DEFAULT_GRADIENT = 'linear-gradient(135deg, #f6f3ff 0%, #d9ccff 100%)';
+const DEFAULT_GRADIENT = 'var(--grad-default)';
 
 const QUICK_SUGGESTIONS = [
   '配色再柔和一点',
@@ -99,18 +99,18 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
   return (
     <div>
       {card.processLog && (
-        <Card size="small" title="企划生成 · 思考过程" style={{ marginBottom: 16, background: '#f6f3ff', border: '1px solid #d9ccff' }}>
+        <Card size="small" title="企划生成 · 思考过程" style={{ marginBottom: 16, background: 'var(--color-surface-alt)', border: '1px solid var(--color-border-strong)' }}>
           <ProcessLog key={opportunity?.id} lines={card.processLog} onDone={() => setLogDone(true)} />
         </Card>
       )}
 
       <div style={{ opacity: !card.processLog || logDone ? 1 : 0, transition: 'opacity 0.5s', pointerEvents: !card.processLog || logDone ? 'auto' : 'none' }}>
         <Card>
-          <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
             {brief?.theme} · {brief?.category} · 价格带 {priceRange[0]}-{priceRange[1]} 元 · 成本 ≤{costLimit} 元
           </div>
           <h1 style={{ margin: '0 0 4px' }}>{emoji} {card.name}</h1>
-          <p style={{ color: '#666' }}>{card.concept}</p>
+          <p style={{ color: 'var(--color-text-secondary)' }}>{card.concept}</p>
 
           <Row gutter={24} style={{ marginTop: 16 }}>
             <Col xs={24} lg={10}>
@@ -123,7 +123,7 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
                 </div>
               )}
               {card.costCheck && (
-                <div style={{ fontSize: 12, color: card.costCheck.passed ? '#3a7d44' : '#e60012', marginTop: 6, padding: '6px 10px', background: card.costCheck.passed ? '#eef7ef' : '#fff0f0', borderRadius: 6 }}>
+                <div style={{ fontSize: 12, color: card.costCheck.passed ? 'var(--cost-pass-fg)' : 'var(--cost-fail-fg)', marginTop: 6, padding: '6px 10px', background: card.costCheck.passed ? 'var(--cost-pass-bg)' : 'var(--cost-fail-bg)', borderRadius: 6 }}>
                   {card.costCheck.passed ? '✅' : '❌'} 成本校验：{card.costCheck.reason}
                 </div>
               )}
@@ -140,15 +140,15 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
             </Col>
           </Row>
 
-          <Card size="small" style={{ margin: '16px 0', background: '#faf8ff' }}>
+          <Card size="small" style={{ margin: '16px 0', background: 'var(--color-surface-alt)' }}>
             <b>跨品类融合说明：</b>{card.fusion}
           </Card>
 
           <Row gutter={24}>
             <Col xs={24} md={8}>
               <h3>定价<span className="plan-section-tag">商品策略</span></h3>
-              <div style={{ fontSize: 28, fontWeight: 700, color: '#e60012' }}>{card.pricing?.price || '—'}</div>
-              <p style={{ fontSize: 12, color: '#666' }}>{card.pricing?.reason}</p>
+              <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--color-brand-accent)' }}>{card.pricing?.price || '—'}</div>
+              <p style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{card.pricing?.reason}</p>
             </Col>
             <Col xs={24} md={9}>
               <h3>上新节奏<span className="plan-section-tag">商品策略</span></h3>
@@ -168,7 +168,7 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
 
       {isArchived ? (
         <Card title="💬 复盘追问" size="small" style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>企划案已归档，仅可复盘回顾，不可再改稿。</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 8 }}>企划案已归档，仅可复盘回顾，不可再改稿。</div>
           {reviewChats.length > 0 && (
             <div style={{ maxHeight: 320, overflow: 'auto', marginBottom: 12 }}>
               <List
@@ -177,7 +177,7 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
                   <List.Item style={{ padding: '4px 0', border: 'none', flexDirection: c.role === 'user' ? 'row-reverse' : 'row' }}>
                     <div style={{
                       maxWidth: '80%', padding: '8px 12px', borderRadius: 12, fontSize: 13, lineHeight: 1.6,
-                      background: c.role === 'user' ? '#7c5cfc' : '#f0f0f0', color: c.role === 'user' ? '#fff' : '#333',
+                      background: c.role === 'user' ? 'var(--chat-user-bg)' : 'var(--chat-ai-bg)', color: c.role === 'user' ? 'var(--chat-user-fg)' : 'var(--chat-ai-fg)',
                       borderTopRightRadius: c.role === 'user' ? 4 : 12, borderTopLeftRadius: c.role === 'ai' ? 4 : 12,
                     }}>
                       <span style={{ fontSize: 11, opacity: 0.7, display: 'block', marginBottom: 2 }}>
@@ -190,7 +190,7 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
               />
               {sending && (
                 <div style={{ textAlign: 'left', padding: '8px 12px' }}>
-                  <Spin indicator={<LoadingOutlined />} size="small" /> <span style={{ color: '#999', fontSize: 12 }}>正在复盘…</span>
+                  <Spin indicator={<LoadingOutlined />} size="small" /> <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>正在复盘…</span>
                 </div>
               )}
               <div ref={chatEnd} />
@@ -215,7 +215,7 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
                   <List.Item style={{ padding: '4px 0', border: 'none', flexDirection: c.role === 'user' ? 'row-reverse' : 'row' }}>
                     <div style={{
                       maxWidth: '80%', padding: '8px 12px', borderRadius: 12, fontSize: 13, lineHeight: 1.6,
-                      background: c.role === 'user' ? '#7c5cfc' : '#f0f0f0', color: c.role === 'user' ? '#fff' : '#333',
+                      background: c.role === 'user' ? 'var(--chat-user-bg)' : 'var(--chat-ai-bg)', color: c.role === 'user' ? 'var(--chat-user-fg)' : 'var(--chat-ai-fg)',
                       borderTopRightRadius: c.role === 'user' ? 4 : 12, borderTopLeftRadius: c.role === 'ai' ? 4 : 12,
                     }}>
                       <span style={{ fontSize: 11, opacity: 0.7, display: 'block', marginBottom: 2 }}>
@@ -228,7 +228,7 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
               />
               {sending && (
                 <div style={{ textAlign: 'left', padding: '8px 12px' }}>
-                  <Spin indicator={<LoadingOutlined />} size="small" /> <span style={{ color: '#999', fontSize: 12 }}>正在分析修改意见…</span>
+                  <Spin indicator={<LoadingOutlined />} size="small" /> <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>正在分析修改意见…</span>
                 </div>
               )}
               <div ref={chatEnd} />
@@ -237,7 +237,7 @@ export default function PlanCard({ card, opportunity, brief, status, isArchived,
 
           {chats.length === 0 && (
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, color: '#999', marginBottom: 6 }}>快捷改稿建议：</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>快捷改稿建议：</div>
               <Space wrap size={[6, 6]}>
                 {QUICK_SUGGESTIONS.map((s) => (
                   <Button key={s} size="small" onClick={() => sendRevise(s)}>{s}</Button>

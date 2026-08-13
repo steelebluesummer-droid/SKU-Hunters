@@ -43,6 +43,7 @@
   --color-text-secondary: var(--gray-700);
   --color-text-muted: var(--gray-600);
   --color-border: var(--gray-200);
+  --color-border-strong: #D9CCFF;   /* 强调边框（紫色描边） */
 
   /* ── 3. Component tokens（组件）────────────────────────── */
   --button-primary-bg: var(--color-action-primary);
@@ -52,6 +53,40 @@
   --nav-active-bg: var(--color-surface-alt);
   --task-card-strip-active: var(--purple-400);
   --task-card-strip-archived: #BBB;
+
+  /* 图表系列色（顺序固定，不机械替换） */
+  --chart-series-primary: var(--purple-600);
+  --chart-series-secondary: var(--purple-400);
+  --chart-series-accent: var(--red-600);
+  --chart-series-info: var(--blue-500);
+  --chart-accent-fill: rgba(230, 0, 18, 0.06);   /* 图表品牌强调区填充 */
+
+  /* 聊天气泡（用户/AI） */
+  --chat-user-bg: var(--purple-600);
+  --chat-user-fg: var(--white);
+  --chat-ai-bg: var(--gray-200);
+  --chat-ai-fg: var(--gray-900);
+
+  /* 成本校验（商品策略回环） */
+  --cost-pass-bg: #EEF7EF;
+  --cost-pass-fg: #3A7D44;
+  --cost-fail-bg: #FFF0F0;
+  --cost-fail-fg: var(--red-600);   /* 商业指标不达标，用品牌红强调 */
+
+  /* 证据与来源 */
+  --evidence-bg: var(--gray-200);
+  --evidence-fg: var(--gray-700);
+  --source-muted: var(--gray-600);
+
+  /* 强调面板（品牌红点缀的轻量背景/边框） */
+  --surface-danger: #FFF5F5;
+  --border-danger: #FFCDD2;
+
+  /* 方向卡渐变（三个机会方向） */
+  --grad-ip-collect: linear-gradient(135deg, #F3E6FF 0%, #E0CCFA 50%, #FAD1DC 100%);
+  --grad-healing-nature: linear-gradient(135deg, #E0F5EC 0%, #CDE7F0 60%, #B8E6D0 100%);
+  --grad-outdoor-clip: linear-gradient(135deg, #FDF3E0 0%, #F8D5B0 55%, #F5E6B8 100%);
+  --grad-default: linear-gradient(135deg, #F6F3FF 0%, #D9CCFF 100%);
 
   /* ── 间距 scale（8px 基准）────────────────────────────── */
   --space-xs: 4px;

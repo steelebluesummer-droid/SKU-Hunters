@@ -67,7 +67,7 @@ export default function DataBoard() {
       {
         type: 'bar',
         data: categoryRank.map((c) => c.heat).reverse(),
-        itemStyle: { color: '#e60012', borderRadius: [0, 6, 6, 0] },
+        itemStyle: { color: 'var(--color-brand-accent)', borderRadius: [0, 6, 6, 0] },
         barWidth: 16,
       },
     ],
@@ -80,8 +80,8 @@ export default function DataBoard() {
     xAxis: { type: 'category', data: voiceTrend.weeks || [] },
     yAxis: { type: 'value', name: '声量' },
     series: [
-      { name: '小红书', type: 'line', smooth: true, data: voiceTrend.xhs || [], itemStyle: { color: '#e60012' } },
-      { name: '抖音', type: 'line', smooth: true, data: voiceTrend.douyin || [], itemStyle: { color: '#7a5fd0' } },
+      { name: '小红书', type: 'line', smooth: true, data: voiceTrend.xhs || [], itemStyle: { color: 'var(--color-brand-accent)' } },
+      { name: '抖音', type: 'line', smooth: true, data: voiceTrend.douyin || [], itemStyle: { color: 'var(--color-action-primary)' } },
     ],
   };
 
@@ -90,7 +90,7 @@ export default function DataBoard() {
     { title: '商品', dataIndex: 'name', width: 180 },
     { title: '价格', dataIndex: 'price', width: 80, render: (v) => `¥${v}` },
     { title: '核心卖点', dataIndex: 'point', width: 140, render: (v) => <Tag>{v}</Tag> },
-    { title: '月销指数', dataIndex: 'sales', width: 140, render: (v) => <Progress percent={v} showInfo={false} strokeColor="#e60012" size="small" /> },
+    { title: '月销指数', dataIndex: 'sales', width: 140, render: (v) => <Progress percent={v} showInfo={false} strokeColor="var(--color-brand-accent)" size="small" /> },
   ];
 
   return (
@@ -156,7 +156,7 @@ export default function DataBoard() {
                   <Progress
                     percent={b.pct}
                     showInfo={false}
-                    strokeColor="#7a5fd0"
+                    strokeColor="var(--color-action-primary)"
                     size="small"
                     style={{ display: 'inline-block', width: '62%', margin: '0 10px' }}
                   />
@@ -164,7 +164,7 @@ export default function DataBoard() {
                 </div>
               ))
             )}
-            <p style={{ fontSize: 12, color: '#999', marginTop: 12 }}>数据源：电商公开样本（冻结 fixture，可切换实时）</p>
+            <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 12 }}>数据源：电商公开样本（冻结 fixture，可切换实时）</p>
           </Card>
         </Col>
       </Row>

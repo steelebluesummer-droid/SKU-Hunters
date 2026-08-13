@@ -76,15 +76,15 @@ export default function InsightBase() {
                 <Card key={p.name} size="small" style={{ marginBottom: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     <b style={{ wordBreak: 'break-word' }}>{p.name}</b>
-                    <span style={{ fontSize: 12 }}>爆品指数 <b style={{ color: '#e60012' }}>{p.index}</b></span>
+                    <span style={{ fontSize: 12 }}>爆品指数 <b style={{ color: 'var(--color-brand-accent)' }}>{p.index}</b></span>
                   </div>
-                  <Progress percent={p.index} showInfo={false} strokeColor="#e60012" size="small" style={{ margin: '4px 0' }} />
+                  <Progress percent={p.index} showInfo={false} strokeColor="var(--color-brand-accent)" size="small" style={{ margin: '4px 0' }} />
                   <div>
                     {(p.factors || []).map((f) => (
                       <Tag key={f} color="purple" style={{ marginBottom: 4, wordBreak: 'break-word' }}>{f}</Tag>
                     ))}
                   </div>
-                  <div style={{ fontSize: 12, color: '#666', marginTop: 4, wordBreak: 'break-word' }}>{p.note}</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4, wordBreak: 'break-word' }}>{p.note}</div>
                 </Card>
               ))
             )}
@@ -106,7 +106,7 @@ export default function InsightBase() {
                       <Tag color={ip.heat?.includes('↑') ? 'red' : 'default'}>{ip.heat}</Tag>
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, color: '#666', wordBreak: 'break-word' }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', wordBreak: 'break-word' }}>
                     适配品类：{(ip.fit || []).join(' / ')}
                   </div>
                 </Card>
@@ -124,7 +124,7 @@ export default function InsightBase() {
                     <Tag key={d} color="geekblue" style={{ marginBottom: 4, wordBreak: 'break-word' }}>{d}</Tag>
                   ))}
                 </div>
-                <p style={{ fontSize: 12, color: '#999', marginTop: 8 }}>
+                <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 8 }}>
                   企划生成时作为品牌一致性约束注入创意设计模块
                 </p>
               </>
@@ -133,7 +133,7 @@ export default function InsightBase() {
         </Col>
       </Row>
 
-      <p style={{ fontSize: 12, color: '#999', marginTop: 16 }}>
+      <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 16 }}>
         数据来源：名创内部策展资产（冻结 fixture，可切换实时）
       </p>
     </div>

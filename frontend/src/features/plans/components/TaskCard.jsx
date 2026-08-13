@@ -64,7 +64,7 @@ export default function TaskCard({ task, onClick }) {
       </Paragraph>
 
       {/* 品类 + 目标人群 */}
-      <div style={{ fontSize: 13, color: '#666', marginBottom: 8, wordBreak: 'break-word' }}>
+      <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 8, wordBreak: 'break-word' }}>
         {task.category || '未分类'}
         {task.audience ? ` · ${task.audience}` : ''}
       </div>
@@ -73,7 +73,7 @@ export default function TaskCard({ task, onClick }) {
       <div
         style={{
           fontSize: 12,
-          color: '#999',
+          color: 'var(--color-text-muted)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',

@@ -9,13 +9,13 @@ export default function OpportunityCards({ opportunities = [], selected, onSelec
   return (
     <div>
       {processLog.length > 0 && (
-        <Card size="small" title="机会生成 · 思考过程" style={{ marginBottom: 16, background: '#f6f3ff', border: '1px solid #d9ccff' }}>
+        <Card size="small" title="机会生成 · 思考过程" style={{ marginBottom: 16, background: 'var(--color-surface-alt)', border: '1px solid var(--color-border-strong)' }}>
           <ProcessLog lines={processLog} onDone={() => setLogDone(true)} />
         </Card>
       )}
       <div style={{ opacity: processLog.length === 0 || logDone ? 1 : 0, transition: 'opacity 0.5s', pointerEvents: processLog.length === 0 || logDone ? 'auto' : 'none' }}>
-        <Card size="small" style={{ marginBottom: 16, background: '#f6f3ff', border: '1px solid #d9ccff' }}>
-          <b style={{ color: '#7a5fd0' }}>机会生成：</b>
+        <Card size="small" style={{ marginBottom: 16, background: 'var(--color-surface-alt)', border: '1px solid var(--color-border-strong)' }}>
+          <b style={{ color: 'var(--color-action-primary)' }}>机会生成：</b>
           综合趋势信号、用户痛点、竞品空白、名创资产与流行元素，收敛出方向——每个方向的依据可点击回溯。
         </Card>
         <Row gutter={16}>
@@ -35,9 +35,9 @@ export default function OpportunityCards({ opportunities = [], selected, onSelec
                 <div style={{ marginBottom: 8 }}>
                   {(o.keywords || []).map(k => <Tag key={k} style={{ whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '100%', height: 'auto', lineHeight: '1.6' }}>{k}</Tag>)}
                 </div>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>建议价格带：<b>{o.priceBand}</b></div>
-                <div style={{ borderTop: '1px dashed #eee', paddingTop: 8 }}>
-                  <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>依据链：</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}>建议价格带：<b>{o.priceBand}</b></div>
+                <div style={{ borderTop: '1px dashed var(--color-border)', paddingTop: 8 }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>依据链：</div>
                   {(o.evidence || []).map((e, i) => (
                     <Popover key={i} content={e.text} title={e.from}>
                       <Tag color="default" style={{ fontSize: 11, marginBottom: 4, cursor: 'help' }}>

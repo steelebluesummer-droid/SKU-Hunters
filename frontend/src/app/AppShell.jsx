@@ -39,7 +39,7 @@ const MENU_ITEMS = [
   },
 ];
 
-const BRAND = 'SKU Hunters · 企划工作室';
+const BRAND = 'SKU Hunters';
 
 function selectedKey(pathname) {
   if (pathname.startsWith('/tasks/')) return '/'; // 任务详情页选中「任务中心」
@@ -73,8 +73,21 @@ export default function AppShell() {
       {/* 桌面侧栏（≥768px） */}
       {isDesktop && (
         <Sider width={200} style={{ background: 'var(--color-surface)' }}>
-          <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>
-            {BRAND}
+          <div
+            style={{
+              height: 56,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '0 16px',
+              borderBottom: '1px solid var(--color-border)',
+              fontWeight: 700,
+              fontSize: 15,
+              color: 'var(--color-action-primary)',
+            }}
+          >
+            <ShopOutlined style={{ fontSize: 18 }} />
+            <span>SKU Hunters</span>
           </div>
           {menu}
         </Sider>
@@ -102,7 +115,8 @@ export default function AppShell() {
               aria-label="打开导航菜单"
               onClick={() => setDrawerOpen(true)}
             />
-            <span style={{ fontWeight: 600 }}>{BRAND}</span>
+            <ShopOutlined style={{ fontSize: 16, color: 'var(--color-action-primary)' }} />
+            <span style={{ fontWeight: 700, color: 'var(--color-action-primary)' }}>SKU Hunters</span>
           </Header>
         )}
 

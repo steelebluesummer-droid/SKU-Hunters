@@ -5,7 +5,7 @@ import { ArrowRightOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import ProcessLog from '../../shared/components/ProcessLog';
 
-const MODULE_TAG = { fontSize: 11, color: '#b7a8f5', marginLeft: 8 };
+const MODULE_TAG = { fontSize: 11, color: 'var(--purple-400)', marginLeft: 8 };
 
 // 洞察模块外壳：标题 + 过程日志 + 日志跑完后显现内容
 function InsightModule({ title, log, children }) {
@@ -41,10 +41,10 @@ function TrendRadar({ trendRadar = {} }) {
               <b>{s.name}</b>
               <Tag color="red">{s.metric}</Tag>
             </div>
-            <div style={{ fontSize: 12, color: '#666', margin: '6px 0' }}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '6px 0' }}>
               {s.period} · 关联领域：{(s.domains || []).map(d => <Tag key={d} style={{ fontSize: 11 }}>{d}</Tag>)}
             </div>
-            <div style={{ fontSize: 12, color: '#7a5fd0' }}>→ 机会判断：{s.opportunity}</div>
+            <div style={{ fontSize: 12, color: 'var(--color-action-primary)' }}>→ 机会判断：{s.opportunity}</div>
           </Card>
         ))}
       </Col>
@@ -76,8 +76,8 @@ function ConsumerVoice({ consumerVoice = {} }) {
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>TOP 痛点</div>
         {painPoints.map((p, i) => (
           <div key={p.text} style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 12 }}>{i + 1}. {p.text} <span style={{ color: '#999' }}>({p.count} 条)</span></div>
-            <Progress percent={Math.round((p.count || 0) / maxCount * 100)} showInfo={false} strokeColor="#7a5fd0" size="small" />
+            <div style={{ fontSize: 12 }}>{i + 1}. {p.text} <span style={{ color: 'var(--color-text-muted)' }}>({p.count} 条)</span></div>
+            <Progress percent={Math.round((p.count || 0) / maxCount * 100)} showInfo={false} strokeColor="var(--color-action-primary)" size="small" />
           </div>
         ))}
         <div style={{ fontSize: 13, fontWeight: 600, margin: '12px 0 8px' }}>使用场景分布</div>
@@ -91,8 +91,8 @@ function ConsumerVoice({ consumerVoice = {} }) {
             <div className="quote-source">{q.source}</div>
           </div>
         ))}
-        <Card size="small" style={{ background: '#f6f3ff', border: '1px solid #d9ccff' }}>
-          <b style={{ color: '#7a5fd0' }}>洞察总结：</b>{consumerVoice.summary || ''}
+        <Card size="small" style={{ background: 'var(--color-surface-alt)', border: '1px solid var(--color-border-strong)' }}>
+          <b style={{ color: 'var(--color-action-primary)' }}>洞察总结：</b>{consumerVoice.summary || ''}
         </Card>
       </Col>
     </Row>
@@ -110,12 +110,12 @@ function CompetitiveMap({ competitiveMap = {} }) {
     yAxis: { name: '设计感', type: 'value', max: 10 },
     series: [{
       type: 'scatter', symbolSize: 18,
-      itemStyle: { color: '#7a5fd0', opacity: 0.8 },
+      itemStyle: { color: 'var(--color-action-primary)', opacity: 0.8 },
       label: { show: true, position: 'top', formatter: p => p.data[2], fontSize: 11 },
       data: (competitiveMap.products || []).map(p => [p.price, p.design, p.name]),
       markArea: gapZone ? {
-        itemStyle: { color: 'rgba(230, 0, 18, 0.06)' },
-        label: { show: true, position: 'insideTop', color: '#e60012', fontSize: 11 },
+        itemStyle: { color: 'var(--chart-accent-fill)' },
+        label: { show: true, position: 'insideTop', color: 'var(--color-brand-accent)', fontSize: 11 },
         data: [[{ name: gapZone.label, xAxis: gapX[0], yAxis: gapY[0] }, { xAxis: gapX[1], yAxis: gapY[1] }]],
       } : undefined,
     }],
@@ -131,7 +131,7 @@ function CompetitiveMap({ competitiveMap = {} }) {
         {priceBands.map(b => (
           <div key={b.band} style={{ marginBottom: 6, fontSize: 12 }}>
             {b.band}
-            <Progress percent={b.pct || 0} showInfo={false} strokeColor="#b7a8f5" size="small"
+            <Progress percent={b.pct || 0} showInfo={false} strokeColor="var(--purple-400)" size="small"
               style={{ display: 'inline-block', width: '60%', margin: '0 8px' }} />
             <b>{b.pct}%</b>
           </div>
@@ -141,8 +141,8 @@ function CompetitiveMap({ competitiveMap = {} }) {
           <Tag key={s.word} style={{ marginBottom: 4 }}>{s.word} ×{s.count}</Tag>
         ))}
         {gapZone?.label && (
-          <Card size="small" style={{ background: '#fff5f5', border: '1px solid #ffcdd2', marginTop: 12 }}>
-            <b style={{ color: '#e60012' }}>机会空白：</b>{gapZone.label}
+          <Card size="small" style={{ background: 'var(--surface-danger)', border: '1px solid var(--border-danger)', marginTop: 12 }}>
+            <b style={{ color: 'var(--color-brand-accent)' }}>机会空白：</b>{gapZone.label}
           </Card>
         )}
       </Col>
@@ -163,11 +163,11 @@ function CompetitorGallery({ products = [] }) {
             <Card size="small" cover={
               p.imageUrl
                 ? <img src={p.imageUrl} alt={p.name} style={{ height: 100, objectFit: 'cover' }} />
-                : <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f7f7f8', color: '#999', fontSize: 12 }}>{p.name.slice(0, 2)}</div>
+                : <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg)', color: 'var(--color-text-muted)', fontSize: 12 }}>{p.name.slice(0, 2)}</div>
             }>
               <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
-              <div style={{ fontSize: 12, color: '#e60012' }}>¥{p.price} · 设计 {p.design}</div>
-              <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{p.sellingPoint || '—'}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-brand-accent)' }}>¥{p.price} · 设计 {p.design}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4 }}>{p.sellingPoint || '—'}</div>
             </Card>
           </Col>
         ))}
@@ -198,7 +198,7 @@ export default function InsightCockpit({ insights }) {
             {(insightBase.hitProducts || []).slice(0, 2).map(p => (
               <div key={p.name} style={{ marginBottom: 8, fontSize: 13 }}>
                 <b>{p.name}</b> <Tag color="red">指数 {p.index}</Tag>
-                <div style={{ fontSize: 12, color: '#666' }}>{(p.factors || []).join(' · ')}</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{(p.factors || []).join(' · ')}</div>
               </div>
             ))}
             <Link to="/insight-base"><Button type="link" size="small" style={{ padding: 0 }}>查看完整 Insight Base <ArrowRightOutlined /></Button></Link>
@@ -209,10 +209,10 @@ export default function InsightCockpit({ insights }) {
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               {(trendGallery.colors || []).slice(0, 5).map(c => (
                 <div key={c.name} title={`${c.name} · ${c.source}`}
-                  style={{ width: 32, height: 32, borderRadius: 8, background: c.hex || '#eee', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.05)' }} />
+                  style={{ width: 32, height: 32, borderRadius: 8, background: c.hex || 'var(--gray-200)', boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.05)' }} />
               ))}
             </div>
-            <div style={{ fontSize: 12, color: '#666' }}>
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
               {(trendGallery.patterns || []).map(p => p.name).join(' · ')} ｜ {(trendGallery.shapes || []).map(s => s.name).join(' · ')}
             </div>
             <Link to="/trend-gallery"><Button type="link" size="small" style={{ padding: 0 }}>查看完整 Trend Gallery <ArrowRightOutlined /></Button></Link>

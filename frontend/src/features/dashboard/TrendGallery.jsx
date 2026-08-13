@@ -14,7 +14,7 @@ import PageHeader from '../plans/components/PageHeader';
 
 // hex 校验：合法 #RGB / #RRGGBB 才使用，否则安全占位
 function safeHex(hex) {
-  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex || '') ? hex : '#e8e8e8';
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex || '') ? hex : 'var(--gray-200)';
 }
 
 export default function TrendGallery() {
@@ -76,12 +76,12 @@ export default function TrendGallery() {
           <Row gutter={[12, 12]}>
             {colors.map((c) => (
               <Col xs={12} sm={8} md={6} lg={4} key={c.name}>
-                <div style={{ border: '1px solid #eee', borderRadius: 8, overflow: 'hidden', height: '100%' }}>
+                <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, overflow: 'hidden', height: '100%' }}>
                   <div style={{ height: 48, background: safeHex(c.hex) }} aria-hidden="true" />
                   <div style={{ padding: 8 }}>
                     <div style={{ fontWeight: 600, fontSize: 13, wordBreak: 'break-word' }}>{c.name}</div>
-                    <div style={{ fontSize: 11, color: '#666' }}>{c.hex}</div>
-                    <div style={{ fontSize: 11, color: '#999', wordBreak: 'break-word' }}>{c.source}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{c.hex}</div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)', wordBreak: 'break-word' }}>{c.source}</div>
                   </div>
                 </div>
               </Col>
@@ -101,7 +101,7 @@ export default function TrendGallery() {
                 <Card key={p.name} size="small" style={{ marginBottom: 8 }}>
                   <b style={{ wordBreak: 'break-word' }}>{p.name}</b>
                   <Tag style={{ marginLeft: 8 }}>{p.source}</Tag>
-                  <div style={{ fontSize: 12, color: '#666', marginTop: 4, wordBreak: 'break-word' }}>{p.note}</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4, wordBreak: 'break-word' }}>{p.note}</div>
                 </Card>
               ))
             )}
@@ -116,7 +116,7 @@ export default function TrendGallery() {
                 <Card key={s.name} size="small" style={{ marginBottom: 8 }}>
                   <b style={{ wordBreak: 'break-word' }}>{s.name}</b>
                   <Tag style={{ marginLeft: 8 }}>{s.source}</Tag>
-                  <div style={{ fontSize: 12, color: '#666', marginTop: 4, wordBreak: 'break-word' }}>{s.note}</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4, wordBreak: 'break-word' }}>{s.note}</div>
                 </Card>
               ))
             )}
@@ -135,7 +135,7 @@ export default function TrendGallery() {
                 <Card size="small" style={{ textAlign: 'center', height: '100%' }}>
                   <div style={{ fontSize: 36, letterSpacing: 2 }}>{e.emoji}</div>
                   <b style={{ wordBreak: 'break-word' }}>{e.name}</b>
-                  <div style={{ fontSize: 12, color: '#666', wordBreak: 'break-word' }}>{e.note}</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', wordBreak: 'break-word' }}>{e.note}</div>
                 </Card>
               </Col>
             ))}
@@ -143,7 +143,7 @@ export default function TrendGallery() {
         )}
       </Card>
 
-      <p style={{ fontSize: 12, color: '#999', marginTop: 16 }}>
+      <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 16 }}>
         数据来源：跨品类社媒公开样本（冻结 fixture，可切换实时）
       </p>
     </div>

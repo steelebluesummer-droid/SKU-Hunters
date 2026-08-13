@@ -19,7 +19,7 @@ export default function PageHeader({ title, subtitle, extra }) {
       <div style={{ minWidth: 0 }}>
         <h2 style={{ margin: 0, wordBreak: 'break-word' }}>{title}</h2>
         {subtitle ? (
-          <p style={{ margin: '4px 0 0', color: '#666', fontSize: 13 }}>{subtitle}</p>
+          <p style={{ margin: '4px 0 0', color: 'var(--color-text-secondary)', fontSize: 13 }}>{subtitle}</p>
         ) : null}
       </div>
       {extra ? <div style={{ flexShrink: 0 }}>{extra}</div> : null}

@@ -32,10 +32,27 @@ export const theme = {
     Layout: {
       siderBg: '#FFFFFF',
       bodyBg: '#F7F7F8',
+      headerBg: '#FFFFFF',
     },
     Menu: {
       itemSelectedBg: '#F6F3FF',
       itemSelectedColor: '#7A5FD0',
+      itemBorderRadius: 8,
+    },
+    Card: {
+      borderRadiusLG: 12,
+      boxShadowTertiary: '0 1px 2px rgba(0, 0, 0, 0.03), 0 2px 8px rgba(0, 0, 0, 0.06)',
+      headerFontSize: 15,
+    },
+    Steps: {
+      iconSize: 28,
+      titleLineHeight: 24,
+    },
+    Tag: {
+      borderRadiusSM: 4,
+    },
+    Progress: {
+      defaultColor: '#7A5FD0',
     },
   },
 };

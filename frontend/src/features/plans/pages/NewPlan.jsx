@@ -119,7 +119,7 @@ export default function NewPlan() {
     <div style={{ maxWidth: 760 }}>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>新建新品企划</h2>
-        <p style={{ margin: '4px 0 0', color: '#666', fontSize: 13 }}>
+        <p style={{ margin: '4px 0 0', color: 'var(--color-text-secondary)', fontSize: 13 }}>
           约束由商品经理下达，AI 在约束内做有依据的创意
         </p>
       </div>
