@@ -11,6 +11,7 @@ import { Card, Row, Col, Table, Tag, Progress, Empty } from 'antd';
 import { getDataBoard } from '../../api/dashboard';
 import ResponsiveChart from '../../shared/components/ResponsiveChart';
 import StateCard from '../../shared/components/StateCard';
+import { readCssVar } from '../../shared/utils/cssTokens';
 import PageHeader from '../plans/components/PageHeader';
 
 export default function DataBoard() {
@@ -67,7 +68,7 @@ export default function DataBoard() {
       {
         type: 'bar',
         data: categoryRank.map((c) => c.heat).reverse(),
-        itemStyle: { color: 'var(--color-brand-accent)', borderRadius: [0, 6, 6, 0] },
+        itemStyle: { color: readCssVar('--color-brand-accent'), borderRadius: [0, 6, 6, 0] },
         barWidth: 16,
       },
     ],
@@ -80,8 +81,8 @@ export default function DataBoard() {
     xAxis: { type: 'category', data: voiceTrend.weeks || [] },
     yAxis: { type: 'value', name: '声量' },
     series: [
-      { name: '小红书', type: 'line', smooth: true, data: voiceTrend.xhs || [], itemStyle: { color: 'var(--color-brand-accent)' } },
-      { name: '抖音', type: 'line', smooth: true, data: voiceTrend.douyin || [], itemStyle: { color: 'var(--color-action-primary)' } },
+      { name: '小红书', type: 'line', smooth: true, data: voiceTrend.xhs || [], itemStyle: { color: readCssVar('--color-brand-accent') } },
+      { name: '抖音', type: 'line', smooth: true, data: voiceTrend.douyin || [], itemStyle: { color: readCssVar('--color-action-primary') } },
     ],
   };
 

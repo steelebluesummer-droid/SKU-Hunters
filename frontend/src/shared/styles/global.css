@@ -99,7 +99,7 @@ body {
 /* ── 企划卡板块标注 ─────────────────────────────────────── */
 .plan-section-tag {
   font-size: 11px;
-  color: var(--purple-400);
+  color: var(--color-section-label);
   font-weight: 400;
   margin-left: var(--space-sm);
 }

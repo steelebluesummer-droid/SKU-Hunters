@@ -70,5 +70,5 @@ design.rar
 backend/data/plans_state.json
 backend/data/state/
 
-# 前端验收截图与临时脚本（本地证据，不入库；Stage 7 统一收编代表性截图）
-preview/
+# 前端验收截图与临时脚本（本地证据，不入库；文档代表性截图见 docs/refactor/v2/preview/）
+/preview/

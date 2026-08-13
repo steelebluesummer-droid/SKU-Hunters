@@ -4,8 +4,9 @@ import { Card, Row, Col, Tag, Progress, Button } from 'antd';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import ProcessLog from '../../shared/components/ProcessLog';
+import { readCssVar } from '../../shared/utils/cssTokens';
 
-const MODULE_TAG = { fontSize: 11, color: 'var(--purple-400)', marginLeft: 8 };
+const MODULE_TAG = { fontSize: 11, color: 'var(--color-section-label)', marginLeft: 8 };
 
 // 洞察模块外壳：标题 + 过程日志 + 日志跑完后显现内容
 function InsightModule({ title, log, children }) {
@@ -110,12 +111,12 @@ function CompetitiveMap({ competitiveMap = {} }) {
     yAxis: { name: '设计感', type: 'value', max: 10 },
     series: [{
       type: 'scatter', symbolSize: 18,
-      itemStyle: { color: 'var(--color-action-primary)', opacity: 0.8 },
+      itemStyle: { color: readCssVar('--color-action-primary'), opacity: 0.8 },
       label: { show: true, position: 'top', formatter: p => p.data[2], fontSize: 11 },
       data: (competitiveMap.products || []).map(p => [p.price, p.design, p.name]),
       markArea: gapZone ? {
-        itemStyle: { color: 'var(--chart-accent-fill)' },
-        label: { show: true, position: 'insideTop', color: 'var(--color-brand-accent)', fontSize: 11 },
+        itemStyle: { color: readCssVar('--chart-accent-fill') },
+        label: { show: true, position: 'insideTop', color: readCssVar('--color-brand-accent'), fontSize: 11 },
         data: [[{ name: gapZone.label, xAxis: gapX[0], yAxis: gapY[0] }, { xAxis: gapX[1], yAxis: gapY[1] }]],
       } : undefined,
     }],

@@ -44,6 +44,7 @@
   --color-text-muted: var(--gray-600);
   --color-border: var(--gray-200);
   --color-border-strong: #D9CCFF;   /* 强调边框（紫色描边） */
+  --color-section-label: var(--purple-600);   /* 区块标签小字，白底对比度 4.8:1（≥4.5） */
 
   /* ── 3. Component tokens（组件）────────────────────────── */
   --button-primary-bg: var(--color-action-primary);
