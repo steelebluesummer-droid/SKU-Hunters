@@ -1,28 +1,33 @@
-"""BusinessEvaluationAgent — 真实商业官
+"""商业官三种实现 + 三档注册表
 
-基于三官 Artifact（feature_matrix / user_sentiment / ip_assessment）与
-BusinessSummaryView（Scoped View）的聚合结果，确定性生成五维 OpportunityScore。
+- MockBusinessAgent（mock_agents）：默认，离线/确定/快
+- BusinessEvaluationAgent（本文件）：确定性真实商业官——不调用 LLM，
+  基于三官 Artifact（feature_matrix / user_sentiment / ip_assessment）与
+  BusinessSummaryView（Scoped View）的聚合结果，确定性生成五维 OpportunityScore。
+  评分纪律：五维分数均来自上游真实数据或 View 聚合结果，统一 clamp 0~100；
+  缺少数据时保守为 0 并写入对应维度的 risk_warning；数据源不可用不得回退
+  Mock，也不得把「数据不可用」变成高分。
+- BusinessAgent（本文件）：真 LLM 商业官——LLM 按锚点 rubric 出五维分数与
+  依据（强制引用材料），代码管加权算术（total_score / star_rating /
+  evidence_refs 抽样）；LLM 未配置 / 输出不合 schema / 缺维度 / 分数越界 →
+  整体回退 Mock（不部分输出，保证 scores 与 proposals 对齐）。
 
-评分纪律（不调用 LLM、不编造分数）：
-- 五维分数均来自上游真实数据或 View 聚合结果，每个维度 0~100，统一 clamp；
-- 缺少数据时保守为 0，并写入对应维度的 risk_warning；
-- total_score 由 Weights 加权算术生成，由 OpportunityScore validator 强制校验；
-- evidence_refs 只聚合自三官 Artifact 的真实证据引用，不伪造 URL；
-- 数据源不可用（BaseUnavailable / BaseProviderError / View 缺失）不得回退 Mock，
-  也不得把「数据不可用」变成高分。
-
-纯函数（score_*）只做确定性数学，输入输出均为纯数据，可独立单元测试。
+注册表三档（get_business_agent_class）：
+  - 默认 / mock          → MockBusinessAgent
+  - deterministic        → BusinessEvaluationAgent（确定性，不烧 LLM）
+  - real（或总开关 AGENT_PROVIDER=real）→ BusinessAgent（LLM，故障回退 Mock）
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.agents.mock_agents import MockBusinessAgent
+from app.agents.real_common import min_confidence, parse_llm_json, provider_enabled
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
-from app.engine.decision_engine import min_confidence
 from app.schemas import (
     Confidence,
     DimensionScore,
@@ -31,6 +36,8 @@ from app.schemas import (
     RiskWarning,
     Weights,
 )
+
+# ══════════════════ 确定性实现：BusinessEvaluationAgent ══════════════════
 
 # ── 纯函数：确定性评分公式 ──────────────────────────
 
@@ -267,9 +274,211 @@ class BusinessEvaluationAgent(BaseAgent):
                 warnings.append(RiskWarning(risk=w, source_dimension=dim, severity="medium"))
         return warnings
 
+
+# ══════════════════ LLM 实现：BusinessAgent ══════════════════
+
+# 五维 → 给分来源（与 MockBusinessAgent._DIM_META 一致，单一事实来源）
+_DIM_SOURCE: dict[str, str] = {
+    "trend_heat": "trend_agent",
+    "user_demand": "consumer_insight_agent",
+    "ip_fit": "ip_strategy_agent",
+    "competition": "business_evaluation_agent",
+    "history_analog": "business_evaluation_agent",
+}
+
+_OUTPUT_CONTRACT = """
+以上为角色与职责说明。本次请以「严格 JSON」输出（不要输出任何解释文字）：
+
+{
+  "scores": [
+    {
+      "proposal_name": "照抄输入的方案名",
+      "dimensions": {
+        "trend_heat":      {"score": 0-100, "basis": "给分依据，必须引用所给材料原句"},
+        "user_demand":     {"score": 0-100, "basis": "同上"},
+        "ip_fit":          {"score": 0-100, "basis": "同上"},
+        "competition":     {"score": 0-100, "basis": "同上"},
+        "history_analog":  {"score": 0-100, "basis": "同上"}
+      },
+      "risk_warnings": [
+        {"risk": "风险描述", "source_dimension": "五维之一", "severity": "low/medium/high"}
+      ]
+    }
+  ]
+}
+
+打分锚点（rubric）：
+  80-100 = 多源强信号交叉验证；60-79 = 单源可信或信号中等；
+  40-59 = 信号弱或间接；0-39 = 无支撑或反向信号
+要求：
+1. 每个输入方案恰好一条，proposal_name 照抄不得改写
+2. 每条 basis 必须引用所给材料（上游情报摘要/证据/质询记录）的原句，
+   禁止编造材料没有的数据
+3. 你只管打分与依据——总分由代码按权重加权计算，不要输出 total
+4. risk_warnings 每方案至多 2 条，没有可给空列表
+"""
+
+
+def _fmt_artifact(title: str, artifact: dict[str, Any] | None) -> str:
+    """上游 artifact 压成 prompt 材料（摘要 + 证据条目）"""
+    if not artifact:
+        return f"【{title}】缺失（记为数据缺口，对应维度按无支撑打分）"
+    lines = [f"【{title}】摘要：{artifact.get('summary', '无')}"]
+    for ref in artifact.get("evidence_refs", [])[:3]:
+        lines.append(f"  · {ref.get('title', '')}：{ref.get('snippet', '')}")
+    if artifact.get("caveats"):
+        lines.append(f"  保留意见：{'；'.join(artifact['caveats'][:2])}")
+    return "\n".join(lines)
+
+
+class BusinessAgent(BaseAgent):
+    """真商业官：LLM 评审打分，代码管算术与置信度，失败回退 Mock"""
+
+    name = "business_evaluation_agent"
+
+    async def run(self, context: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = await asyncio.to_thread(self._generate, context)
+            if result is not None:
+                return result
+        except Exception:  # noqa: BLE001,S110 — 降级纪律：任何故障回退 Mock
+            pass
+        return await MockBusinessAgent().run(context)
+
+    def _generate(self, context: dict[str, Any]) -> dict[str, Any] | None:
+        from app.engine.llm import complete, load_prompt
+
+        brief = context.get("brief", {})
+        weights = Weights.model_validate(context.get("weights", {}))
+        weight_map = weights.model_dump()
+        proposals = context.get("proposal_set", {}).get("proposals", [])
+        if not proposals:
+            return None
+        upstream = context.get("upstream_confidences", [])
+        feedback = (context.get("feedback") or "").strip()
+
+        fm = context.get("feature_matrix")
+        us = context.get("user_sentiment")
+        ip = context.get("ip_assessment")
+
+        # 材料：brief + 上游情报 + 提案 + 质询记录
+        material = [
+            (f"【Brief】品类：{brief.get('category', '潮玩')}　"
+             f"目标市场：{brief.get('market', 'CN')}　"
+             f"预算带：{brief.get('budget_range', 'mid')}"),
+            f"【权重】{'/'.join(f'{k}={v}' for k, v in weight_map.items())}",
+            "",
+            _fmt_artifact("趋势官 FeatureMatrix", fm),
+            "",
+            _fmt_artifact("用户官 UserSentiment", us),
+            "",
+            _fmt_artifact("IP 策略官 IPAssessment", ip),
+            "",
+            "【待评方案】",
+        ]
+        for p in proposals:
+            material.append(
+                f"  · {p.get('name', '')}：{p.get('concept', '')}"
+                f"（形态 {p.get('product_form', '')}，价格带 {p.get('price_band', '')}）"
+            )
+        challenges = context.get("challenges", [])
+        if challenges:
+            material.append("\n【质询记录】")
+            for c in challenges[:6]:
+                material.append(
+                    f"  · [{c.get('source_role', '')}/{c.get('stance', '')}] "
+                    f"{c.get('proposal_name', '')}：{c.get('content', '')[:80]}"
+                )
+        if feedback:
+            material.append(f"\n【评委打回意见】{feedback}——本轮必须针对性修正")
+
+        persona_prompt = load_prompt(self.name)
+        system = (persona_prompt + "\n" + _OUTPUT_CONTRACT) if persona_prompt else _OUTPUT_CONTRACT
+        raw = complete(system, "\n".join(material), temperature=0.3, max_tokens=2500)
+        if not raw:
+            return None
+        data = parse_llm_json(raw)
+        if data is None:
+            return None
+
+        # 组装：LLM 分数 + 代码算术；任一方案不合规 → 整体回退
+        llm_by_name = {str(s.get("proposal_name", "")): s for s in data.get("scores", [])}
+        floor_confidence = min_confidence(upstream)
+        scores = []
+        for p in proposals:
+            name = p.get("name", "")
+            s = llm_by_name.get(name)
+            if s is None:
+                return None
+            dims_raw = s.get("dimensions", {})
+            dims = []
+            for dim_name, source in _DIM_SOURCE.items():
+                d = dims_raw.get(dim_name)
+                if d is None:
+                    return None  # 缺维度 → 整体回退
+                try:
+                    score = float(d.get("score"))
+                except (TypeError, ValueError):
+                    return None
+                if not 0 <= score <= 100:
+                    return None  # 越界 → 整体回退
+                basis = str(d.get("basis", "")).strip()
+                dims.append({
+                    "dimension": dim_name,
+                    "score": score,
+                    "source_agent": source,
+                    "basis": basis or f"{dim_name} 依据材料不足",
+                })
+            total = round(sum(d["score"] * weight_map[d["dimension"]] for d in dims), 2)
+
+            warnings = []
+            for w in s.get("risk_warnings", [])[:2]:
+                risk = str(w.get("risk", "")).strip()
+                if not risk:
+                    continue
+                severity = str(w.get("severity", "medium"))
+                warnings.append({
+                    "risk": risk,
+                    "source_dimension": str(w.get("source_dimension", "competition")),
+                    "severity": severity if severity in ("low", "medium", "high") else "medium",
+                })
+
+            # 证据：从上游三份 artifact 各抽首条（代码抽样，非 LLM 写）
+            evidence = []
+            for artifact in (fm, us, ip):
+                if artifact and artifact.get("evidence_refs"):
+                    evidence.append(artifact["evidence_refs"][0])
+
+            scores.append(OpportunityScore(
+                proposal_name=name,
+                dimension_scores=dims,
+                weights_used=weights,
+                total_score=total,
+                star_rating=max(1, min(5, round(total / 20))),
+                risk_warnings=warnings,
+                upstream_confidence=floor_confidence,
+                evidence_refs=evidence,
+                confidence=floor_confidence,
+                caveats=[("五维分数为 LLM 评审打分（锚点 rubric 约束），"
+                          "总分为代码加权算术，可逐笔复算")],
+            ).model_dump(mode="json"))
+
+        return {"opportunity_scores": scores}
+
+
+# ══════════════════ 注册表 ══════════════════
+
 def get_business_agent_class() -> type[BaseAgent]:
-    """注册表切换：默认 MockBusinessAgent；设 BUSINESS_AGENT_PROVIDER=real 时返回真实实现"""
-    provider = os.getenv("BUSINESS_AGENT_PROVIDER", "mock").strip().lower()
-    if provider == "real":
+    """注册表三档切换：
+    - 默认 / mock → MockBusinessAgent（离线/确定/快）
+    - BUSINESS_AGENT_PROVIDER=deterministic → BusinessEvaluationAgent
+      （确定性评分：不调用 LLM，分数全部来自 View 聚合与上游 Artifact）
+    - BUSINESS_AGENT_PROVIDER=real（或总开关 AGENT_PROVIDER=real）→ BusinessAgent
+      （LLM 评审打分，LLM/数据故障时内部回退 Mock）
+    注意：注册表在 import 时求值，env 必须在进程启动前设置。
+    """
+    if provider_enabled("BUSINESS_AGENT_PROVIDER"):
+        return BusinessAgent
+    if os.getenv("BUSINESS_AGENT_PROVIDER", "").strip().lower() == "deterministic":
         return BusinessEvaluationAgent
     return MockBusinessAgent

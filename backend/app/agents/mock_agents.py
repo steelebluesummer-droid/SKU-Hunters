@@ -35,11 +35,10 @@ from app.schemas import (
 
 
 def _min_confidence(values: list[str]) -> Confidence:
-    """置信度取最低值——沿链路衰减，不放大"""
-    order = [Confidence.UNKNOWN, Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH]
-    if not values:
-        return Confidence.UNKNOWN
-    return min((Confidence(v) for v in values), key=order.index)
+    """置信度取最低值——沿链路衰减，不放大（实现已迁 real_common.min_confidence）"""
+    from app.agents.real_common import min_confidence
+
+    return min_confidence(values)
 
 
 class MockTrendAgent(BaseAgent):

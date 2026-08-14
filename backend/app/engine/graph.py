@@ -37,14 +37,12 @@ from langgraph.types import Command, interrupt
 
 from app.agents.business_agent import get_business_agent_class
 from app.agents.challenge_agents import CHALLENGE_REGISTRY
-from app.agents.consumer_agent import get_consumer_agent_class
 from app.agents.creative_agent import get_creative_agent_class
 from app.agents.creative_contract import validate_proposals
+from app.agents.gtm_agent import get_gtm_agent_class
 from app.agents.ip_agent import get_ip_agent_class
-from app.agents.mock_agents import (
-    MockGTMAgent,
-)
 from app.agents.trend_agent import get_trend_agent_class
+from app.agents.user_agent import get_user_agent_class
 from app.engine import llm
 from app.engine.connector_gateway import (
     resolve_connectors,
@@ -146,15 +144,19 @@ def _close_sqlite():
 atexit.register(_close_sqlite)
 
 # ── Agent 注册表：真 Agent 出炉后只改这里 ──────────────────────
-# trend 通过 get_trend_agent_class() 切换：默认 Mock（离线/确定/快），
-# 设 TREND_AGENT_PROVIDER=real 启用真实 Google+B站 趋势官（可回退 Mock）。
+# 六官均支持环境变量切换：默认 Mock（离线/确定/快），
+# 设 <ROLE>_AGENT_PROVIDER=real 或总开关 AGENT_PROVIDER=real 启用真 LLM Agent
+# （数据/LLM 故障时真 Agent 内部自动回退 Mock，会议不阻塞）；
+# user/ip/business 另支持 <ROLE>_AGENT_PROVIDER=deterministic 启用
+# 确定性真实实现（不烧 LLM，分数全部来自 Scoped View 聚合）。
+# 注意：注册表在 import 时求值，env 必须在进程启动前设置。
 AGENT_REGISTRY: dict[str, type] = {
     "trend": get_trend_agent_class(),
-    "user": get_consumer_agent_class(),
+    "user": get_user_agent_class(),
     "ip": get_ip_agent_class(),
     "creative": get_creative_agent_class(),
     "business": get_business_agent_class(),
-    "gtm": MockGTMAgent,
+    "gtm": get_gtm_agent_class(),
 }
 
 # ── Agent 短键 → AGENT_DATA_ACCESS 白名单键映射 ────────────────
@@ -343,6 +345,7 @@ async def business_node(state: CommitteeState) -> dict[str, Any]:
         "proposal_set": state["proposal_set"],
         "challenges": state.get("challenges", []),
         "upstream_confidences": upstream,
+        # 真商业官的评审材料（Mock 忽略多余键，透明）
         "feature_matrix": state.get("feature_matrix"),
         "user_sentiment": state.get("user_sentiment"),
         "ip_assessment": state.get("ip_assessment"),

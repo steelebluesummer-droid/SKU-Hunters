@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
@@ -17,6 +17,12 @@ class TaobaoSuggestConnector:
     """淘宝搜索联想词连接器"""
 
     BASE_URL = "https://suggest.taobao.com/sug"
+
+    # 商品形态信号词（analyze_demand 与真 Agent 共用，单一来源）
+    FORM_KEYWORDS: ClassVar[list[str]] = [
+        "娃衣", "公仔", "挂件", "盲盒", "毛绒", "手办", "摆件",
+        "收纳", "钥匙扣", "抱枕", "灯", "杯", "包", "衣服",
+    ]
 
     def __init__(self, timeout: float = 10.0):
         self.timeout = timeout
@@ -81,14 +87,10 @@ class TaobaoSuggestConnector:
         avg_heat = sum(s["heat"] for s in suggestions) / len(suggestions)
 
         # 从联想词中抽取商品形态信号
-        form_keywords = [
-            "娃衣", "公仔", "挂件", "盲盒", "毛绒", "手办", "摆件",
-            "收纳", "钥匙扣", "抱枕", "灯", "杯", "包", "衣服",
-        ]
         signals = sorted({
             form
             for s in suggestions
-            for form in form_keywords
+            for form in self.FORM_KEYWORDS
             if form in s["query"]
         })
 

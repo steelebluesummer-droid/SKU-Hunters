@@ -124,6 +124,8 @@ cd backend && ./venv/Scripts/python scripts/refresh_real_sample.py
 | 112 国场景？ | 企划约束的市场字段 + GTM 官分国别计划（圆桌链路）；演示聚焦中国主场深度打磨（导师建议：1-2 个场景深度 > 全面铺开）。 |
 | 图是 AI 画的吗？ | 即梦（火山引擎）文生图：设计语言 + 关键词组装 prompt 出图；演示环境用冻结出图，AK/SK 配置后 live 模式实时生成，失败自动回退冻结图。 |
 | 为什么不是全自动？ | 名创的真实流程就是"人下约束、人选方向、选样会评审"——AI 做有依据的创意和校验，关键决策留给人。 |
+| 用户洞察哪来的？ | 真用户官已接真实数据源：淘宝联想词（消费需求信号）+ 微博/百度热搜（社媒信号）并行拉取，LLM 归纳痛点与动机，**痛点频次由代码按热度归一计算**、证据链接代码从连接器返回构建——LLM 只写判断性文本，编不了数字和 URL。默认演示走 Mock（冻结数据永不翻车），`.env` 设 `AGENT_PROVIDER=real` + 配好 `LLM_API_KEY` 即六官全真（user/ip/business/gtm + trend/creative），LLM 或数据源故障自动回退 Mock。 |
+| 成本/总分怎么算的？ | 真商业官：LLM 按锚点 rubric 出五维分数（0-100）+ 每条依据强制引用材料原句；**总分是代码加权算术**（Σ 分数×权重，schema 校验器强制容差 0.5，LLM 的 total 直接丢弃），置信度取上游最低（衰减不放大）。可逐笔复算。 |
 | 多维表格/妙搭用了吗？ | 多维表格已真实集成：归档企划案时自动写一行到「SKU 企划归档库」（首次归档自动建表，字段含定价/成本校验/选中机会/设计语言）。演示时归档后页面出现"已同步飞书多维表格 ↗"标签，点开就是真实表格。妙搭未做——我们的前端是定制 React 页面，承载比妙搭表单更复杂的交互，这是取舍不是遗漏。 |
 
 ## 演示前检查清单
@@ -135,8 +137,9 @@ cd backend && ./venv/Scripts/python scripts/refresh_real_sample.py
 5. 飞书副线：启动 cpolar 隧道 → 确认开放平台事件订阅 URL 指向当前隧道地址 + `/api/v1/feishu/events`
 6. 多维表格：确认「SKU 委员会」应用已开通 `bitable:app` 权限（开放平台 → 权限管理），首次归档会自动建「SKU 企划归档库」；未开通则归档照常成功、同步记为失败（页面不炸）
 7. 断网兜底：前端后端不在线时自动用本地 mock，全流程仍可演示（改稿回复为固定回执）
-8. 测试基线：`cd backend && ./venv/Scripts/python -m pytest tests/ -q`（200 项全绿）
+8. 测试基线：`cd backend && ./venv/Scripts/python -m pytest tests/ -q`（229 项全绿）
 9. 真实数据抽样（可选加分项）：`cd backend && ./venv/Scripts/python scripts/refresh_real_sample.py`——三节全 ✅ 即快照可用，评委追问数据源时打开 `backend/data/real_sample_snapshot.json`
 10. 趋势打分快照（可选加分项）：`cd backend && ./venv/Scripts/python scripts/trend_scan.py`——生成 `trend_scan_snapshot.json`，追问"趋势怎么判价值"时展示依据链
 11. 趋势历史回溯（可选加分项）：`cd backend && ./venv/Scripts/python scripts/trend_backfill.py`——生成 `trend_history.json`，追问"增速哪来的/来不及攒数据"时展示实测环比与五源实证结论
 12. 趋势曲线累积（加分叙事）：`backend/data/trend_archive.jsonl` 一行一天真实采集记录——评委追问"曲线哪来的"时展示"从 8 月 14 日起每日采集"。由 Windows 计划任务每日 12:05 自动跑 `scripts/daily_collect.py`（注册命令：`schtasks /create /f /tn "SKU-Hunters-DailyCollect" /tr "<backend绝对路径>\venv\Scripts\python.exe -X utf8 <backend绝对路径>\scripts\daily_collect.py" /sc daily /st 12:05`；删除用 `schtasks /delete /tn SKU-Hunters-DailyCollect`；电脑关机错过可手动补跑，同日重跑覆盖当天记录不重复）
+13. 真委员模式（可选加分项）：`.env` 加 `AGENT_PROVIDER=real` 并确认 `LLM_API_KEY` 已配 → 重启后端，六官全部走真 LLM + 真实数据源（用户官=淘宝联想词+热搜、IP官=淘宝+B站双源、商业官=上游三 artifact 评审、GTM官=TikTok/热搜）。冒烟口径：跑一轮评审，四官产出带真实证据链接与 caveats 声明；任何一路故障自动回退 Mock，演示不翻车。注意注册表在进程启动时求值，改开关必须重启。
