@@ -40,39 +40,81 @@ WEIGHT_TEMPLATES: dict[str, Weights] = {
 # 注意：product_ideation 没有任何原始数据源，只有 artifact_store，
 # 这是「创意官只见结论不见数据」的实现。
 
-AGENT_DATA_ACCESS: dict[str, list[str]] = {
-    "trend_agent": [
-        "google_trends",       # 海外搜索趋势（需海外网络）
-        "bilibili_ranking",    # B站分区排行
-        "social_snapshot",     # 小红书/TikTok 预采集快照
-    ],
-    "consumer_insight_agent": [
-        "taobao_suggest",      # 淘宝联想词（需求侧）
-        "ecommerce_reviews",   # 电商评论数据集
-        "ugc_comments",        # UGC 评论情绪
-    ],
-    "ip_strategy_agent": [
-        "ip_database",         # IP 热度/授权信息库
-        "licensing_db",        # 授权案例库
-        "hit_case_library",    # 历史联名案例（RAG）
-    ],
-    "product_ideation_agent": [
-        "artifact_store",      # 仅三方 Artifact + 知识库，无原始数据
-        "hit_case_library",
-    ],
-    "business_evaluation_agent": [
-        "cost_db",             # 成本数据
-        "competitor_db",       # 竞品数据
-        "sales_reference",     # 历史销售参照
-    ],
-    "go_to_market_agent": [
-        "market_db",           # 区域市场数据
-        "holiday_calendar",    # 节假日日历
-    ],
-    "learning_agent": [
-        "ledger",              # 多维表格决策台账
-        "sales_actuals",       # 上市后实际数据
-    ],
+AGENT_DATA_ACCESS: dict[str, dict[str, list[str]]] = {
+    # 四类权限显式区分（剧本铁律一的代码化）：
+    #   connectors        —— 运行时 connector（走 CONNECTOR_REGISTRY，可实例化）
+    #   readonly_sources  —— 已声明但未实现的只读数据源（fail-closed，暂不归类）
+    #   views             —— Base Scoped View（走 VIEW_REGISTRY，只读能力对象）
+    #   write_ports       —— 独立写入端口（走 WRITE_PORT_REGISTRY，如复盘台账）
+    "trend_agent": {
+        "connectors": [
+            "google_trends",       # 海外搜索趋势（需海外网络）
+            "bilibili_ranking",    # B站分区排行
+        ],
+        "readonly_sources": [
+            "social_snapshot",     # 小红书/TikTok 预采集快照（未实现）
+        ],
+        "views": ["TrendDataView"],
+        "write_ports": [],
+    },
+    "consumer_insight_agent": {
+        "connectors": [
+            "taobao_suggest",      # 淘宝联想词（需求侧）
+        ],
+        "readonly_sources": [
+            "ecommerce_reviews",   # 电商评论数据集（未实现）
+            "ugc_comments",        # UGC 评论情绪（未实现）
+        ],
+        "views": ["ConsumerDataView"],
+        "write_ports": [],
+    },
+    "ip_strategy_agent": {
+        "connectors": [],
+        "readonly_sources": [
+            "ip_database",         # IP 热度/授权信息库（未实现）
+            "licensing_db",        # 授权案例库（未实现）
+            "hit_case_library",    # 历史联名案例（RAG，未实现）
+        ],
+        "views": ["IPDataView"],
+        "write_ports": [],
+    },
+    "product_ideation_agent": {
+        "connectors": [],
+        "readonly_sources": [
+            "artifact_store",      # 仅三方 Artifact + 知识库，无原始数据（未实现）
+            "hit_case_library",
+        ],
+        "views": [],               # 创意官不注入任何数据视图（只见结论不见数据）
+        "write_ports": [],
+    },
+    "business_evaluation_agent": {
+        "connectors": [],
+        "readonly_sources": [
+            "cost_db",             # 成本数据（未实现）
+            "competitor_db",       # 竞品数据（未实现）
+            "sales_reference",     # 历史销售参照（未实现）
+        ],
+        "views": ["BusinessSummaryView"],
+        "write_ports": [],
+    },
+    "go_to_market_agent": {
+        "connectors": [],
+        "readonly_sources": [
+            "market_db",           # 区域市场数据（未实现）
+            "holiday_calendar",    # 节假日日历（未实现）
+        ],
+        "views": ["GTMMarketView"],
+        "write_ports": [],
+    },
+    "learning_agent": {
+        "connectors": [],
+        "readonly_sources": [
+            "ledger",              # 多维表格决策台账（未实现，只读经 LearningLedgerReadView）
+            "sales_actuals",       # 上市后实际数据（未实现）
+        ],
+        "views": ["LearningLedgerReadView"],
+        "write_ports": ["RetroLedgerWriter"],  # 复盘台账写入端口（独立，只追加）
+    },
 }
 
 

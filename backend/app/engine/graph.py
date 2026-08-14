@@ -45,7 +45,11 @@ from app.agents.mock_agents import (
 )
 from app.agents.trend_agent import get_trend_agent_class
 from app.engine import llm
-from app.engine.connector_gateway import resolve_connectors
+from app.engine.connector_gateway import (
+    resolve_connectors,
+    resolve_views,
+    resolve_write_port,
+)
 from app.engine.decision_engine import DecisionEngine
 from app.engine.state import CommitteeState
 from app.schemas import (
@@ -160,25 +164,37 @@ _AGENT_ACCESS_KEY = {
 
 
 def _instantiate_agent(agent_key: str):
-    """经 connector 网关实例化 agent：只注入白名单内的 connector（信息隔离）
+    """经数据网关实例化 agent：只注入白名单内的 connector 与 Scoped View（信息隔离）
 
     只有真实 TrendAgent 访问原始数据源（google_trends / bilibili_ranking），
     经 resolve_connectors 按白名单注入；其余 mock agent 不访问 connector。
     product_ideation_agent 的白名单不含原始数据源，创意官物理上拿不到它们。
+    Scoped View 经 resolve_views 注入（创意官 views 为空 → 不见数据）；
+    复盘写入端口经 resolve_write_port 注入（仅 learning_agent 有）。
+    Agent 拿到的永远是能力对象（View / 写入端口），不持有原始 BaseDataAdapter。
     """
     agent_cls = AGENT_REGISTRY[agent_key]
     access_key = _AGENT_ACCESS_KEY.get(agent_key)
     if access_key is None:
         return agent_cls()
     connectors = resolve_connectors(access_key)
+    views = resolve_views(access_key)            # Scoped View（创意官为空 dict）
+    write_port = resolve_write_port(access_key)  # 复盘写入端口（当前仅 learning 有）
     if agent_key == "trend":
         from app.agents.trend_agent import TrendAgent
         if issubclass(agent_cls, TrendAgent):
-            return agent_cls(
+            agent = agent_cls(
                 google_connector=connectors.get("google_trends"),
                 bilibili_connector=connectors.get("bilibili_ranking"),
             )
-    return agent_cls()
+        else:
+            agent = agent_cls()
+    else:
+        agent = agent_cls()
+    # 能力对象注入：Agent 经网关拿 View/写入端口，而非 raw adapter
+    agent.views = views
+    agent.write_port = write_port
+    return agent
 
 # ── 权重模板：把参数问题翻译成业务语言（剧本 5.4）──────────────
 _TEMPLATE_WEIGHTS = {
