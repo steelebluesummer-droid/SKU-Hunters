@@ -37,6 +37,7 @@ from langgraph.types import Command, interrupt
 
 from app.agents.challenge_agents import CHALLENGE_REGISTRY
 from app.agents.creative_agent import get_creative_agent_class
+from app.agents.creative_contract import validate_proposals
 from app.agents.mock_agents import (
     MockBusinessAgent,
     MockGTMAgent,
@@ -314,6 +315,14 @@ async def creative_node(state: CommitteeState) -> dict[str, Any]:
         "ip_assessment": state.get("ip_assessment"),
         "feedback": _feedback(state),
     })
+    # 四项契约校验（graph 边界强制：Mock 与真实输出都经过，非法输出不能进入 business）
+    validate_proposals(
+        raw.get("proposals", []),
+        state["brief"],
+        state.get("feature_matrix"),
+        state.get("user_sentiment"),
+        state.get("ip_assessment"),
+    )
     return {
         "proposal_set": ProposalSet.model_validate(raw).model_dump(mode="json"),
         "current_act": "act2",

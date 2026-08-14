@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
+from app.agents.creative_contract import ContractError, validate_proposals
 from app.agents.mock_agents import MockCreativeAgent
 from app.schemas import ProposalSet, SourceRef
 
@@ -92,19 +93,42 @@ def _source_map(
     return refs
 
 
+_MAX_RETRIES = 3
+
+
+class _NoLLM(Exception):
+    """LLM 未配置或调用失败（触发 fail-soft 降级到 Mock）"""
+
+
 class CreativeAgent(BaseAgent):
-    """真创意官：LLM 出创意，代码管溯源与校验，失败回退 Mock"""
+    """真创意官：LLM 出创意，代码管溯源与校验；契约失败重试，重试仍失败抛 ContractError"""
 
     name = "product_ideation_agent"
 
     async def run(self, context: dict[str, Any]) -> dict[str, Any]:
-        try:
-            result = await asyncio.to_thread(self._generate, context)
-            if result is not None:
-                return result
-        except Exception:  # noqa: BLE001,S110 — 降级纪律：任何故障回退 Mock
-            pass
-        return await MockCreativeAgent().run(context)
+        last_error: ContractError | None = None
+        for _ in range(_MAX_RETRIES):
+            try:
+                return await asyncio.to_thread(self._generate, context)
+            except _NoLLM:
+                break  # 无 Key / LLM 故障 → 降级 Mock（fail-soft 保留）
+            except ContractError as e:
+                last_error = e
+                continue  # 输出不合契约 → 重新生成重试
+            except Exception:  # noqa: BLE001 — 其他故障降级 Mock
+                break
+        if last_error is not None:
+            raise last_error  # 重试仍失败 → 明确 ContractError
+        # 降级 Mock：Mock 产物也必须通过契约校验（只有输出契约合法才允许降级）
+        mock_result = await MockCreativeAgent().run(context)
+        validate_proposals(
+            mock_result.get("proposals", []),
+            context.get("brief", {}),
+            context.get("feature_matrix"),
+            context.get("user_sentiment"),
+            context.get("ip_assessment"),
+        )
+        return mock_result
 
     def _generate(self, context: dict[str, Any]) -> dict[str, Any] | None:
         from app.engine.llm import complete
@@ -136,11 +160,11 @@ class CreativeAgent(BaseAgent):
 
         raw = complete(_SYSTEM_PROMPT, user_prompt, temperature=0.8, max_tokens=2000)
         if not raw:
-            return None
+            raise _NoLLM()
 
         data = self._parse_json(raw)
         if data is None:
-            return None
+            raise ContractError("LLM 输出无法解析为 JSON")
 
         refs = _source_map(fm, us, ip)
         proposals = []
@@ -157,7 +181,10 @@ class CreativeAgent(BaseAgent):
                 "confidence": "medium",
             })
         if len(proposals) < 3 or any(not p["name"] or not p["concept"] for p in proposals):
-            return None
+            raise ContractError("方案数量不足 3 个或字段为空")
+
+        # 四项契约校验：source_map 覆盖 / 方案互异 / 价格带预算 / product_form 依据
+        validate_proposals(proposals, brief, fm, us, ip)
 
         return ProposalSet.model_validate({
             "proposals": proposals[:5],
