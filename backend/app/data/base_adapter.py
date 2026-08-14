@@ -2,7 +2,7 @@
 
 约束：
 - BaseDataAdapter 只能由 connector_gateway 或数据服务层持有，不能直接注入 Agent。
-- 真实配置只从环境变量读取（FEISHU_BASE_TOKEN / FEISHU_DATA_TABLE_ID / FEISHU_SUMMARY_TABLE_ID）。
+- 真实配置只从环境变量读取（FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BASE_APP_TOKEN / FEISHU_DATA_TABLE_ID / FEISHU_SUMMARY_TABLE_ID）。
 - 缺少配置时应用可启动；只有真正调用 Base 数据时才抛 BaseUnavailable。
 - 当前未接入真实飞书 Base API（无字段映射），真实 provider 一律 fail-closed。
 - 不打印 Token、不猜测飞书 API 字段、不伪造真实数据。
@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
-from app.schemas.base_data import BaseQuery, BaseRecord, BaseRecordPage
+import requests
+from pydantic import ValidationError
+
+from app.schemas.base_data import BasePlatform, BaseQuery, BaseRecord, BaseRecordPage
 
 
 class BaseUnavailable(Exception):
@@ -27,7 +31,7 @@ class BaseProviderError(Exception):
 
 def _has_base_config() -> bool:
     """是否配置了真实飞书 Base 环境变量（只判断存在性，不读取 Token 值）"""
-    return bool(os.getenv("FEISHU_BASE_TOKEN")) and bool(os.getenv("FEISHU_DATA_TABLE_ID"))
+    return bool(os.getenv("FEISHU_BASE_APP_TOKEN")) and bool(os.getenv("FEISHU_DATA_TABLE_ID"))
 
 def _resolve_provider_mode() -> str:
     """解析 Base 数据源模式：mock / feishu / disabled（默认 disabled = 生产 fail-closed）
@@ -44,7 +48,7 @@ def _provider_for_mode(mode: str) -> BaseProvider:
         return MockBaseProvider()
     if mode == "feishu":
         if not _has_base_config():
-            raise BaseUnavailable("BASE_PROVIDER_MODE=feishu 但缺少 FEISHU_BASE_TOKEN / FEISHU_DATA_TABLE_ID")
+            raise BaseUnavailable("BASE_PROVIDER_MODE=feishu 但缺少 FEISHU_BASE_APP_TOKEN / FEISHU_DATA_TABLE_ID")
         return FeishuBaseProvider()
     if mode == "disabled":
         raise BaseUnavailable("BASE_PROVIDER_MODE=disabled（默认），Base 数据访问已关闭")
@@ -131,6 +135,29 @@ _FIXTURE_RECORDS: list[dict[str, Any]] = [
 ]
 
 
+def _filter_records(
+    records: list[BaseRecord],
+    keyword: str | None = None,
+    platform: str | None = None,
+    category: str | None = None,
+    as_of: str | None = None,
+    snapshot_id: str | None = None,
+) -> list[BaseRecord]:
+    """内存过滤（Mock 与 Feishu provider 共用）：keyword 子串 / platform 等值 / category 等值 / as_of 边界 / snapshot 锁定"""
+    result = list(records)
+    if keyword:
+        result = [r for r in result if keyword.lower() in r.keyword.lower()]
+    if platform:
+        result = [r for r in result if r.platform == platform]
+    if category:
+        result = [r for r in result if r.category == category]
+    if as_of:
+        result = [r for r in result if r.record_date <= as_of]  # 不读未来数据
+    if snapshot_id:
+        result = [r for r in result if r.snapshot_id == snapshot_id]  # 快照锁定
+    return result
+
+
 class MockBaseProvider:
     """本地 fixture provider — 未接真实飞书 API，仅用于演示与测试"""
 
@@ -138,18 +165,7 @@ class MockBaseProvider:
         self._records = [BaseRecord.model_validate(r) for r in (records or _FIXTURE_RECORDS)]
 
     def _filtered(self, keyword: str | None, platform: str | None, category: str | None, as_of: str | None, snapshot_id: str | None = None) -> list[BaseRecord]:
-        result = list(self._records)
-        if keyword:
-            result = [r for r in result if keyword.lower() in r.keyword.lower()]
-        if platform:
-            result = [r for r in result if r.platform == platform]
-        if category:
-            result = [r for r in result if r.category == category]
-        if as_of:
-            result = [r for r in result if r.record_date <= as_of]  # 不读未来数据
-        if snapshot_id:
-            result = [r for r in result if r.snapshot_id == snapshot_id]  # 快照锁定
-        return result
+        return _filter_records(self._records, keyword, platform, category, as_of, snapshot_id)
 
     def search_records(self, keyword, platform=None, category=None, as_of=None, snapshot_id=None, page=1, page_size=20):
         filtered = self._filtered(keyword, platform, category, as_of, snapshot_id)
@@ -187,28 +203,278 @@ class MockBaseProvider:
 
 
 class FeishuBaseProvider:
-    """真实飞书 Base provider（占位）— 未接入真实字段映射，一律 fail-closed"""
+    """真实飞书 Base provider（只读）— 从飞书多维表格读取采集记录
 
-    def __init__(self, token: str | None = None, data_table_id: str | None = None, summary_table_id: str | None = None):
-        self._token = token or os.getenv("FEISHU_BASE_TOKEN")
+    - 认证复用 FeishuAuth（FEISHU_APP_ID/APP_SECRET → tenant_access_token），不自行维护 token。
+    - 数据定位：FEISHU_BASE_APP_TOKEN（多维表格 ID）+ FEISHU_DATA_TABLE_ID（明细）/ FEISHU_SUMMARY_TABLE_ID（汇总）。
+    - 缺配置 → BaseUnavailable；网络/飞书非零错误码 → BaseProviderError；与「无数据」严格区分。
+    - 字段映射以 docs/guides/feishu-base-mapping.md §四/§五 为准（真实字段名未核对前为设计假设）。
+    - 分页：飞书 page_token 游标；一期「拉全表 + 内存过滤 + 内存分页」，超 2 万条需 filter 下推优化。
+    """
+
+    _API = "https://open.feishu.cn/open-apis/bitable/v1/apps"
+    _REQ_TIMEOUT = 10
+
+    def __init__(
+        self,
+        auth: Any | None = None,
+        app_token: str | None = None,
+        data_table_id: str | None = None,
+        summary_table_id: str | None = None,
+    ):
+        self._auth = auth
+        self._app_token = app_token or os.getenv("FEISHU_BASE_APP_TOKEN")
         self._data_table_id = data_table_id or os.getenv("FEISHU_DATA_TABLE_ID")
         self._summary_table_id = summary_table_id or os.getenv("FEISHU_SUMMARY_TABLE_ID")
+        self._caveats: list[dict[str, Any]] = []
+        self._records_cache: list[BaseRecord] | None = None
+        self._summary_cache: list[dict[str, Any]] | None = None
+
+    # ── 配置与认证 ──────────────────────────────
 
     def _ensure_config(self) -> None:
-        if not self._token or not self._data_table_id:
-            raise BaseUnavailable("飞书 Base 配置缺失：FEISHU_BASE_TOKEN / FEISHU_DATA_TABLE_ID")
+        if not self._app_token or not self._data_table_id:
+            raise BaseUnavailable("飞书 Base 配置缺失：FEISHU_BASE_APP_TOKEN / FEISHU_DATA_TABLE_ID")
 
-    def search_records(self, *args, **kwargs):
-        self._ensure_config()
-        raise BaseUnavailable("真实飞书 Base API 未接入（缺少字段映射），当前仅支持本地 mock provider")
+    def _get_auth(self) -> Any:
+        """复用 feishu.auth.FeishuAuth，不自行维护 token"""
+        if self._auth is not None:
+            return self._auth
+        from feishu.auth import FeishuAuth
+        from feishu.config import FeishuConfig
 
-    def get_summary(self, *args, **kwargs):
-        self._ensure_config()
-        raise BaseUnavailable("真实飞书 Base API 未接入（缺少字段映射），当前仅支持本地 mock provider")
+        config = FeishuConfig.from_env()
+        if not config.app_id or not config.app_secret:
+            raise BaseUnavailable("飞书认证配置缺失：FEISHU_APP_ID / FEISHU_APP_SECRET")
+        return FeishuAuth(config)
 
-    def get_date_distribution(self, *args, **kwargs):
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._get_auth().get_token()}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+    def _post(self, table_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """调用飞书记录查询接口，返回 data；网络/超时/非零错误码 → BaseProviderError"""
+        url = f"{self._API}/{self._app_token}/tables/{table_id}/records/search"
+        try:
+            resp = requests.post(url, headers=self._headers(), json=body, timeout=self._REQ_TIMEOUT)
+        except requests.RequestException as e:
+            raise BaseProviderError(f"飞书 Base 请求失败（网络/超时）: {e}") from e
+        # 先检查 HTTP 状态码，避免 4xx/5xx 且 code=0 的异常响应被误判成功
+        if resp.status_code >= 400:
+            raise BaseProviderError(f"飞书 Base HTTP 错误：status={resp.status_code}")
+        try:
+            data = resp.json()
+        except ValueError as e:
+            raise BaseProviderError(f"飞书 Base 响应非 JSON（HTTP {resp.status_code}）") from e
+        if data.get("code") != 0:
+            raise BaseProviderError(f"飞书 Base 返回错误 code={data.get('code')} msg={data.get('msg')}")
+        return data.get("data", {})
+
+    # ── 字段转换 ──────────────────────────────
+
+    @staticmethod
+    def _to_float(raw: Any) -> float | None:
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _ms_to_date(ms: Any) -> str | None:
+        """毫秒时间戳 → YYYY-MM-DD"""
+        if ms is None:
+            return None
+        try:
+            return datetime.fromtimestamp(float(ms) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        except (ValueError, TypeError, OSError):
+            return None
+
+    @staticmethod
+    def _ms_to_iso(ms: Any) -> str | None:
+        """毫秒时间戳 → ISO8601"""
+        if ms is None:
+            return None
+        try:
+            return datetime.fromtimestamp(float(ms) / 1000, tz=timezone.utc).isoformat()
+        except (ValueError, TypeError, OSError):
+            return None
+
+    @staticmethod
+    def _to_url(raw: Any) -> str | None:
+        """飞书 Url 字段（dict{link,text} 或 str）→ 链接；空/非 http(s) → None"""
+        if raw is None:
+            return None
+        link = raw.get("link") if isinstance(raw, dict) else raw
+        if not link:
+            return None
+        text = str(link)
+        return text if text.startswith(("http://", "https://")) else None
+
+    @staticmethod
+    def _to_json(raw: Any) -> Any:
+        """dict 原样；str 按 JSON 解析；失败 → None（raw_value / brands 通用）"""
+        if raw is None:
+            return None
+        if isinstance(raw, (dict, list)):
+            return raw
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+
+    def _to_base_record(self, fields: dict[str, Any], record_id: str) -> tuple[BaseRecord | None, dict[str, Any] | None]:
+        """飞书字段 → BaseRecord；非法 platform/字段校验失败 → (None, caveat)（跳过但不静默吞掉）"""
+        platform_raw = fields.get("platform")
+        try:
+            platform = BasePlatform(platform_raw) if platform_raw else None
+        except ValueError:
+            return None, {"record_id": record_id, "field": "platform", "reason": f"非法 platform: {platform_raw!r}"}
+
+        data = {
+            "record_id": fields.get("record_id") or record_id,
+            "keyword": fields.get("keyword"),
+            "platform": platform,
+            "category": fields.get("category") or "",
+            "summary": fields.get("summary") or "",
+            "heat_index": self._to_float(fields.get("heat_index")),
+            "interaction": self._to_float(fields.get("interaction")),
+            "brand": fields.get("brand"),
+            "price_range": fields.get("price_range"),
+            "record_date": self._ms_to_date(fields.get("record_date")),
+            "source_url": self._to_url(fields.get("source_url")),
+            "snapshot_id": fields.get("snapshot_id"),
+            "ingested_at": self._ms_to_iso(fields.get("ingested_at")),
+            "raw_value": self._to_json(fields.get("raw_value")),
+        }
+        try:
+            return BaseRecord.model_validate(data), None
+        except ValidationError as e:
+            return None, {"record_id": record_id, "field": None, "reason": str(e)}
+
+    # ── 拉取 ──────────────────────────────
+
+    def _fetch_all(self) -> list[BaseRecord]:
+        """page_token 游标拉取明细表全量并转为 BaseRecord（跳过非法记录、记 caveat；带请求级缓存）"""
+        if self._records_cache is not None:
+            return self._records_cache
         self._ensure_config()
-        raise BaseUnavailable("真实飞书 Base API 未接入（缺少字段映射），当前仅支持本地 mock provider")
+        records: list[BaseRecord] = []
+        caveats: list[dict[str, Any]] = []
+        page_token: str | None = None
+        max_pages = 100  # 防御：异常时兜底
+        for _ in range(max_pages):
+            body: dict[str, Any] = {"page_size": 500}
+            if page_token:
+                body["page_token"] = page_token
+            data = self._post(self._data_table_id, body)
+            for item in data.get("items", []):
+                record, caveat = self._to_base_record(item.get("fields", {}), item.get("record_id", ""))
+                if record is not None:
+                    records.append(record)
+                elif caveat is not None:
+                    caveats.append(caveat)
+            if not data.get("has_more"):
+                break
+            page_token = data.get("page_token")
+            if not page_token:
+                break  # 无进展保护
+        self._caveats = caveats
+        self._records_cache = records
+        return records
+
+    def _fetch_summary_rows(self) -> list[dict[str, Any]]:
+        """拉取汇总表全量原始字段；汇总表未配置 → BaseUnavailable；带请求级缓存"""
+        if self._summary_cache is not None:
+            return self._summary_cache
+        if not self._summary_table_id:
+            raise BaseUnavailable("飞书汇总表未配置：FEISHU_SUMMARY_TABLE_ID")
+        self._ensure_config()
+        rows: list[dict[str, Any]] = []
+        page_token: str | None = None
+        max_pages = 100
+        for _ in range(max_pages):
+            body: dict[str, Any] = {"page_size": 500}
+            if page_token:
+                body["page_token"] = page_token
+            data = self._post(self._summary_table_id, body)
+            for item in data.get("items", []):
+                rows.append(item.get("fields", {}))
+            if not data.get("has_more"):
+                break
+            page_token = data.get("page_token")
+            if not page_token:
+                break
+        self._summary_cache = rows
+        return rows
+
+    # ── 查询接口（BaseProvider protocol）──────────────
+
+    def search_records(self, keyword, platform=None, category=None, as_of=None, snapshot_id=None, page=1, page_size=20) -> BaseRecordPage:
+        all_records = self._fetch_all()
+        filtered = _filter_records(all_records, keyword, platform, category, as_of, snapshot_id)
+        total = len(filtered)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_records = filtered[start:end]
+        return BaseRecordPage(records=page_records, total=total, page=page, page_size=page_size, has_more=end < total)
+
+    def get_summary(self, category=None, as_of=None, snapshot_id=None) -> dict[str, Any]:
+        rows = self._fetch_summary_rows()
+        matched: list[dict[str, Any]] = []
+        for row in rows:
+            if category is not None and row.get("category") != category:
+                continue
+            if snapshot_id is not None and row.get("snapshot_id") != snapshot_id:
+                continue
+            if as_of is not None:
+                row_as_of = self._ms_to_date(row.get("as_of"))
+                if row_as_of is None or row_as_of > as_of:
+                    continue
+            matched.append(row)
+        if not matched:
+            # 一期不做静默实时聚合降级：无匹配快照即明确失败
+            raise BaseUnavailable("飞书汇总表无匹配快照（category/as_of/snapshot_id 无命中）")
+        # 确定性选择：指定 snapshot_id 应唯一；否则按 as_of 降序选最新；重复即歧义
+        if snapshot_id is not None:
+            if len(matched) > 1:
+                raise BaseProviderError(f"汇总表快照 {snapshot_id} 存在 {len(matched)} 条重复，无法确定性选择")
+            row = matched[0]
+        else:
+            matched.sort(key=lambda r: r.get("as_of") or 0, reverse=True)
+            row = matched[0]
+            if len(matched) > 1 and (matched[1].get("as_of") or 0) == (row.get("as_of") or 0):
+                raise BaseProviderError("汇总表存在多条相同 as_of 的快照，无法确定性选择")
+        brands = self._to_json(row.get("brands"))
+        return {
+            "category": row.get("category") or category or "all",
+            "snapshot_id": row.get("snapshot_id"),
+            "record_count": int(self._to_float(row.get("record_count")) or 0),
+            "avg_heat_index": self._to_float(row.get("avg_heat_index")) or 0.0,
+            "brands": brands if isinstance(brands, list) else [],
+        }
+
+    def get_date_distribution(self, keyword, as_of=None, snapshot_id=None) -> list[dict[str, Any]]:
+        all_records = self._fetch_all()
+        filtered = _filter_records(all_records, keyword, None, None, as_of, snapshot_id)
+        dist: dict[str, int] = {}
+        for r in filtered:
+            dist[r.record_date] = dist.get(r.record_date, 0) + 1
+        return [{"date": d, "count": c} for d, c in sorted(dist.items())]
+
+    @property
+    def caveats(self) -> list[dict[str, Any]]:
+        """最近一次拉取中被跳过的非法记录（结构化 caveat，供审计，不静默吞掉）"""
+        return list(self._caveats)
+
+    def clear_cache(self) -> None:
+        """清空明细/汇总表缓存与 caveat（下一次查询重新拉取飞书）"""
+        self._records_cache = None
+        self._summary_cache = None
+        self._caveats = []
 
 
 # ── 统一适配器 ────────────────────────────────────────────

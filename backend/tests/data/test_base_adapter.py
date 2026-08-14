@@ -15,7 +15,9 @@ from pydantic import ValidationError
 
 def _clear_base_env(monkeypatch):
     for k in (
-        "FEISHU_BASE_TOKEN",
+        "FEISHU_APP_ID",
+        "FEISHU_APP_SECRET",
+        "FEISHU_BASE_APP_TOKEN",
         "FEISHU_DATA_TABLE_ID",
         "FEISHU_SUMMARY_TABLE_ID",
         "BASE_PROVIDER_MODE",
@@ -52,9 +54,9 @@ def test_mock_mode_uses_fixture(monkeypatch):
 
 
 def test_feishu_provider_unavailable_without_config(monkeypatch):
-    """FeishuBaseProvider 无配置 → 调用时抛 BaseUnavailable（与无数据区分）"""
+    """FeishuBaseProvider 无 app_token/table_id → 调用时抛 BaseUnavailable（与无数据区分）"""
     _clear_base_env(monkeypatch)
-    provider = FeishuBaseProvider(token=None, data_table_id=None, summary_table_id=None)
+    provider = FeishuBaseProvider(app_token=None, data_table_id=None, summary_table_id=None)
     with pytest.raises(BaseUnavailable):
         provider.search_records("小风扇")
 
