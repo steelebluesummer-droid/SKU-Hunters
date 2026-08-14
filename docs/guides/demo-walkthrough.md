@@ -139,3 +139,4 @@ cd backend && ./venv/Scripts/python scripts/refresh_real_sample.py
 9. 真实数据抽样（可选加分项）：`cd backend && ./venv/Scripts/python scripts/refresh_real_sample.py`——三节全 ✅ 即快照可用，评委追问数据源时打开 `backend/data/real_sample_snapshot.json`
 10. 趋势打分快照（可选加分项）：`cd backend && ./venv/Scripts/python scripts/trend_scan.py`——生成 `trend_scan_snapshot.json`，追问"趋势怎么判价值"时展示依据链
 11. 趋势历史回溯（可选加分项）：`cd backend && ./venv/Scripts/python scripts/trend_backfill.py`——生成 `trend_history.json`，追问"增速哪来的/来不及攒数据"时展示实测环比与五源实证结论
+12. 趋势曲线累积（加分叙事）：`backend/data/trend_archive.jsonl` 一行一天真实采集记录——评委追问"曲线哪来的"时展示"从 8 月 14 日起每日采集"。由 Windows 计划任务每日 12:05 自动跑 `scripts/daily_collect.py`（注册命令：`schtasks /create /f /tn "SKU-Hunters-DailyCollect" /tr "<backend绝对路径>\venv\Scripts\python.exe -X utf8 <backend绝对路径>\scripts\daily_collect.py" /sc daily /st 12:05`；删除用 `schtasks /delete /tn SKU-Hunters-DailyCollect`；电脑关机错过可手动补跑，同日重跑覆盖当天记录不重复）
