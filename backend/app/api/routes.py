@@ -8,6 +8,7 @@ D5：SQLite 持久化——会议终态自动落盘，重启后历史数据恢�
 from __future__ import annotations
 
 import asyncio
+import copy
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -25,6 +26,15 @@ router = APIRouter(prefix="/api/v1", tags=["committee"])
 
 # 内存主存储：session_id → 运行中会话（与 SQLite 终态落盘互补）
 _SESSIONS: dict[str, dict[str, Any]] = {}
+_session_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _session_lock(session_id: str) -> asyncio.Lock:
+    """同一 session 的复盘写操作串行化（避免 retro_turns 覆盖 / retro_logs 丢失）"""
+    lock = _session_locks.get(session_id)
+    if lock is None:
+        lock = _session_locks[session_id] = asyncio.Lock()
+    return lock
 
 # role → current_act 映射
 _ROLE_ACT = {
@@ -89,6 +99,13 @@ def _persist(sid: str):
         final_action=s.get("final_action"),
         error=s.get("error"),
     )
+
+
+
+def _persist_snapshot(sid: str, snapshot: dict, question: str, answer: str):
+    """线程内落盘：只写 store，不读 _SESSIONS（数据已由调用方在事件循环中复制）"""
+    store.add_retro_log(sid, question, answer)
+    store.create_or_update(sid, **snapshot)
 
 
 async def _drive(session_id: str, brief: dict[str, Any]):
@@ -256,14 +273,28 @@ async def retro_chat(session_id: str, payload: dict):
     question = payload.get("question", "").strip()
     if not question:
         raise HTTPException(422, detail={"error": {"code": "RETRO_QUESTION_REQUIRED", "message": "question 必填"}})
-    digest = "\n".join(session["digest_parts"])
-    answer = retro_answer(digest, question)
-    turn = {"question": question, "answer": answer, "timestamp": _now()}
-    session["retro_logs"].append(turn)
-    session["archive"]["retro_turns"] = session["archive"].get("retro_turns", 0) + 1
-    store.add_retro_log(session_id, question, answer)  # 历史复盘直接落盘
-    _persist(session_id)  # 同步 archive.retro_turns
-    return {"session_id": session_id, **turn}
+    lock = await _session_lock(session_id)
+    async with lock:
+        digest = "\n".join(session["digest_parts"])
+        answer = await asyncio.to_thread(retro_answer, digest, question)
+        turn = {"question": question, "answer": answer, "timestamp": _now()}
+        session["retro_logs"].append(turn)
+        session["archive"]["retro_turns"] = session["archive"].get("retro_turns", 0) + 1
+        # 复制需要持久化的数据，线程只写 store 不读 _SESSIONS
+        snapshot = {
+            "brief": copy.deepcopy(session["brief"]),
+            "created_at": session["created_at"],
+            "current_act": session["current_act"],
+            "status": session["status"],
+            "live_feed": copy.deepcopy(session["live_feed"]),
+            "report": copy.deepcopy(session.get("report")),
+            "archive": copy.deepcopy(session.get("archive")),
+            "digest_parts": copy.deepcopy(session.get("digest_parts", [])),
+            "final_action": session.get("final_action"),
+            "error": session.get("error"),
+        }
+        await asyncio.to_thread(_persist_snapshot, session_id, snapshot, question, answer)
+        return {"session_id": session_id, **turn}
 
 
 @router.get("/weights/templates")

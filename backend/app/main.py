@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,13 +14,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # 启动即加载 backend/.env（LLM Key、即梦 AK/SK、飞书配置）——必须在 app.* 导入前
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-from app.api.planning import router as planning_router  # noqa: E402
-from app.api.routes import router as committee_router  # noqa: E402
-from app.xhs.api import router as xhs_router  # noqa: E402
-
 # 飞书机器人模块（backend/feishu/，需从 backend/ 目录启动以保证可导入）
 from feishu import FeishuConfig  # noqa: E402
 from feishu.webhook import create_feishu_router  # noqa: E402
+
+from app.api.planning import router as planning_router  # noqa: E402
+from app.api.routes import router as committee_router  # noqa: E402
+from app.xhs.api import router as xhs_router  # noqa: E402
 
 app = FastAPI(
     title="SKU Hunters — AI 新品企划工作室",
@@ -27,9 +28,32 @@ app = FastAPI(
     version="2.0.0",
 )
 
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:4173",
+]
+
+
+def _load_cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+    if not raw:
+        return list(_DEFAULT_CORS_ORIGINS)
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        raise RuntimeError(
+            "CORS_ALLOW_ORIGINS 不允许为 '*'：与 allow_credentials=True 冲突，"
+            "请显式列出允许来源（逗号分隔）"
+        )
+    return origins
+
+
+_CORS_ALLOW_ORIGINS = _load_cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

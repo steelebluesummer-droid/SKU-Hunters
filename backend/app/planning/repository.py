@@ -13,6 +13,7 @@ import json
 import re
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -52,10 +53,11 @@ _LEGACY_STATE_FILE = Path(__file__).resolve().parents[2] / "data" / "plans_state
 
 
 def _save_state() -> None:
-    """将全部任务状态原子落盘（先写临时文件再 rename，避免写一半损坏）"""
+    """将全部任务状态原子落盘（锁内快照 + 唯一临时文件 + rename，避免并发覆盖）"""
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {}
+    tmp = _STATE_FILE.with_name(f".plans_state.{uuid.uuid4().hex}.tmp")
     with _lock:
+        payload = {}
         for pid, p in _PLANS.items():
             payload[pid] = {
                 "plan_id": p["plan_id"],
@@ -68,10 +70,9 @@ def _save_state() -> None:
                 "revise_logs": p.get("revise_logs", []),
                 "archived_at": p.get("archived_at"),
             }
-    tmp = _STATE_FILE.with_suffix(".json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    tmp.replace(_STATE_FILE)  # 原子替换（同目录 rename）
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        tmp.replace(_STATE_FILE)
 
 
 def _load_state() -> dict[str, dict[str, Any]]:
@@ -114,7 +115,31 @@ def create_plan(brief: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_plan(plan_id: str) -> dict[str, Any] | None:
-    return _PLANS.get(plan_id)
+    with _lock:
+        return _PLANS.get(plan_id)
+
+
+# ── per-plan 写锁（业务对象锁，非文件锁）────────────────────
+# 同一 plan_id 的「读-改-写」串行化，避免并发请求对同一任务的状态推进竞态。
+# 与全局 _lock 分层：_lock 保护 _PLANS 字典结构读写；plan 锁保护单任务业务操作。
+
+_plan_locks: dict[str, threading.Lock] = {}
+_plan_locks_guard = threading.Lock()
+
+
+def _plan_lock(plan_id: str) -> threading.Lock:
+    with _plan_locks_guard:
+        lock = _plan_locks.get(plan_id)
+        if lock is None:
+            lock = _plan_locks[plan_id] = threading.Lock()
+        return lock
+
+
+@contextmanager
+def plan_write_lock(plan_id: str):
+    """同一 plan_id 的写操作串行化上下文管理器"""
+    with _plan_lock(plan_id):
+        yield
 
 
 def list_plans() -> list[dict[str, Any]]:

@@ -95,7 +95,7 @@ def _opportunities_from_bundle(category: str, bundle: dict, brief: dict) -> list
             "keywords": [ip_short, color0, "联名限定"],
             "evidence": [
                 ev("名创内部", f"IP 池：{ip_short}（{ip_why[:50]}）" if ip_why else f"IP 策略：{ip_short}"),
-                ev("趋势洞察", f"{sig0['name']}（{sig0['metric']}）" if sig0 else ""),
+                ev("趋势洞察", f"{sig0.get('name', '')}（{sig0.get('metric', '')}）" if sig0 else ""),
                 ev("流行元素", f"当季配色 {color0}"),
                 ev("竞品分析", gap_label[:50] if gap_label else "差异化机会空白"),
             ],
@@ -107,12 +107,12 @@ def _opportunities_from_bundle(category: str, bundle: dict, brief: dict) -> list
             "id": "pain-solution", "emoji": "💡",
             "title": f"{category}痛点解决升级款",
             "direction": "功能实用风",
-            "pitch": f"直击「{pain0['text'][:22] if pain0 else '体验'}」痛点，做差异化功能",
+            "pitch": f"直击「{pain0.get('text', '')[:22] if pain0 else '体验'}」痛点，做差异化功能",
             "priceBand": price_band,
-            "keywords": [(pain0["text"][:12] if pain0 else ""), "品质升级"],
+            "keywords": [(pain0.get("text", "")[:12] if pain0 else ""), "品质升级"],
             "evidence": [
-                ev("用户洞察", f"高频痛点：{pain0['text']}（{pain0['count']}条）" if pain0 else ""),
-                ev("趋势洞察", f"{sig1['name']}（{sig1['metric']}）" if sig1 else ""),
+                ev("用户洞察", f"高频痛点：{pain0.get('text', '')}（{pain0.get('count', 0)}条）" if pain0 else ""),
+                ev("趋势洞察", f"{sig1.get('name', '')}（{sig1.get('metric', '')}）" if sig1 else ""),
                 ev("竞品分析", gap_label[:50] if gap_label else "差异化机会空白"),
                 ev("流行元素", f"当季配色 {color0 or '—'}"),
             ],
@@ -130,7 +130,7 @@ def _opportunities_from_bundle(category: str, bundle: dict, brief: dict) -> list
             ev("用户洞察", f"高频场景：{scene0}"),
             ev("流行元素", f"风格关键词：{expr0 or '—'}"),
             ev("竞品分析", gap_label[:50] if gap_label else "差异化机会空白"),
-            ev("趋势洞察", f"{sig0['name']}（{sig0['metric']}）" if sig0 else ""),
+            ev("趋势洞察", f"{sig0.get('name', '')}（{sig0.get('metric', '')}）" if sig0 else ""),
         ],
     })
 

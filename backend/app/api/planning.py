@@ -18,6 +18,7 @@ brief 传 mode="live" 走真实 LLM + 即梦出图（失败自动降级）。
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -182,7 +183,7 @@ async def action_generate_plan_card(plan_id: str, payload: dict):
     if not opportunity_id:
         raise HTTPException(422, detail={"error": {"code": "OPPORTUNITY_REQUIRED", "message": "opportunity_id 必填"}})
     try:
-        card = pipeline.generate_plan_card(plan, opportunity_id)
+        card = await asyncio.to_thread(pipeline.generate_plan_card, plan, opportunity_id)
     except StateTransitionError as e:
         raise _state_transition_error(e)
     if card is None:
@@ -194,7 +195,7 @@ async def action_generate_plan_card(plan_id: str, payload: dict):
 async def action_archive(plan_id: str, background_tasks: BackgroundTasks):
     plan = _get_plan_or_404(plan_id)
     try:
-        pipeline.archive_plan(plan)
+        await asyncio.to_thread(pipeline.archive_plan, plan)
     except StateTransitionError as e:
         raise _state_transition_error(e)
     except ValueError as e:
@@ -210,7 +211,7 @@ async def generate_plan_card(plan_id: str, payload: dict):
     if not opportunity_id:
         raise HTTPException(422, detail={"error": {"code": "OPPORTUNITY_REQUIRED", "message": "opportunity_id 必填"}})
     try:
-        card = pipeline.generate_plan_card(plan, opportunity_id)
+        card = await asyncio.to_thread(pipeline.generate_plan_card, plan, opportunity_id)
     except StateTransitionError as e:
         raise _state_transition_error(e)
     if card is None:
@@ -227,7 +228,8 @@ async def revise_plan(plan_id: str, payload: dict):
     if plan.get("plan_card") is None:
         raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": "请先生成企划卡"}})
     try:
-        return {"plan_id": plan_id, **pipeline.revise_plan(plan, message)}
+        result = await asyncio.to_thread(pipeline.revise_plan, plan, message)
+        return {"plan_id": plan_id, **result}
     except StateTransitionError as e:
         raise _state_transition_error(e)
 
@@ -252,7 +254,7 @@ def _run_archive_hooks(plan: dict[str, Any]) -> None:
 async def archive_plan(plan_id: str, background_tasks: BackgroundTasks):
     plan = _get_plan_or_404(plan_id)
     try:
-        pipeline.archive_plan(plan)
+        await asyncio.to_thread(pipeline.archive_plan, plan)
     except StateTransitionError as e:
         raise _state_transition_error(e)
     except ValueError as e:
@@ -269,7 +271,8 @@ async def review_plan(plan_id: str, payload: dict):
     question = (payload.get("question") or "").strip()
     if not question:
         raise HTTPException(422, detail={"error": {"code": "QUESTION_REQUIRED", "message": "question 必填"}})
-    return {"plan_id": plan_id, **pipeline.review_plan(plan, question)}
+    result = await asyncio.to_thread(pipeline.review_plan, plan, question)
+    return {"plan_id": plan_id, **result}
 
 
 # ── 策展数据独立页（非 Agent 现搜，提前策展）────────────────────

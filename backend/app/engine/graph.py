@@ -45,6 +45,7 @@ from app.agents.mock_agents import (
 )
 from app.agents.trend_agent import get_trend_agent_class
 from app.engine import llm
+from app.engine.connector_gateway import resolve_connectors
 from app.engine.decision_engine import DecisionEngine
 from app.engine.state import CommitteeState
 from app.schemas import (
@@ -147,6 +148,38 @@ AGENT_REGISTRY: dict[str, type] = {
     "gtm": MockGTMAgent,
 }
 
+# ── Agent 短键 → AGENT_DATA_ACCESS 白名单键映射 ────────────────
+_AGENT_ACCESS_KEY = {
+    "trend": "trend_agent",
+    "user": "consumer_insight_agent",
+    "ip": "ip_strategy_agent",
+    "creative": "product_ideation_agent",
+    "business": "business_evaluation_agent",
+    "gtm": "go_to_market_agent",
+}
+
+
+def _instantiate_agent(agent_key: str):
+    """经 connector 网关实例化 agent：只注入白名单内的 connector（信息隔离）
+
+    只有真实 TrendAgent 访问原始数据源（google_trends / bilibili_ranking），
+    经 resolve_connectors 按白名单注入；其余 mock agent 不访问 connector。
+    product_ideation_agent 的白名单不含原始数据源，创意官物理上拿不到它们。
+    """
+    agent_cls = AGENT_REGISTRY[agent_key]
+    access_key = _AGENT_ACCESS_KEY.get(agent_key)
+    if access_key is None:
+        return agent_cls()
+    connectors = resolve_connectors(access_key)
+    if agent_key == "trend":
+        from app.agents.trend_agent import TrendAgent
+        if issubclass(agent_cls, TrendAgent):
+            return agent_cls(
+                google_connector=connectors.get("google_trends"),
+                bilibili_connector=connectors.get("bilibili_ranking"),
+            )
+    return agent_cls()
+
 # ── 权重模板：把参数问题翻译成业务语言（剧本 5.4）──────────────
 _TEMPLATE_WEIGHTS = {
     WeightTemplate.DEFAULT: Weights(),
@@ -211,7 +244,7 @@ def _make_insight_node(agent_key: str, artifact_key: str, schema: type):
     """ACT1 洞察官节点工厂：三官并行，各自写自己的 artifact 键"""
 
     async def node(state: CommitteeState) -> dict[str, Any]:
-        agent = AGENT_REGISTRY[agent_key]()
+        agent = _instantiate_agent(agent_key)
         raw = await agent.run({
             "brief": state["brief"],
             "feedback": _feedback(state),
@@ -253,7 +286,7 @@ def _make_challenge_node(agent_key: str):
 
 async def creative_node(state: CommitteeState) -> dict[str, Any]:
     """ACT2 创意官：汇聚三方情报（fan-in）"""
-    agent = AGENT_REGISTRY["creative"]()
+    agent = _instantiate_agent("creative")
     raw = await agent.run({
         "brief": state["brief"],
         "feature_matrix": state.get("feature_matrix"),
@@ -270,7 +303,7 @@ async def creative_node(state: CommitteeState) -> dict[str, Any]:
 
 async def business_node(state: CommitteeState) -> dict[str, Any]:
     """ACT3 商业官：对每个提案出五维评分（算术由 schema 强制校验）"""
-    agent = AGENT_REGISTRY["business"]()
+    agent = _instantiate_agent("business")
     upstream = [
         state.get("feature_matrix", {}).get("confidence", "unknown"),
         state.get("user_sentiment", {}).get("confidence", "unknown"),
@@ -297,7 +330,7 @@ async def business_node(state: CommitteeState) -> dict[str, Any]:
 
 async def gtm_node(state: CommitteeState) -> dict[str, Any]:
     """ACT3 全球化官（Phase 2 占位，与商业官并行）"""
-    agent = AGENT_REGISTRY["gtm"]()
+    agent = _instantiate_agent("gtm")
     raw = await agent.run({
         "brief": state["brief"],
         "proposal_set": state["proposal_set"],

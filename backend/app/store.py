@@ -14,6 +14,7 @@ def _conn() -> sqlite3.Connection:
         _local.conn = sqlite3.connect(str(_DB_PATH))
         _local.conn.row_factory = sqlite3.Row
         _local.conn.execute("PRAGMA journal_mode=WAL")
+        _local.conn.execute("PRAGMA foreign_keys=ON")
     return _local.conn
 
 def init():
@@ -54,15 +55,21 @@ def create(sid: str, brief: dict) -> None:
     ).connection.commit()  # type: ignore[union-attr]
 
 def create_or_update(sid: str, **kv):
-    """终态落盘：INSERT OR REPLACE 全量写入（D5）"""
+    """终态落盘：UPSERT 全量写入（不先删父行，避免 retro_logs 外键悬空）"""
     if not kv: return
     init()
     now = kv.get("created_at") or datetime.now(timezone.utc).isoformat()
     _jsonify = lambda v: _json(v) if isinstance(v, (dict, list)) else v
     _conn().execute(
-        """INSERT OR REPLACE INTO sessions
+        """INSERT INTO sessions
            (session_id,brief,created_at,current_act,status,live_feed,report,archive,digest_parts,final_action,error)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(session_id) DO UPDATE SET
+             brief=excluded.brief, created_at=excluded.created_at,
+             current_act=excluded.current_act, status=excluded.status,
+             live_feed=excluded.live_feed, report=excluded.report,
+             archive=excluded.archive, digest_parts=excluded.digest_parts,
+             final_action=excluded.final_action, error=excluded.error""",
         (sid,
          _jsonify(kv.get("brief", {})), now,
          kv.get("current_act", "act5_retro"), kv.get("status", "completed"),

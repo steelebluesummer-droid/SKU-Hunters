@@ -32,6 +32,7 @@ from app.planning.repository import (
     create_plan,
     get_plan,
     list_plans,
+    plan_write_lock,
 )
 from app.schemas.planning import InsightBundle, Opportunity, PlanBrief
 
@@ -83,12 +84,13 @@ def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
     前置状态 brief_locked；成功后 status → insights_ready。
     取代「advance + GET」两请求组合，消除半完成态。
     """
-    if plan.get("status") != "brief_locked":
-        raise StateTransitionError("brief_locked", plan.get("status"), "generate-insights")
-    bundle = _resolve_insight_bundle(plan["brief"].get("category", ""))
-    _ = InsightBundle.model_validate(_snake_keys(bundle))
-    plan["status"] = "insights_ready"
-    _save_state()
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") != "brief_locked":
+            raise StateTransitionError("brief_locked", plan.get("status"), "generate-insights")
+        bundle = _resolve_insight_bundle(plan["brief"].get("category", ""))
+        _ = InsightBundle.model_validate(_snake_keys(bundle))
+        plan["status"] = "insights_ready"
+        _save_state()
     return bundle
 
 
@@ -121,22 +123,23 @@ def generate_opportunities(plan: dict[str, Any]) -> list[dict[str, Any]]:
 
     前置状态 insights_ready；成功后 status → opportunities_ready。
     """
-    if plan.get("status") != "insights_ready":
-        raise StateTransitionError("insights_ready", plan.get("status"), "generate-opportunities")
-    category = plan["brief"].get("category", "")
-    brief = plan["brief"]
-    try:
-        bundle = _resolve_insight_bundle(category)
-        opps = _opportunities_from_bundle(category, bundle, brief)
-    except FileNotFoundError:
-        opps = []
-    if not opps:
-        opps = _fallback_opportunities(category, brief)
-    for o in opps:
-        _ = Opportunity.model_validate(_snake_keys(o))
-    plan["opportunities"] = opps
-    plan["status"] = "opportunities_ready"
-    _save_state()
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") != "insights_ready":
+            raise StateTransitionError("insights_ready", plan.get("status"), "generate-opportunities")
+        category = plan["brief"].get("category", "")
+        brief = plan["brief"]
+        try:
+            bundle = _resolve_insight_bundle(category)
+            opps = _opportunities_from_bundle(category, bundle, brief)
+        except FileNotFoundError:
+            opps = []
+        if not opps:
+            opps = _fallback_opportunities(category, brief)
+        for o in opps:
+            _ = Opportunity.model_validate(_snake_keys(o))
+        plan["opportunities"] = opps
+        plan["status"] = "opportunities_ready"
+        _save_state()
     return opps
 
 
@@ -149,23 +152,24 @@ def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, A
     前置状态 opportunities_ready；成功后 status → plan_card_ready。
     返回值保持 camelCase 键名（前端契约）。
     """
-    if plan.get("status") != "opportunities_ready":
-        raise StateTransitionError("opportunities_ready", plan.get("status"), "generate-plan-card")
-    template = fixtures.PLAN_TEMPLATES.get(opportunity_id)
-    opportunity = _find_opportunity(plan, opportunity_id)
-    if opportunity is None:
-        return None
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") != "opportunities_ready":
+            raise StateTransitionError("opportunities_ready", plan.get("status"), "generate-plan-card")
+        template = fixtures.PLAN_TEMPLATES.get(opportunity_id)
+        opportunity = _find_opportunity(plan, opportunity_id)
+        if opportunity is None:
+            return None
 
-    card = (
-        _assemble_fixture_plan_card(plan, template, opportunity, opportunity_id)
-        if template is not None
-        else _build_dynamic_plan_card(plan, opportunity)
-    )
+        card = (
+            _assemble_fixture_plan_card(plan, template, opportunity, opportunity_id)
+            if template is not None
+            else _build_dynamic_plan_card(plan, opportunity)
+        )
 
-    plan["selected_opportunity"] = opportunity_id
-    plan["plan_card"] = card
-    plan["status"] = "plan_card_ready"
-    _save_state()
+        plan["selected_opportunity"] = opportunity_id
+        plan["plan_card"] = card
+        plan["status"] = "plan_card_ready"
+        _save_state()
     return card
 
 
@@ -176,30 +180,31 @@ def revise_plan(plan: dict[str, Any], message: str) -> dict[str, Any]:
 
     仅 plan_card_ready 状态可改稿；archived 只读，禁止改稿（复盘追问用 review_plan）。
     """
-    if plan.get("status") == "archived":
-        raise StateTransitionError("plan_card_ready", "archived", "revise")
-    card = plan.get("plan_card") or {}
-    answer = llm.complete(
-        system_prompt=(
-            "你是 SKU Hunters 新品企划工作室的企划助手。商品经理会对已生成的企划卡"
-            "提出修改意见，你要说明会如何调整（涉及创意设计与商品策略两个环节，"
-            "若影响成本需说明成本校验结果）。只依据给定企划卡内容作答，150 字以内。"
-        ),
-        user_prompt=(
-            f"【当前企划卡】\n名称：{card.get('name', '')}\n概念：{card.get('concept', '')}\n"
-            f"设计语言：{card.get('designLanguage', '')}\n功能点：{card.get('features', [])}\n"
-            f"定价：{card.get('pricing', {})}\n成本校验：{card.get('costCheck', {})}\n\n"
-            f"【修改意见】{message}"
-        ),
-        max_tokens=400,
-    )
-    if answer is None:
-        answer = (
-            "已收到修改意见。正式版将由创意设计模块调整方案，商品策略模块复核成本与价格带，"
-            "概念图同步重新生成。（当前为冻结数据演示环境）"
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") == "archived":
+            raise StateTransitionError("plan_card_ready", "archived", "revise")
+        card = plan.get("plan_card") or {}
+        answer = llm.complete(
+            system_prompt=(
+                "你是 SKU Hunters 新品企划工作室的企划助手。商品经理会对已生成的企划卡"
+                "提出修改意见，你要说明会如何调整（涉及创意设计与商品策略两个环节，"
+                "若影响成本需说明成本校验结果）。只依据给定企划卡内容作答，150 字以内。"
+            ),
+            user_prompt=(
+                f"【当前企划卡】\n名称：{card.get('name', '')}\n概念：{card.get('concept', '')}\n"
+                f"设计语言：{card.get('designLanguage', '')}\n功能点：{card.get('features', [])}\n"
+                f"定价：{card.get('pricing', {})}\n成本校验：{card.get('costCheck', {})}\n\n"
+                f"【修改意见】{message}"
+            ),
+            max_tokens=400,
         )
-    turn = {"message": message, "reply": answer, "timestamp": _now()}
-    plan["revise_logs"].append(turn)
+        if answer is None:
+            answer = (
+                "已收到修改意见。正式版将由创意设计模块调整方案，商品策略模块复核成本与价格带，"
+                "概念图同步重新生成。（当前为冻结数据演示环境）"
+            )
+        turn = {"message": message, "reply": answer, "timestamp": _now()}
+        plan["revise_logs"].append(turn)
     return turn
 
 
@@ -211,13 +216,14 @@ def archive_plan(plan: dict[str, Any]) -> dict[str, Any]:
     飞书同步（多维表格 + 通知卡片）由 API 层挂 BackgroundTasks 执行，
     归档响应不等飞书（见 api/planning.py _run_archive_hooks）。
     """
-    if plan.get("status") != "plan_card_ready":
-        raise StateTransitionError("plan_card_ready", plan.get("status"), "archive")
-    if plan.get("plan_card") is None:
-        raise ValueError("企划卡尚未生成，不能归档")
-    plan["status"] = "archived"
-    plan["archived_at"] = _now()
-    _save_state()
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") != "plan_card_ready":
+            raise StateTransitionError("plan_card_ready", plan.get("status"), "archive")
+        if plan.get("plan_card") is None:
+            raise ValueError("企划卡尚未生成，不能归档")
+        plan["status"] = "archived"
+        plan["archived_at"] = _now()
+        _save_state()
     return plan
 
 

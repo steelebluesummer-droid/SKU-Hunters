@@ -91,18 +91,26 @@ class SocialEvidenceLoader:
     # ── ① 趋势信号 ────────────────────────────────────────
     def to_trend_radar(self, topic: str) -> dict[str, Any]:
         d = self.load(topic)
-        signals = [
-            {
-                "name": s["name"],
-                "metric": s["metric"],
-                "period": s["period"],
+        signals: list[dict[str, Any]] = []
+        skipped = 0
+        for s in d.get("trend_signals", []):
+            name = s.get("name")
+            metric = s.get("metric")
+            if not name or not metric:
+                skipped += 1
+                continue
+            signals.append({
+                "name": name,
+                "metric": metric,
+                "period": s.get("period", ""),
                 "domains": s.get("domains", []),
                 "opportunity": s.get("opportunity", ""),
-            }
-            for s in d.get("trend_signals", [])
-        ]
+            })
+        log = [f"加载 {topic} 社媒证据，识别趋势信号 {len(signals)} 条"]
+        if skipped:
+            log.append(f"跳过 {skipped} 条缺少 name/metric 的不完整趋势信号")
         return {
-            "processLog": [f"加载 {topic} 社媒证据，识别趋势信号 {len(signals)} 条"],
+            "processLog": log,
             "signals": signals,
             "hotWords": d.get("hot_words", []),
             "heatCurve": None,  # 热度曲线来自 Google Trends 线，另行注入
@@ -116,20 +124,36 @@ class SocialEvidenceLoader:
         if d is None and raw.get("voice_of_user"):
             d = self._voice_of_user_to_consumer(raw)
         d = d or {}
+        pain_points: list[dict[str, Any]] = []
+        scenes: list[dict[str, Any]] = []
+        quotes: list[dict[str, Any]] = []
+        skipped = 0
+        for p in d.get("pain_points", []):
+            text = p.get("text")
+            if not text:
+                skipped += 1
+                continue
+            pain_points.append({"text": text, "count": int(_first_number(p.get("count", 0), 0))})
+        for s in d.get("scenes", []):
+            scene = s.get("scene")
+            if not scene:
+                skipped += 1
+                continue
+            scenes.append({"name": scene, "value": _weight_value(s.get("weight", 0))})
+        for q in d.get("quotes", []):
+            text = q.get("text")
+            if not text:
+                skipped += 1
+                continue
+            quotes.append({"text": text, "source": q.get("source", "")})
+        log = [f"加载 {topic} 社媒评论样本，情感与痛点聚类"]
+        if skipped:
+            log.append(f"跳过 {skipped} 条字段不完整的评论/场景/原声条目")
         return {
-            "processLog": [f"加载 {topic} 社媒评论样本，情感与痛点聚类"],
-            "painPoints": [
-                {"text": p["text"], "count": int(_first_number(p.get("count", 0), 0))}
-                for p in d.get("pain_points", [])
-            ],
-            "scenes": [
-                {"name": s["scene"], "value": _weight_value(s.get("weight", 0))}
-                for s in d.get("scenes", [])
-            ],
-            "quotes": [
-                {"text": q["text"], "source": q.get("source", "")}
-                for q in d.get("quotes", [])
-            ],
+            "processLog": log,
+            "painPoints": pain_points,
+            "scenes": scenes,
+            "quotes": quotes,
             "summary": d.get("summary", ""),
         }
 
@@ -137,13 +161,15 @@ class SocialEvidenceLoader:
     def _voice_of_user_to_consumer(raw: dict[str, Any]) -> dict[str, Any]:
         """把 voice_of_user（speaker/raw_quote/scenario/sentiment）转成 ConsumerVoice 结构"""
         items = raw.get("voice_of_user", [])
-        quotes = [
-            {
-                "text": q["raw_quote"],
+        quotes = []
+        for q in items:
+            raw_quote = q.get("raw_quote")
+            if not raw_quote:
+                continue
+            quotes.append({
+                "text": raw_quote,
                 "source": f"{q.get('speaker', '')} · {q.get('source_note', '')}",
-            }
-            for q in items
-        ]
+            })
         # 痛点：负面情绪的原声，按类别合并
         pain_map: dict[str, int] = {}
         for q in items:
@@ -171,19 +197,24 @@ class SocialEvidenceLoader:
     # ── ③ 竞争地图 ────────────────────────────────────────
     def to_competitive_map(self, topic: str) -> dict[str, Any]:
         d = self.load(topic).get("competitive_map", {})
-        products = [
-            {
-                "name": p["name"],
+        products = []
+        skipped = 0
+        for p in d.get("products", []):
+            name = p.get("name")
+            if not name:
+                skipped += 1
+                continue
+            products.append({
+                "name": name,
                 "price": _first_number(p.get("price", 0)),
                 "design": _first_number(p.get("design", 5)),
                 "imageUrl": p.get("image_url", ""),
                 "sellingPoint": p.get("selling_point", ""),
-            }
-            for p in d.get("products", [])
-        ]
+            })
         gap = d.get("gap_zone", "")
         return {
-            "processLog": [f"加载 {topic} 竞品样本，构建价格×设计感矩阵"],
+            "processLog": [f"加载 {topic} 竞品样本，构建价格×设计感矩阵"]
+            + ([f"跳过 {skipped} 条缺少 name 的不完整竞品"] if skipped else []),
             "products": products,
             # 采集侧未给坐标，x/y 置空；前端展示 label，坐标为 0 不影响文字
             "gapZone": {"x": [30, 60], "y": [7, 10], "label": gap or "差异化机会空白"} if gap else None,
