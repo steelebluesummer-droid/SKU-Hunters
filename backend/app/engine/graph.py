@@ -36,13 +36,13 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from app.agents.challenge_agents import CHALLENGE_REGISTRY
+from app.agents.consumer_agent import get_consumer_agent_class
 from app.agents.creative_agent import get_creative_agent_class
 from app.agents.creative_contract import validate_proposals
 from app.agents.mock_agents import (
     MockBusinessAgent,
     MockGTMAgent,
     MockIPAgent,
-    MockUserAgent,
 )
 from app.agents.trend_agent import get_trend_agent_class
 from app.engine import llm
@@ -150,7 +150,7 @@ atexit.register(_close_sqlite)
 # 设 TREND_AGENT_PROVIDER=real 启用真实 Google+B站 趋势官（可回退 Mock）。
 AGENT_REGISTRY: dict[str, type] = {
     "trend": get_trend_agent_class(),
-    "user": MockUserAgent,
+    "user": get_consumer_agent_class(),
     "ip": MockIPAgent,
     "creative": get_creative_agent_class(),
     "business": MockBusinessAgent,

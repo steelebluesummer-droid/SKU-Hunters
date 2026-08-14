@@ -59,6 +59,17 @@ class ConsumerDataView(_ReadView):
         records = self._port.search_all(keyword, platform="taobao", as_of=as_of, snapshot_id=snapshot_id)
         return [{"keyword": r.keyword, "summary": r.summary} for r in records]
 
+    def get_category_signals(self, category: str, as_of: str | None = None, snapshot_id: str | None = None) -> dict[str, Any]:
+        """按品类返回聚合信号 + 证据引用（不返回原始评论全文；source_url 缺失不伪造）"""
+        records = self._port.search_all("", category=category, as_of=as_of, snapshot_id=snapshot_id)
+        signals = [
+            {"keyword": r.keyword, "summary": r.summary, "platform": r.platform,
+             "heat_index": r.heat_index, "interaction": r.interaction}
+            for r in records
+        ]
+        evidence = self._port.build_evidence_refs(records)
+        return {"signals": signals, "evidence": evidence}
+
     def build_evidence_refs(self, records: list[Any]) -> list[dict[str, str]]:
         return self._port.build_evidence_refs(records)
 
