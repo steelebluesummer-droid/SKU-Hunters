@@ -3,8 +3,8 @@
 拓扑（与全景设计文档 4.2/5.5 一致）：
 
     START → brief_node ─┬─→ trend_agent ─┐
-                        ├─→ user_agent  ─┼─→ 🚪act1_gate ─→ creative_agent ─┬─→ business_agent ─┐
-                        └─→ ip_agent    ─┘        ↕ qa                       └─→ gtm_agent     ─┴─→ decision_engine
+                        ├─→ user_agent  ─┼─→ 🚪act1_gate ─→ creative_agent ─→ 三质询(fan-in) ─→ business_agent ─→ gtm_agent ─→ decision_engine
+                        └─→ ip_agent    ─┘        ↕ qa
                                                                                                         │
                               ┌─ retro_qa ←→ 🚪retro_gate ←─ learning_node ←─ 🚪human_gate ←──────────┘
                               ↓            （首次复盘入口：    ↕ qa        （Gate 2 结论即归档：
@@ -49,6 +49,10 @@ from app.engine.connector_gateway import (
     resolve_connectors,
     resolve_views,
     resolve_write_port,
+)
+from app.engine.context_contract import (
+    validate_business_context,
+    validate_gtm_context,
 )
 from app.engine.decision_engine import DecisionEngine
 from app.engine.state import CommitteeState
@@ -319,20 +323,25 @@ async def creative_node(state: CommitteeState) -> dict[str, Any]:
 
 async def business_node(state: CommitteeState) -> dict[str, Any]:
     """ACT3 商业官：对每个提案出五维评分（算术由 schema 强制校验）"""
-    agent = _instantiate_agent("business")
     upstream = [
         state.get("feature_matrix", {}).get("confidence", "unknown"),
         state.get("user_sentiment", {}).get("confidence", "unknown"),
         state.get("ip_assessment", {}).get("confidence", "unknown"),
     ]
-    raw = await agent.run({
+    context = {
         "brief": state["brief"],
         "weights": state["weights"],
         "proposal_set": state["proposal_set"],
         "challenges": state.get("challenges", []),
         "upstream_confidences": upstream,
+        "feature_matrix": state.get("feature_matrix"),
+        "user_sentiment": state.get("user_sentiment"),
+        "ip_assessment": state.get("ip_assessment"),
         "feedback": _feedback(state),
-    })
+    }
+    validate_business_context(context)  # 三官 Artifact 缺失 → ContextContractError，阻断 Agent 调用
+    agent = _instantiate_agent("business")
+    raw = await agent.run(context)
     scores = [
         OpportunityScore.model_validate(s).model_dump(mode="json")
         for s in raw["opportunity_scores"]
@@ -345,13 +354,18 @@ async def business_node(state: CommitteeState) -> dict[str, Any]:
 
 
 async def gtm_node(state: CommitteeState) -> dict[str, Any]:
-    """ACT3 全球化官（Phase 2 占位，与商业官并行）"""
-    agent = _instantiate_agent("gtm")
-    raw = await agent.run({
+    """ACT3 全球化官（Phase 2 占位，商业官之后串行：需 opportunity_scores 上游结果）"""
+    context = {
         "brief": state["brief"],
         "proposal_set": state["proposal_set"],
         "challenges": state.get("challenges", []),
-    })
+        "opportunity_scores": state["opportunity_scores"],
+        "ip_assessment": state["ip_assessment"],
+        "feedback": _feedback(state),
+    }
+    validate_gtm_context(context)  # 上游结果缺失 → ContextContractError，阻断 Agent 调用
+    agent = _instantiate_agent("gtm")
+    raw = await agent.run(context)
     plans = [
         GTMPlan.model_validate(p).model_dump(mode="json") for p in raw["gtm_plans"]
     ]
@@ -698,19 +712,16 @@ def build_graph(checkpointer: Any = None) -> Any:
     g.add_conditional_edges("act1_gate", _route_act1_gate)
     g.add_edge("qa_act1_node", "act1_gate")
 
-    # ACT2 → ACT2_CHALLENGE（三洞察官质询）→ ACT3 双轨 fan-out
+    # ACT2 → ACT2_CHALLENGE（三洞察官质询）→ ACT3 串行（business → gtm）
     g.add_edge("creative_agent", "trend_challenge")
     g.add_edge("creative_agent", "user_challenge")
     g.add_edge("creative_agent", "ip_challenge")
     g.add_edge("trend_challenge", "business_agent")
-    g.add_edge("trend_challenge", "gtm_agent")
     g.add_edge("user_challenge", "business_agent")
-    g.add_edge("user_challenge", "gtm_agent")
     g.add_edge("ip_challenge", "business_agent")
-    g.add_edge("ip_challenge", "gtm_agent")
+    g.add_edge("business_agent", "gtm_agent")  # business → gtm 串行（gtm 需 opportunity_scores）
 
-    # ACT3 fan-in → ACT4
-    g.add_edge("business_agent", "decision_engine")
+    # ACT3 → ACT4
     g.add_edge("gtm_agent", "decision_engine")
     g.add_edge("decision_engine", "human_gate")
 

@@ -36,8 +36,8 @@ LangGraph 编排，FastAPI + 飞书机器人交互。代码在 `backend/`。
 4. context 可用键：
    - 所有 Agent：`brief`、`feedback`（人工修改意见，修改回退重跑时非空）
    - creative：+ `feature_matrix`、`user_sentiment`、`ip_assessment`
-   - business：+ `weights`、`proposal_set`、`upstream_confidences`
-   - gtm：+ `proposal_set`
+   - business：+ `weights`、`proposal_set`、`upstream_confidences`、`feature_matrix`、`user_sentiment`、`ip_assessment`
+   - gtm：+ `proposal_set`、`opportunity_scores`、`ip_assessment`
 5. 接入方式：改 `graph.py` 里 `AGENT_REGISTRY` 对应键的类，**其他一律不动**
 6. 禁止：Agent 返回未过 schema 的 dict；依赖 state 里未声明的键
 

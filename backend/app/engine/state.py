@@ -32,7 +32,7 @@ class CommitteeState(TypedDict, total=False):
     proposal_set: dict                # 创意官 ProposalSet
     challenges: Annotated[list[dict], operator.add]   # 质询记录（背书/修正/反对）
 
-    # ── ACT3 双轨评审（并行写入）──
+    # ── ACT3 顺序评审（business 先，gtm 后串行）──
     opportunity_scores: list[dict]    # 商业官 OpportunityScore[]
     gtm_plans: list[dict]             # 全球化官 GTMPlan[]（Phase 2）
 
