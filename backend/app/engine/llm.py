@@ -76,6 +76,10 @@ def complete(
 
     Returns:
         模型输出文本；未配置 Key 或调用失败返回 None
+
+    注意：推理模型（如 deepseek-v4-pro）的 reasoning tokens 计入
+    max_tokens——预算太小会被思考过程吃光导致返回空串。调用方对
+    复杂任务应给 6000+ 预算（实测该类任务 reasoning 约 2000+ tokens）。
     """
     config = get_llm_config()
     if config is None:

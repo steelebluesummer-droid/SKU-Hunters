@@ -28,7 +28,7 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.agents.mock_agents import MockGTMAgent
-from app.agents.real_common import parse_llm_json, provider_enabled
+from app.agents.real_common import fuzzy_get, parse_llm_json, provider_enabled
 from app.data.baidu_hot import BaiduHotConnector
 from app.data.errors import ConnectorFetchError
 from app.data.tiktok_trends import TiktokTrendsConnector
@@ -41,7 +41,7 @@ _OUTPUT_CONTRACT = """
 {
   "plans": [
     {
-      "proposal_name": "照抄输入的方案名",
+      "proposal_name": "照抄「」内的方案名（不含其他任何文字）",
       "country_plans": [
         {
           "country": "国家/地区码，如 TH/JP/US",
@@ -59,7 +59,7 @@ _OUTPUT_CONTRACT = """
 }
 
 要求：
-1. 每个输入方案恰好一条，proposal_name 照抄不得改写
+1. 每个输入方案恰好一条，proposal_name 只照抄「」内的方案名
 2. country_plans 1-3 个国家，按批次排序，batch 从 1 开始
 3. rationale 优先引用所给市场材料；材料缺失时写清"经验判断"而不是编数据
 """
@@ -142,7 +142,7 @@ class GTMAgent(BaseAgent):
         ]
         for p in proposals:
             material.append(
-                f"  · {p.get('name', '')}：{p.get('concept', '')}"
+                f"  · 方案「{p.get('name', '')}」：{p.get('concept', '')}"
                 f"（形态 {p.get('product_form', '')}，"
                 f"目标人群 {p.get('target_segment', '')}，"
                 f"价格带锚点 {p.get('price_band', '')}）"
@@ -163,7 +163,7 @@ class GTMAgent(BaseAgent):
 
         persona_prompt = load_prompt(self.name)
         system = (persona_prompt + "\n" + _OUTPUT_CONTRACT) if persona_prompt else _OUTPUT_CONTRACT
-        raw = complete(system, "\n".join(material), temperature=0.3, max_tokens=2500)
+        raw = complete(system, "\n".join(material), temperature=0.3, max_tokens=100_000)
         if not raw:
             return None
         data = parse_llm_json(raw)
@@ -188,7 +188,7 @@ class GTMAgent(BaseAgent):
         plans = []
         for p in proposals:
             name = p.get("name", "")
-            plan = llm_by_name.get(name)
+            plan = fuzzy_get(llm_by_name, name)
             if plan is None:
                 return None  # 缺方案 → 整体回退
             country_plans = []

@@ -46,3 +46,24 @@ def min_confidence(values: list[str]) -> Confidence:
     if not values:
         return Confidence.UNKNOWN
     return min((Confidence(v) for v in values), key=order.index)
+
+
+def fuzzy_get(mapping: dict[str, Any], name: str) -> Any | None:
+    """按方案名取 LLM 输出条目：先精确，再归一化模糊匹配。
+
+    LLM 抄方案名时偶尔会丢/改标点（"挂脖/手持" → "挂脖手持"），
+    归一化（去标点空白）后双向包含即算命中；都没有返回 None。
+    """
+    if not name:
+        return None
+    hit = mapping.get(name)
+    if hit is not None:
+        return hit
+    norm = re.sub(r"[\s/·\-—_（）()【】\[\]「」:：,，。.]", "", name)
+    if not norm:
+        return None
+    for k, v in mapping.items():
+        nk = re.sub(r"[\s/·\-—_（）()【】\[\]「」:：,，。.]", "", k)
+        if nk and (norm in nk or nk in norm):
+            return v
+    return None

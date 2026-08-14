@@ -496,3 +496,22 @@ class TestGTMAgent:
         agent = GTMAgent(weibo=FakeHot(), baidu=FakeHot())
         result = _run(agent, GTM_CTX)
         assert result == _run(MockGTMAgent(), GTM_CTX)
+
+
+class TestFuzzyGet:
+    """方案名模糊匹配：LLM 抄名时丢/改标点（真机冒烟发现的回退原因）"""
+
+    def test_exact_match(self):
+        assert real_common.fuzzy_get({"方案A": 1}, "方案A") == 1
+
+    def test_punctuation_stripped(self):
+        m = {"玉桂狗挂脖手持两用随身风扇": 2}
+        assert real_common.fuzzy_get(m, "玉桂狗挂脖/手持两用随身风扇") == 2
+
+    def test_brackets_and_spaces_stripped(self):
+        m = {"方案「库洛米裙摆风扇」（手持）": 3}
+        assert real_common.fuzzy_get(m, "库洛米裙摆风扇") == 3
+
+    def test_no_match_returns_none(self):
+        assert real_common.fuzzy_get({"方案A": 1}, "方案B") is None
+        assert real_common.fuzzy_get({"方案A": 1}, "") is None

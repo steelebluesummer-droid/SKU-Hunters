@@ -158,7 +158,7 @@ class CreativeAgent(BaseAgent):
         if feedback:
             user_prompt += f"\n【评委打回意见】上一轮方案被打回，意见：{feedback}——本轮必须针对性修正\n"
 
-        raw = complete(_SYSTEM_PROMPT, user_prompt, temperature=0.8, max_tokens=2000)
+        raw = complete(_SYSTEM_PROMPT, user_prompt, temperature=0.8, max_tokens=100_000)
         if not raw:
             raise _NoLLM()
 
@@ -208,7 +208,8 @@ def get_creative_agent_class() -> type[BaseAgent]:
     """注册表切换：默认 MockCreativeAgent（离线/确定/快）；
     设 CREATIVE_AGENT_PROVIDER=real 时返回真 CreativeAgent（LLM 故障时内部回退 Mock）。
     """
-    provider = os.getenv("CREATIVE_AGENT_PROVIDER", "mock").strip().lower()
+    provider = (os.getenv("CREATIVE_AGENT_PROVIDER")
+                or os.getenv("AGENT_PROVIDER", "mock")).strip().lower()
     if provider == "real":
         return CreativeAgent
     return MockCreativeAgent

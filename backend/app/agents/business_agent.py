@@ -26,7 +26,12 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.agents.mock_agents import MockBusinessAgent
-from app.agents.real_common import min_confidence, parse_llm_json, provider_enabled
+from app.agents.real_common import (
+    fuzzy_get,
+    min_confidence,
+    parse_llm_json,
+    provider_enabled,
+)
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
 from app.schemas import (
     Confidence,
@@ -292,7 +297,7 @@ _OUTPUT_CONTRACT = """
 {
   "scores": [
     {
-      "proposal_name": "照抄输入的方案名",
+      "proposal_name": "照抄「」内的方案名（不含其他任何文字）",
       "dimensions": {
         "trend_heat":      {"score": 0-100, "basis": "给分依据，必须引用所给材料原句"},
         "user_demand":     {"score": 0-100, "basis": "同上"},
@@ -311,11 +316,13 @@ _OUTPUT_CONTRACT = """
   80-100 = 多源强信号交叉验证；60-79 = 单源可信或信号中等；
   40-59 = 信号弱或间接；0-39 = 无支撑或反向信号
 要求：
-1. 每个输入方案恰好一条，proposal_name 照抄不得改写
+1. 每个输入方案恰好一条，proposal_name 只照抄「」内的方案名
 2. 每条 basis 必须引用所给材料（上游情报摘要/证据/质询记录）的原句，
    禁止编造材料没有的数据
-3. 你只管打分与依据——总分由代码按权重加权计算，不要输出 total
-4. risk_warnings 每方案至多 2 条，没有可给空列表
+3. score 必须是 0-100 的数字——材料不足时按锚点给 0-39 分并在 basis
+   注明"无支撑"，禁止输出 null 或文字
+4. 你只管打分与依据——总分由代码按权重加权计算，不要输出 total
+5. risk_warnings 每方案至多 2 条，没有可给空列表
 """
 
 
@@ -378,7 +385,7 @@ class BusinessAgent(BaseAgent):
         ]
         for p in proposals:
             material.append(
-                f"  · {p.get('name', '')}：{p.get('concept', '')}"
+                f"  · 方案「{p.get('name', '')}」：{p.get('concept', '')}"
                 f"（形态 {p.get('product_form', '')}，价格带 {p.get('price_band', '')}）"
             )
         challenges = context.get("challenges", [])
@@ -394,7 +401,7 @@ class BusinessAgent(BaseAgent):
 
         persona_prompt = load_prompt(self.name)
         system = (persona_prompt + "\n" + _OUTPUT_CONTRACT) if persona_prompt else _OUTPUT_CONTRACT
-        raw = complete(system, "\n".join(material), temperature=0.3, max_tokens=2500)
+        raw = complete(system, "\n".join(material), temperature=0.3, max_tokens=100_000)
         if not raw:
             return None
         data = parse_llm_json(raw)
@@ -407,7 +414,7 @@ class BusinessAgent(BaseAgent):
         scores = []
         for p in proposals:
             name = p.get("name", "")
-            s = llm_by_name.get(name)
+            s = fuzzy_get(llm_by_name, name)
             if s is None:
                 return None
             dims_raw = s.get("dimensions", {})

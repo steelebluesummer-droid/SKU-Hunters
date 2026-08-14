@@ -415,7 +415,8 @@ def get_trend_agent_class() -> type[BaseAgent]:
     设 TREND_AGENT_PROVIDER=real 时返回本真实 TrendAgent。
     Mock 作为可回退实现保留，不删除。
     """
-    provider = os.getenv("TREND_AGENT_PROVIDER", "mock").strip().lower()
+    provider = (os.getenv("TREND_AGENT_PROVIDER")
+                or os.getenv("AGENT_PROVIDER", "mock")).strip().lower()
     if provider == "real":
         return TrendAgent
     from .mock_agents import MockTrendAgent

@@ -822,9 +822,18 @@ def _translate(node_name: str, update: dict[str, Any]) -> dict[str, Any] | None:
                 "content": "五维机会值评分：\n" + "\n".join(lines),
                 "evidence": _evidence_of(top), "score": top["total_score"]}
     if node_name == "gtm_agent":
+        plans = update["gtm_plans"]
+        lines = []
+        for p in plans:
+            stops = " → ".join(
+                f"{c['country']}(批{c['batch']})" for c in p.get("country_plans", [])
+            )
+            lines.append(f"· {p['proposal_name']}：{stops}")
+            if p.get("caveats"):
+                lines.append(f"  保留：{p['caveats'][0]}")
         return {"role": "global",
-                "content": f"已生成 {len(update['gtm_plans'])} 份上市策略（Phase 2 占位）",
-                "evidence": [], "score": None}
+                "content": f"上市策略 {len(plans)} 份：\n" + "\n".join(lines),
+                "evidence": _evidence_of(plans[0]) if plans else [], "score": None}
     if node_name == "decision_engine":
         rec = update["recommendation"]
         return {"role": "decision",

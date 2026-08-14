@@ -204,7 +204,7 @@ class UserAgent(BaseAgent):
 
         persona_prompt = load_prompt(self.name)
         system = (persona_prompt + "\n" + _OUTPUT_CONTRACT) if persona_prompt else _OUTPUT_CONTRACT
-        raw = complete(system, "\n".join(material), temperature=0.5, max_tokens=2000)
+        raw = complete(system, "\n".join(material), temperature=0.5, max_tokens=100_000)
         if not raw:
             return None
         data = parse_llm_json(raw)
@@ -247,7 +247,7 @@ class UserAgent(BaseAgent):
         summary = str(data.get("summary", "")).strip()
         if not summary:
             return None
-        persona = str(data.get("persona", "")).strip()
+        persona = str(data.get("persona", "")).strip().rstrip("。.")
         if persona and persona not in summary:
             summary = f"{persona}。{summary}"
 
