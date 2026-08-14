@@ -135,36 +135,37 @@ def test_tiktok_empty_board_is_not_error(monkeypatch):
 
 
 def test_aggregator_isolates_single_source_failure(monkeypatch):
+    ok_item = [{"word": "露营热", "heat": 1, "rank": 1, "url": ""}]
     monkeypatch.setattr(hot_topics.WeiboHotConnector, "get_hot_search",
-                        lambda self: [{"word": "露营热", "heat": 1, "rank": 1, "url": ""}])
+                        lambda self: ok_item)
     monkeypatch.setattr(hot_topics.TiktokTrendsConnector, "get_hot_search",
                         lambda self: [{"word": "camping", "heat": 1, "rank": 1,
                                        "url": "", "country": "US"}])
+    monkeypatch.setattr(hot_topics.DouyinHotConnector, "get_hot_search",
+                        lambda self: ok_item)
+    monkeypatch.setattr(hot_topics.XiaohongshuHotConnector, "get_hot_search",
+                        lambda self: ok_item)
 
     def boom(self):
         raise ConnectorFetchError("baidu", "HTTP 502")
 
     monkeypatch.setattr(hot_topics.BaiduHotConnector, "get_hot_search", boom)
     payload = hot_topics.fetch_all()
-    assert payload["scanned_sources"] == ["weibo", "tiktok"]
+    assert payload["scanned_sources"] == ["weibo", "douyin", "xiaohongshu", "tiktok"]
     assert payload["failed_sources"] == [{"source": "baidu", "detail": "HTTP 502"}]
     assert payload["items"][0]["source"] == "weibo"
-    assert payload["items"][1]["source"] == "tiktok"
+    assert payload["items"][-1]["source"] == "tiktok"
 
 
 def test_aggregator_raises_when_all_sources_fail(monkeypatch):
-    def boom_weibo(self):
-        raise ConnectorFetchError("weibo", "超时")
+    def boom(self):
+        raise ConnectorFetchError("x", "超时")
 
-    def boom_baidu(self):
-        raise ConnectorFetchError("baidu", "HTTP 502")
-
-    def boom_tiktok(self):
-        raise ConnectorFetchError("tiktok", "网络受限")
-
-    monkeypatch.setattr(hot_topics.WeiboHotConnector, "get_hot_search", boom_weibo)
-    monkeypatch.setattr(hot_topics.BaiduHotConnector, "get_hot_search", boom_baidu)
-    monkeypatch.setattr(hot_topics.TiktokTrendsConnector, "get_hot_search", boom_tiktok)
+    monkeypatch.setattr(hot_topics.WeiboHotConnector, "get_hot_search", boom)
+    monkeypatch.setattr(hot_topics.BaiduHotConnector, "get_hot_search", boom)
+    monkeypatch.setattr(hot_topics.DouyinHotConnector, "get_hot_search", boom)
+    monkeypatch.setattr(hot_topics.XiaohongshuHotConnector, "get_hot_search", boom)
+    monkeypatch.setattr(hot_topics.TiktokTrendsConnector, "get_hot_search", boom)
     with pytest.raises(ConnectorFetchError, match="全部热搜源失败"):
         hot_topics.fetch_all()
 

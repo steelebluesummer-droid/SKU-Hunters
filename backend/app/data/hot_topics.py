@@ -1,7 +1,7 @@
 """热搜聚合器 — 多源真实趋势信号合并 + 关键词匹配
 
 供 Agent / 脚本使用的工具层：一次调用拉取多个公开热搜源
-（微博 / 百度），按演示关键词过滤出与本企划相关的真实话题。
+（微博 / 百度 / 抖音 / 小红书 / TikTok），按演示关键词过滤出与本企划相关的真实话题。
 
 故障隔离纪律（与连接器层约定一致）：
   - 单源失败不影响其他源（记入 failed_sources，绝不折叠为"零命中"）；
@@ -16,11 +16,15 @@ from typing import Any
 from .baidu_hot import BaiduHotConnector
 from .errors import ConnectorFetchError
 from .tiktok_trends import TiktokTrendsConnector
+from .uapi_hot import DouyinHotConnector, XiaohongshuHotConnector
 from .weibo_hot import WeiboHotConnector
 
 SOURCES = {
     "weibo": WeiboHotConnector,
     "baidu": BaiduHotConnector,
+    # 经 UApiPro 聚合 API：名创主渠道 + 登录墙平台的合规替代采集
+    "douyin": DouyinHotConnector,
+    "xiaohongshu": XiaohongshuHotConnector,
     "tiktok": TiktokTrendsConnector,  # 海外社媒（112 国口径），国内网络受限时记入 failed_sources
 }
 

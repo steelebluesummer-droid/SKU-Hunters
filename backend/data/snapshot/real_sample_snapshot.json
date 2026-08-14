@@ -1,5 +1,5 @@
 {
-  "refreshed_at": "2026-08-12T10:54:47.815827+00:00",
+  "refreshed_at": "2026-08-13T08:49:43.130657+00:00",
   "sections": {
     "hot_search": {
       "total_items": 50,
@@ -7,7 +7,12 @@
         "weibo",
         "baidu"
       ],
-      "failed_sources": [],
+      "failed_sources": [
+        {
+          "source": "tiktok",
+          "detail": "请求/解析失败: ConnectError"
+        }
+      ],
       "hits": []
     },
     "taobao_suggest": {
@@ -185,53 +190,41 @@
     },
     "bilibili": {
       "keywords": {
-        "小风扇": {
-          "scanned_videos": 189,
-          "total_results": 0,
-          "total_views": 0,
-          "scanned_partitions": [
-            "动画",
-            "鬼畜"
-          ],
-          "failed_partitions": [
-            "生活",
-            "时尚",
-            "游戏"
-          ],
-          "top_videos": []
-        },
         "工位改造": {
-          "scanned_videos": 191,
+          "scanned_videos": 474,
           "total_results": 0,
           "total_views": 0,
           "scanned_partitions": [
+            "生活",
             "时尚",
-            "游戏"
-          ],
-          "failed_partitions": [
-            "生活",
-            "动画",
-            "鬼畜"
-          ],
-          "top_videos": []
-        },
-        "露营装备": {
-          "scanned_videos": 95,
-          "total_results": 0,
-          "total_views": 0,
-          "scanned_partitions": [
-            "时尚"
-          ],
-          "failed_partitions": [
-            "生活",
             "动画",
             "游戏",
             "鬼畜"
           ],
+          "failed_partitions": [],
+          "top_videos": []
+        },
+        "露营装备": {
+          "scanned_videos": 474,
+          "total_results": 0,
+          "total_views": 0,
+          "scanned_partitions": [
+            "生活",
+            "时尚",
+            "动画",
+            "游戏",
+            "鬼畜"
+          ],
+          "failed_partitions": [],
           "top_videos": []
         }
       },
-      "failed_keywords": []
+      "failed_keywords": [
+        {
+          "keyword": "小风扇",
+          "detail": "全部 5 个分区采集失败: [bilibili] 分区榜[生活] 业务错误: code=-352, message=-352; [bilibili] 分区榜[时尚] 业务错误: code=-352, message=-352; [bilibili] 分区榜[动画] 业务错误: code=-352, message=-352; [bilibili] 分区榜[游戏] 业务错误: code=-352, message=-352; [bilibili] 分区榜[鬼畜] 业务错误: code=-352, message=-352"
+        }
+      ]
     }
   }
 }
