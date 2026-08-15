@@ -162,6 +162,17 @@ class GTMMarketView(_ReadView):
             for r in records
         ]
 
+    def get_market_signals(self, category: str, as_of: str | None = None, snapshot_id: str | None = None) -> dict[str, Any]:
+        """返回品类市场聚合信号 + 证据引用（不返回原始评论全文；source_url 缺失不伪造）"""
+        records = self._port.search_all("", category=category, as_of=as_of, snapshot_id=snapshot_id)
+        signals = [
+            {"keyword": r.keyword, "platform": r.platform, "heat_index": r.heat_index,
+             "record_date": r.record_date, "brand": r.brand}
+            for r in records
+        ]
+        evidence = self._port.build_evidence_refs(records)
+        return {"signals": signals, "evidence": evidence}
+
 class LearningLedgerReadView(_ReadView):
     """学习台账只读视图 — 权限：决策记录 / 历史评分 / 结果信号（只读，不含写入方法）"""
 

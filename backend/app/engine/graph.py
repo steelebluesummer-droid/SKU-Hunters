@@ -40,10 +40,8 @@ from app.agents.challenge_agents import CHALLENGE_REGISTRY
 from app.agents.consumer_agent import get_consumer_agent_class
 from app.agents.creative_agent import get_creative_agent_class
 from app.agents.creative_contract import validate_proposals
+from app.agents.gtm_agent import get_gtm_agent_class
 from app.agents.ip_agent import get_ip_agent_class
-from app.agents.mock_agents import (
-    MockGTMAgent,
-)
 from app.agents.trend_agent import get_trend_agent_class
 from app.engine import llm
 from app.engine.connector_gateway import (
@@ -154,7 +152,7 @@ AGENT_REGISTRY: dict[str, type] = {
     "ip": get_ip_agent_class(),
     "creative": get_creative_agent_class(),
     "business": get_business_agent_class(),
-    "gtm": MockGTMAgent,
+    "gtm": get_gtm_agent_class(),
 }
 
 # ── Agent 短键 → AGENT_DATA_ACCESS 白名单键映射 ────────────────
@@ -363,7 +361,7 @@ async def business_node(state: CommitteeState) -> dict[str, Any]:
 
 
 async def gtm_node(state: CommitteeState) -> dict[str, Any]:
-    """ACT3 全球化官（Phase 2 占位，商业官之后串行：需 opportunity_scores 上游结果）"""
+    """ACT3 全球化官（商业官之后串行：需 opportunity_scores 上游结果）"""
     context = {
         "brief": state["brief"],
         "proposal_set": state["proposal_set"],
@@ -820,7 +818,7 @@ def _translate(node_name: str, update: dict[str, Any]) -> dict[str, Any] | None:
                 "evidence": _evidence_of(top), "score": top["total_score"]}
     if node_name == "gtm_agent":
         return {"role": "global",
-                "content": f"已生成 {len(update['gtm_plans'])} 份上市策略（Phase 2 占位）",
+                "content": f"已生成 {len(update['gtm_plans'])} 份上市策略",
                 "evidence": [], "score": None}
     if node_name == "decision_engine":
         rec = update["recommendation"]
