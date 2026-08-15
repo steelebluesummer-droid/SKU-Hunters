@@ -47,10 +47,25 @@ def test_trend_gallery_mapping():
     assert len(tg["expressions"]) >= 1
 
 
-def test_voice_format_consumer_voice():
-    """小风扇全量原声（voice_of_user 格式）能转成消费者之声"""
-    cv = L.to_consumer_voice("小风扇voice")
-    assert len(cv["quotes"]) == 13
+def test_voice_format_consumer_voice(tmp_path):
+    """全量原声（voice_of_user 格式）能转成消费者之声（自带夹具，不依赖采集文件）"""
+    import json
+
+    voice = {
+        "note": "原声采集样本",
+        "voice_of_user": [
+            {"speaker": "上班族A", "source_note": "三联生活实验室", "raw_quote": "挂脖风扇卷头发太吓人了",
+             "scenario": "通勤", "sentiment": "negative", "category": "安全焦虑"},
+            {"speaker": "学生B", "source_note": "小红书评论", "raw_quote": "图书馆用噪音有点大",
+             "scenario": "通勤", "sentiment": "negative", "category": "安全焦虑"},
+            {"speaker": "宝妈C", "source_note": "微博", "raw_quote": "续航还行，出门一天够用",
+             "scenario": "户外", "sentiment": "positive", "category": "续航"},
+        ],
+    }
+    (tmp_path / "测试voice_2026-08-15.json").write_text(
+        json.dumps(voice, ensure_ascii=False), encoding="utf-8")
+    cv = SocialEvidenceLoader(root=tmp_path).to_consumer_voice("测试voice")
+    assert len(cv["quotes"]) == 3
     # 原声带说话人+来源，可对账
     assert "三联生活实验室" in cv["quotes"][0]["source"]
     # 负面类别聚成痛点

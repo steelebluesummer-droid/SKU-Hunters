@@ -104,6 +104,10 @@
       {
         "scene": "品类现象",
         "weight": "中"
+      },
+      {
+        "scene": "价格敏感",
+        "weight": "中"
       }
     ],
     "quotes": [
@@ -381,52 +385,52 @@
   },
   "evidence_refs": [
     {
-      "ref_id": "E001",
-      "type": "media_article",
-      "title": "爆火的手持小风扇，快进化成瑜伽裤了",
-      "publisher": "三联生活实验室/虎嗅",
-      "date": "2026-07-08",
-      "url": "https://m.huxiu.com/article/4873625.html"
-    },
-    {
-      "ref_id": "E002",
-      "type": "case_study",
-      "title": "小红书店铺700万销售额，这个小家电商家做对了什么",
-      "publisher": "人人都是产品经理",
-      "date": "2026-08",
-      "url": "https://www.woshipm.com/share/6096243.html"
-    },
-    {
-      "ref_id": "E003",
-      "type": "data_report",
-      "title": "抽象爆火-小红书季节场景新解法",
-      "publisher": "千瓜数据/增长黑客",
       "date": "2025-08-13",
+      "publisher": "千瓜数据/增长黑客",
+      "ref_id": "E003",
+      "title": "抽象爆火-小红书季节场景新解法",
+      "type": "data_report",
       "url": "https://www.growthhk.cn/cgo/market/140822.html"
     },
     {
-      "ref_id": "E004",
-      "type": "industry_news",
-      "title": "告别能转就行，手持风扇开启百变时代",
-      "publisher": "杭州日报/每日商报",
-      "date": "2026-07-17",
-      "url": "http://hznews.hangzhou.com.cn/jingji/content/2026-07/17/content_9256896.htm"
-    },
-    {
-      "ref_id": "E005",
-      "type": "industry_news",
-      "title": "消暑装备趁热旺销",
-      "publisher": "中国经济网",
       "date": "2026-08-09",
+      "publisher": "中国经济网",
+      "ref_id": "E005",
+      "title": "消暑装备趁热旺销",
+      "type": "industry_news",
       "url": "http://adimg.ce.cn/xwzx/gnsz/gdxw/202608/t20260809_3136079.shtml"
     },
     {
-      "ref_id": "E006",
-      "type": "industry_report",
-      "title": "2026家电行业：社媒矩阵营销洞察与策略",
-      "publisher": "云略/慧博投研",
+      "date": "2026-08",
+      "publisher": "人人都是产品经理",
+      "ref_id": "E002",
+      "title": "小红书店铺700万销售额，这个小家电商家做对了什么",
+      "type": "case_study",
+      "url": "https://www.woshipm.com/share/6096243.html"
+    },
+    {
+      "date": "2026-07-17",
+      "publisher": "杭州日报/每日商报",
+      "ref_id": "E004",
+      "title": "告别能转就行，手持风扇开启百变时代",
+      "type": "industry_news",
+      "url": "http://hznews.hangzhou.com.cn/jingji/content/2026-07/17/content_9256896.htm"
+    },
+    {
       "date": "2026-06-26",
+      "publisher": "云略/慧博投研",
+      "ref_id": "E006",
+      "title": "2026家电行业：社媒矩阵营销洞察与策略",
+      "type": "industry_report",
       "url": "https://m.hibor.com.cn/wap_detail.aspx?id=bb4e2c5b618a7d5d76e5f30da22ca1bf"
+    },
+    {
+      "date": "2026-07-08",
+      "publisher": "三联生活实验室/虎嗅",
+      "ref_id": "E001",
+      "title": "爆火的手持小风扇，快进化成瑜伽裤了",
+      "type": "media_article",
+      "url": "https://m.huxiu.com/article/4873625.html"
     }
   ],
   "gaps_note": "竞品品牌图(官方商品图直链未采集，image_url 留空按可对账来源)；其余五看已补齐"
