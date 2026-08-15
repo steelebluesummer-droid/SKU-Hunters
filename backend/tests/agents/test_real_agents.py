@@ -515,3 +515,68 @@ class TestFuzzyGet:
     def test_no_match_returns_none(self):
         assert real_common.fuzzy_get({"方案A": 1}, "方案B") is None
         assert real_common.fuzzy_get({"方案A": 1}, "") is None
+
+
+# ── ⑥ 学习官台账反哺（飞轮闭环）─────────────────────────────────
+
+ANALOG = {
+    "proposal": "库洛米旧款风扇", "category": "小风扇",
+    "predicted_score": 45.0, "ai_decision": "reject",
+    "human_action": "reject", "status": "rejected", "retro_turns": 2,
+}
+
+
+def _capture_llm(monkeypatch, payload):
+    """patch complete 并捕获 user prompt（验证材料装配）"""
+    captured = {}
+
+    def _spy(system, user, **kw):
+        captured["user"] = user
+        return json.dumps(payload)
+
+    monkeypatch.setattr("app.engine.llm.complete", _spy)
+    return captured
+
+
+class TestHistoryFeedback:
+    def test_business_material_has_analogs(self, monkeypatch):
+        captured = _capture_llm(monkeypatch, BUSINESS_LLM)
+        ctx = {**BUSINESS_CTX, "history_analogs": [ANALOG]}
+        _run(BusinessAgent(), ctx)
+        assert "历史相似案例" in captured["user"]
+        assert "库洛米旧款风扇" in captured["user"]
+        assert "reject" in captured["user"]
+
+    def test_business_material_empty_analogs_honest(self, monkeypatch):
+        captured = _capture_llm(monkeypatch, BUSINESS_LLM)
+        _run(BusinessAgent(), {**BUSINESS_CTX, "history_analogs": []})
+        assert "无历史档案" in captured["user"]
+
+    def test_creative_negative_examples(self, monkeypatch):
+        from app.agents.creative_agent import CreativeAgent
+
+        payload = {"proposals": [
+            {"name": f"方案{i}", "concept": f"概念{i}", "product_form": "摆件",
+             "target_segment": "学生", "price_band": "¥39-59",
+             "differentiation": f"差异{i}"}
+            for i in range(3)
+        ], "ideation_note": "note"}
+        captured = _capture_llm(monkeypatch, payload)
+        ctx = {"brief": BRIEF, "history_analogs": [ANALOG]}
+        result = _run(CreativeAgent(), ctx)
+        assert "历史教训" in captured["user"]
+        assert "库洛米旧款风扇" in captured["user"]
+        assert len(result["proposals"]) == 3  # 契约不受影响
+
+    def test_creative_no_analogs_no_section(self, monkeypatch):
+        from app.agents.creative_agent import CreativeAgent
+
+        payload = {"proposals": [
+            {"name": f"方案{i}", "concept": f"概念{i}", "product_form": "摆件",
+             "target_segment": "学生", "price_band": "¥39-59",
+             "differentiation": f"差异{i}"}
+            for i in range(3)
+        ], "ideation_note": "note"}
+        captured = _capture_llm(monkeypatch, payload)
+        _run(CreativeAgent(), {"brief": BRIEF})  # 无 history_analogs 键
+        assert "历史教训" not in captured["user"]

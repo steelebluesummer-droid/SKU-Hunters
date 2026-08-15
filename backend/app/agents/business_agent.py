@@ -33,6 +33,7 @@ from app.agents.real_common import (
     provider_enabled,
 )
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
+from app.engine.ledger import format_analogs
 from app.schemas import (
     Confidence,
     DimensionScore,
@@ -396,6 +397,14 @@ class BusinessAgent(BaseAgent):
                     f"  · [{c.get('source_role', '')}/{c.get('stance', '')}] "
                     f"{c.get('proposal_name', '')}：{c.get('content', '')[:80]}"
                 )
+        # 学习官台账：history_analog 维度的真实材料（飞轮闭环）
+        analogs = context.get("history_analogs") or []
+        if analogs:
+            material.append("\n【历史相似案例】（学习官台账，人决策是最有分量的信号）")
+            material.extend(format_analogs(analogs))
+        else:
+            material.append("\n【历史相似案例】无历史档案——history_analog "
+                            "按无支撑打分并在 basis 注明")
         if feedback:
             material.append(f"\n【评委打回意见】{feedback}——本轮必须针对性修正")
 

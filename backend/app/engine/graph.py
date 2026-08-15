@@ -54,6 +54,7 @@ from app.engine.context_contract import (
     validate_gtm_context,
 )
 from app.engine.decision_engine import DecisionEngine
+from app.engine.ledger import query_analogs
 from app.engine.state import CommitteeState
 from app.schemas import (
     Brief,
@@ -316,6 +317,8 @@ async def creative_node(state: CommitteeState) -> dict[str, Any]:
         "user_sentiment": state.get("user_sentiment"),
         "ip_assessment": state.get("ip_assessment"),
         "feedback": _feedback(state),
+        # 学习官台账：历史被否方案做负例（Mock 忽略多余键，透明）
+        "history_analogs": query_analogs(state["brief"].get("category", "")),
     })
     # 四项契约校验（graph 边界强制：Mock 与真实输出都经过，非法输出不能进入 business）
     validate_proposals(
@@ -350,6 +353,8 @@ async def business_node(state: CommitteeState) -> dict[str, Any]:
         "user_sentiment": state.get("user_sentiment"),
         "ip_assessment": state.get("ip_assessment"),
         "feedback": _feedback(state),
+        # 学习官台账：history_analog 维度的真实材料（飞轮闭环）
+        "history_analogs": query_analogs(state["brief"].get("category", "")),
     }
     validate_business_context(context)  # 三官 Artifact 缺失 → ContextContractError，阻断 Agent 调用
     agent = _instantiate_agent("business")

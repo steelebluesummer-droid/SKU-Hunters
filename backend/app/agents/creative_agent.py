@@ -19,6 +19,7 @@ from typing import Any
 from app.agents.base_agent import BaseAgent
 from app.agents.creative_contract import ContractError, validate_proposals
 from app.agents.mock_agents import MockCreativeAgent
+from app.engine.ledger import format_analogs
 from app.schemas import ProposalSet, SourceRef
 
 # 预算带 → 建议价格带（名创优品实际价位段）
@@ -157,6 +158,15 @@ class CreativeAgent(BaseAgent):
 """
         if feedback:
             user_prompt += f"\n【评委打回意见】上一轮方案被打回，意见：{feedback}——本轮必须针对性修正\n"
+
+        # 学习官台账：历史案例做负例（被否/低分方案避免重复提案）
+        analogs = context.get("history_analogs") or []
+        if analogs:
+            user_prompt += (
+                "\n【历史教训】学习官台账中的同品类过往案例——"
+                "被否或低分的方案不要换皮重提，通过的可借鉴其形态/场景选择：\n"
+                + "\n".join(format_analogs(analogs)) + "\n"
+            )
 
         raw = complete(_SYSTEM_PROMPT, user_prompt, temperature=0.8, max_tokens=100_000)
         if not raw:
