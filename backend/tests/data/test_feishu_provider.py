@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+
 from app.data.base_adapter import BaseProviderError, BaseUnavailable, FeishuBaseProvider
 from app.schemas.base_data import BasePlatform
 

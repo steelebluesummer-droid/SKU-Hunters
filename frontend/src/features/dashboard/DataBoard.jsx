@@ -58,6 +58,7 @@ export default function DataBoard() {
   const priceBands = data.priceBands || [];
   const voiceTrend = data.voiceTrend || { weeks: [], xhs: [], douyin: [] };
   const hasVoiceTrend = voiceTrend.weeks?.length > 0;
+  const sourceLabel = data.sourceLabel || '数据来源未知';
 
   const rankOption = {
     tooltip: {},
@@ -91,12 +92,16 @@ export default function DataBoard() {
     { title: '商品', dataIndex: 'name', width: 180 },
     { title: '价格', dataIndex: 'price', width: 80, render: (v) => `¥${v}` },
     { title: '核心卖点', dataIndex: 'point', width: 140, render: (v) => <Tag>{v}</Tag> },
-    { title: '月销指数', dataIndex: 'sales', width: 140, render: (v) => <Progress percent={v} showInfo={false} strokeColor="var(--color-brand-accent)" size="small" /> },
+    { title: '热度指数', dataIndex: 'sales', width: 140, render: (v) => <Progress percent={v} showInfo={false} strokeColor="var(--color-brand-accent)" size="small" /> },
   ];
 
   return (
     <div>
-      <PageHeader title="数据看板 · 品类大盘" subtitle="未经筛选的大盘全貌（策展数据，非 Agent 现搜）" />
+      <PageHeader title="数据看板 · 品类大盘" subtitle="基于采集记录的实时聚合，不把互动量伪装成销量" />
+      <div style={{ marginBottom: 16 }}>
+        <Tag color={data.dataSource === 'feishu' ? 'blue' : 'default'}>{sourceLabel}</Tag>
+        {data.recordCount != null ? <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>共 {data.recordCount} 条记录</span> : null}
+      </div>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
@@ -165,7 +170,7 @@ export default function DataBoard() {
                 </div>
               ))
             )}
-            <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 12 }}>数据源：电商公开样本（冻结 fixture，可切换实时）</p>
+            <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 12 }}>价格带按采集记录中的价格字段统计；缺失价格的记录不计入分母。</p>
           </Card>
         </Col>
       </Row>

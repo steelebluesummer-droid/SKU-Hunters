@@ -6,7 +6,7 @@
  * 响应式：375 单列，价格上下限独立成列可读。
  * ============================================================ */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useBlocker } from 'react-router-dom';
 import { Form, Select, Input, InputNumber, Button, Card, Checkbox, Row, Col, Alert, Modal } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -54,10 +54,11 @@ export default function NewPlan() {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(false);
   const [pageError, setPageError] = useState(null);
 
   // 应用内导航守卫：dirty 时任何导航（侧栏/后退/取消）都需确认
-  const blocker = useBlocker(dirty);
+  const blocker = useBlocker(() => dirtyRef.current);
 
   useEffect(() => {
     if (blocker.state === 'blocked') {
@@ -95,6 +96,7 @@ export default function NewPlan() {
       const brief = fromForm(values);
       const res = await createPlan(brief);
       if (res?.plan_id) {
+        dirtyRef.current = false;
         setDirty(false); // 已提交，离开无需再确认
         nav(`/tasks/${res.plan_id}`);
       } else {
@@ -142,7 +144,10 @@ export default function NewPlan() {
         form={form}
         layout="vertical"
         onFinish={onFinish}
-        onValuesChange={() => setDirty(true)}
+        onValuesChange={() => {
+          dirtyRef.current = true;
+          setDirty(true);
+        }}
         initialValues={{
           market: '中国大陆',
           priceMin: 39,

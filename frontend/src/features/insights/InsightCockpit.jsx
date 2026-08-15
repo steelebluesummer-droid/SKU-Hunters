@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Row, Col, Tag, Progress, Button } from 'antd';
+import { Card, Row, Col, Tag, Progress, Button, Empty } from 'antd';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import ProcessLog from '../../shared/components/ProcessLog';
@@ -13,10 +13,10 @@ const AI_TAG = <Tag color="purple" style={{ fontSize: 11, marginLeft: 8 }}>AI �
 const BLOCK_TITLE = { fontSize: 13, fontWeight: 600, margin: '16px 0 8px' };
 
 // 洞察模块外壳：标题 + 过程日志 + 日志跑完后显现内容
-function InsightModule({ title, log, children }) {
+function InsightModule({ title, tag = 'AI 分析 · 样本可溯', log, children }) {
   const [done, setDone] = useState(false);
   return (
-    <Card title={<span>{title}<span style={MODULE_TAG}>AI 分析 · 样本可溯</span></span>} style={{ marginBottom: 16 }}>
+    <Card title={<span>{title}<span style={MODULE_TAG}>{tag}</span></span>} style={{ marginBottom: 16 }}>
       <ProcessLog lines={log || []} onDone={() => setDone(true)} />
       <div style={{ opacity: done ? 1 : 0, transition: 'opacity 0.5s', pointerEvents: done ? 'auto' : 'none' }}>
         {children}
@@ -209,28 +209,35 @@ function TrendRadarEnriched({ trendRadar = {}, enrichment }) {
 
 function ConsumerVoice({ consumerVoice = {} }) {
   const painPoints = consumerVoice.painPoints || [];
+  const scenes = consumerVoice.scenes || [];
   const maxCount = Math.max(1, ...painPoints.map(p => p.count || 0));
   const sceneOption = {
     tooltip: { trigger: 'item', formatter: '{b}: {c}%' },
     legend: { bottom: 0, textStyle: { fontSize: 11 } },
     series: [{
-      type: 'pie', radius: ['40%', '65%'], center: ['50%', '44%'],
+      type: 'pie', radius: ['32%', '52%'], center: ['50%', '40%'],
       label: { fontSize: 11 },
-      data: (consumerVoice.scenes || []).map(s => ({ name: s.name, value: s.value || 0 })),
+      data: scenes.map(s => ({ name: s.name, value: s.value || 0 })),
     }],
   };
   return (
     <Row gutter={16}>
       <Col xs={24} md={9}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>TOP 痛点</div>
-        {painPoints.map((p, i) => (
+        {painPoints.length ? painPoints.map((p, i) => (
           <div key={p.text} style={{ marginBottom: 8 }}>
             <div style={{ fontSize: 12 }}>{i + 1}. {p.text} <span style={{ color: 'var(--color-text-muted)' }}>({p.count} 条)</span></div>
             <Progress percent={Math.round((p.count || 0) / maxCount * 100)} showInfo={false} strokeColor="var(--color-action-primary)" size="small" />
           </div>
-        ))}
+        )) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无结构化痛点数据" style={{ padding: '12px 0' }} />
+        )}
         <div style={{ fontSize: 13, fontWeight: 600, margin: '12px 0 8px' }}>使用场景分布</div>
-        <ReactECharts option={sceneOption} style={{ height: 200 }} />
+        {scenes.length ? (
+          <ReactECharts option={sceneOption} style={{ height: 320 }} />
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无结构化场景数据" style={{ height: 320, display: 'flex', flexDirection: 'column', justifyContent: 'center' }} />
+        )}
       </Col>
       <Col xs={24} md={15}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>消费者原声</div>
@@ -344,7 +351,7 @@ export default function InsightCockpit({ insights, category }) {
   return (
     <div>
       <InsightModule title="趋势机会雷达" log={trendLog}><TrendRadar trendRadar={trendRadar} enrichment={enrichment} /></InsightModule>
-      <InsightModule title="Consumer Voice · 用户需求" log={consumerVoice.processLog}><ConsumerVoice consumerVoice={consumerVoice} /></InsightModule>
+      <InsightModule title="用户需求 · 实时摘要" tag="实时摘要 · 样本可溯" log={consumerVoice.processLog}><ConsumerVoice consumerVoice={consumerVoice} /></InsightModule>
       <InsightModule title="Competitive Map · 竞品分析" log={competitiveMap.processLog}><CompetitiveMap competitiveMap={competitiveMap} /></InsightModule>
 
       <Row gutter={16}>

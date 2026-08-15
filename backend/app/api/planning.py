@@ -21,14 +21,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
+from app.data.base_adapter import BaseProviderError, BaseUnavailable
 from app.planning import fixtures, ip_resource, pipeline
 from app.planning.insight_resolver import LLMGenerationError
+from app.planning.live_data import build_live_data_board
 from app.planning.repository import plan_write_lock
 from app.planning.service import StateTransitionError
 from app.schemas.planning import PlanBrief
@@ -326,6 +329,21 @@ async def get_ip_resource():
 
 
 def _load_curated_module(topic: str, key: str, fallback: dict):
+    if os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower() == "feishu":
+        try:
+            from app.planning.live_insights import build_live_insight_bundle
+
+            return build_live_insight_bundle(topic)[key]
+        except (BaseUnavailable, BaseProviderError, ValueError) as exc:
+            raise HTTPException(
+                503,
+                detail={
+                    "error": {
+                        "code": "BASE_UNAVAILABLE",
+                        "message": "飞书实时洞察暂不可用，请检查 Base 配置或品类数据",
+                    }
+                },
+            ) from exc
     """策展数据：有社媒证据取真实数据，否则回退 fixtures"""
     try:
         from app.insights.loaders.social_evidence import SocialEvidenceLoader
@@ -346,8 +364,28 @@ async def trend_gallery(topic: str = "小风扇"):
 
 @router.get("/data-board")
 async def data_board():
-    # 大盘看板 = 品类热度/声量/热销榜 + 价格带分布（来自竞品矩阵），前端单次取全
-    return {**fixtures.DATA_BOARD, "priceBands": fixtures.COMPETITIVE_MAP["priceBands"]}
+    """数据看板：Feishu 模式读取实时明细，其他模式才展示 fixture。"""
+    mode = os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower()
+    if mode == "feishu":
+        try:
+            return await asyncio.to_thread(build_live_data_board)
+        except (BaseUnavailable, BaseProviderError, ValueError) as exc:
+            logger.exception("Feishu 实时看板读取失败")
+            raise HTTPException(
+                503,
+                detail={
+                    "error": {
+                        "code": "BASE_UNAVAILABLE",
+                        "message": "飞书实时数据暂不可用，请检查 Base 配置、权限或数据表内容",
+                    }
+                },
+            ) from exc
+    return {
+        **fixtures.DATA_BOARD,
+        "priceBands": fixtures.COMPETITIVE_MAP["priceBands"],
+        "dataSource": "fixture",
+        "sourceLabel": "本地演示数据（仅 BASE_PROVIDER_MODE 非 feishu 时）",
+    }
 
 
 _TREND_SCAN_FILE = Path(__file__).resolve().parents[2] / "data" / "trend_scan_snapshot.json"
