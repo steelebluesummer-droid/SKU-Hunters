@@ -35,13 +35,13 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from app.agents.business_agent import get_business_agent_class
 from app.agents.challenge_agents import CHALLENGE_REGISTRY
 from app.agents.consumer_agent import get_consumer_agent_class
 from app.agents.creative_agent import get_creative_agent_class
 from app.agents.creative_contract import validate_proposals
 from app.agents.ip_agent import get_ip_agent_class
 from app.agents.mock_agents import (
-    MockBusinessAgent,
     MockGTMAgent,
 )
 from app.agents.trend_agent import get_trend_agent_class
@@ -153,7 +153,7 @@ AGENT_REGISTRY: dict[str, type] = {
     "user": get_consumer_agent_class(),
     "ip": get_ip_agent_class(),
     "creative": get_creative_agent_class(),
-    "business": MockBusinessAgent,
+    "business": get_business_agent_class(),
     "gtm": MockGTMAgent,
 }
 
