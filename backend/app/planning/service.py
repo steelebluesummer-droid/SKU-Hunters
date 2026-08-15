@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.engine import llm
+from app.engine.strict_mode import is_demo_hidden
 from app.planning import fixtures
 from app.planning.insight_resolver import _resolve_insight_bundle
 from app.planning.opportunity_engine import (
@@ -295,6 +296,8 @@ def seed_demo() -> None:
         if "demo" in _PLANS:
             return
 
+    if is_demo_hidden():
+        return  # 严格模式不预置演示任务（已有持久化 demo 已在上方恢复，且 API 层隐藏）
     _PLANS["demo"] = {
         "plan_id": "demo",
         # 与 create_plan 同路径归一化：camelCase fixtures → snake_case brief

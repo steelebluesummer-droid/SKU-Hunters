@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 import uuid
@@ -19,6 +18,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.engine.strict_mode import (
+    StrictModeError,
+    allow_fixture_tasks,
+    is_demo_hidden,
+    planning_default_mode,
+)
 from app.schemas.planning import PlanBrief
 from app.schemas.planning_api_v2 import PlanSummaryV2
 
@@ -104,9 +109,11 @@ def create_plan(brief: dict[str, Any]) -> dict[str, Any]:
     # 先归一化键名（前端/DEMO_BRIEF 是 camelCase，PlanBrief 无别名会静默丢字段）
     validated = PlanBrief.model_validate(_snake_keys(brief))
     plan_id = f"plan_{datetime.now(timezone.utc):%Y%m%d}_{uuid.uuid4().hex[:4]}"
-    configured_mode = os.getenv("PLANNING_DEFAULT_MODE", "fixture").strip().lower()
+    configured_mode = planning_default_mode()
     requested_mode = str(brief.get("mode") or configured_mode).strip().lower()
-    mode = requested_mode if requested_mode in {"fixture", "live"} else "fixture"
+    mode = requested_mode if requested_mode in {"fixture", "live"} else "live"
+    if mode == "fixture" and not allow_fixture_tasks():
+        raise StrictModeError("严格真实模式禁止创建 fixture（演示）任务，请使用 live")
     stored_brief = validated.model_dump()
     stored_brief["mode"] = mode
     plan = {
@@ -154,7 +161,8 @@ def plan_write_lock(plan_id: str):
 
 def list_plans() -> list[dict[str, Any]]:
     with _lock:
-        plans = sorted(_PLANS.values(), key=lambda p: p["created_at"], reverse=True)
+        plans = [_PLANS[k] for k in _PLANS if not (k == "demo" and is_demo_hidden())]
+        plans = sorted(plans, key=lambda p: p["created_at"], reverse=True)
     summaries = [
         PlanSummaryV2(
             plan_id=p["plan_id"],

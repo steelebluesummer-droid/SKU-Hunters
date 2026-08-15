@@ -16,11 +16,11 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
+from app.engine.strict_mode import resolve_provider
 from app.learning.actual_signal import ActualStatus, NormalizedActualSignal
 from app.schemas import Confidence, DimensionGap, EvidenceRef, RetroReport
 
@@ -249,7 +249,7 @@ class MockLearningAgent(LearningAgent):
 
 def get_learning_agent_class() -> type[BaseAgent]:
     """注册表切换：默认 MockLearningAgent；设 LEARNING_AGENT_PROVIDER=real 时返回真实实现"""
-    provider = os.getenv("LEARNING_AGENT_PROVIDER", "mock").strip().lower()
+    provider = resolve_provider("学习官", "LEARNING_AGENT_PROVIDER")
     if provider == "real":
         return LearningAgent
     return MockLearningAgent

@@ -15,6 +15,26 @@ LangGraph 编排，FastAPI + 飞书机器人交互。代码在 `backend/`。
 3. 所有路径用 `Path(__file__).resolve()` 锚定，禁止绝对路径
 4. 提交前本地跑：`ruff check backend/`（从仓库根）+ `pytest tests/ --cov=app`（从 backend/）
 
+## 严格真实模式（Strict Real Mode）
+
+生产环境禁止一切 Mock / fixture / 演示数据回退，由 `app/engine/strict_mode.py` 单一事实源判定：
+
+```env
+APP_ENV=production
+ALLOW_MOCK=false
+BASE_PROVIDER_MODE=feishu
+PLANNING_DEFAULT_MODE=live
+AGENT_PROVIDER=real
+LEARNING_AGENT_PROVIDER=real
+```
+
+- `APP_ENV=production` 且 `ALLOW_MOCK=false` → 严格模式：LLM / 数据源失败**阻断**（抛 `StrictModeError`），不回退 Mock；真实数据不足 → `unavailable`（合法态），不用演示内容填满页面；字段缺失 → `unknown`。
+- 严格模式强制：企划默认模式 `live`；**禁止**创建/打开 `fixture` 与 `demo` 任务；`/health` 返回 `mock_allowed=false, strict_real=true`。
+- Agent 注册表（`get_*_agent_class`）经 `resolve_provider` 校验：严格模式必须 `real`（或含确定性官允许 `deterministic`），否则启动即阻断。
+- 真实 Agent 内部 Mock fallback 经 `require_mock_allowed`：严格模式抛错，非严格放行（测试用）。
+- 使用真实数据的 deterministic Agent（如 ConsumerInsightAgent / IPStrategyAgent / GoToMarketAgent）不属于 Mock，可保留。
+- Mock 代码保留给自动化测试（测试环境 `APP_ENV` 留空、`ALLOW_MOCK` 默认 true）。
+
 ## 接口 A：接入新 Agent（替换 mock）
 
 编排层在 `backend/app/engine/graph.py`。所有图节点是薄包装层，只认注册表：

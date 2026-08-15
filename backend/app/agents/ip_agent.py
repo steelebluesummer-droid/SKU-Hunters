@@ -24,17 +24,17 @@ from __future__ import annotations
 
 import asyncio
 import math
-import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.agents.mock_agents import MockIPAgent
-from app.agents.real_common import parse_llm_json, provider_enabled
+from app.agents.real_common import parse_llm_json
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
 from app.data.bilibili_hot import BilibiliConnector
 from app.data.errors import ConnectorFetchError
 from app.data.taobao_suggest import TaobaoSuggestConnector
+from app.engine.strict_mode import require_mock_allowed, resolve_provider
 from app.schemas import Confidence, EvidenceRef, IPAssessment, IPCandidate
 
 # ══════════════════ 确定性实现：IPStrategyAgent ══════════════════
@@ -210,6 +210,7 @@ class IPAgent(BaseAgent):
                 return result
         except Exception:  # noqa: BLE001,S110 — 降级纪律：任何故障回退 Mock
             pass
+        require_mock_allowed("IP官 LLM/数据故障回退 Mock")
         return await MockIPAgent().run(context)
 
     # ── 数据采集（候选 × 双源并行）───────────────────────────
@@ -400,8 +401,9 @@ def get_ip_agent_class() -> type[BaseAgent]:
       （双源交叉验证 + LLM 研判，数据/LLM 故障时内部回退 Mock）
     注意：注册表在 import 时求值，env 必须在进程启动前设置。
     """
-    if provider_enabled("IP_AGENT_PROVIDER"):
+    provider = resolve_provider("IP官", "IP_AGENT_PROVIDER", ("real", "deterministic"))
+    if provider == "real":
         return IPAgent
-    if os.getenv("IP_AGENT_PROVIDER", "").strip().lower() == "deterministic":
+    if provider == "deterministic":
         return IPStrategyAgent
     return MockIPAgent

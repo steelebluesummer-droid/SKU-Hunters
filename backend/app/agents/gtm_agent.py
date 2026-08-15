@@ -34,18 +34,18 @@ GTMAgent 降级纪律（与其他真 Agent 有一个刻意差异）：
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.agents.mock_agents import MockGTMAgent
-from app.agents.real_common import fuzzy_get, parse_llm_json, provider_enabled
+from app.agents.real_common import fuzzy_get, parse_llm_json
 from app.data.baidu_hot import BaiduHotConnector
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
 from app.data.errors import ConnectorFetchError
 from app.data.tiktok_trends import TiktokTrendsConnector
 from app.data.weibo_hot import WeiboHotConnector
 from app.engine.decision_engine import min_confidence
+from app.engine.strict_mode import require_mock_allowed, resolve_provider
 from app.schemas import Confidence, CountryPlan, EvidenceRef, GTMPlan
 
 _OUTPUT_CONTRACT = """
@@ -100,6 +100,7 @@ class GTMAgent(BaseAgent):
                 return result
         except Exception:  # noqa: BLE001,S110 — 降级纪律：LLM 故障回退 Mock
             pass
+        require_mock_allowed("GTM官 LLM/数据故障回退 Mock")
         return await MockGTMAgent().run(context)
 
     # ── 市场声量采集（故障返回 failed 标记，不抛）─────────────
@@ -400,8 +401,9 @@ def get_gtm_agent_class() -> type[BaseAgent]:
     GTM_AGENT_PROVIDER=real（或总开关 AGENT_PROVIDER=real）→ GTMAgent，
     LLM 故障时内部回退 Mock（数据源故障不回退，降置信度继续出策略）。
     """
-    if provider_enabled("GTM_AGENT_PROVIDER"):
+    provider = resolve_provider("GTM官", "GTM_AGENT_PROVIDER", ("real", "deterministic"))
+    if provider == "real":
         return GTMAgent
-    if os.getenv("GTM_AGENT_PROVIDER", "").strip().lower() == "deterministic":
+    if provider == "deterministic":
         return GoToMarketAgent
     return MockGTMAgent

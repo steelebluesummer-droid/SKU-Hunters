@@ -29,6 +29,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
+from app.engine.strict_mode import StrictModeError
 from app.planning import fixtures, ip_resource, pipeline
 from app.planning.insight_resolver import LLMGenerationError
 from app.planning.live_data import build_live_data_board
@@ -40,9 +41,12 @@ from app.schemas.planning_api_v2 import PlanListResponseV2
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["planning"])
+from app.engine.strict_mode import is_demo_hidden
 
 
 def _get_plan_or_404(plan_id: str) -> dict[str, Any]:
+    if plan_id == "demo" and is_demo_hidden():
+        raise HTTPException(404, detail={"error": {"code": "PLAN_NOT_FOUND", "message": plan_id}})
     plan = pipeline.get_plan(plan_id)
     if plan is None:
         raise HTTPException(404, detail={"error": {"code": "PLAN_NOT_FOUND", "message": plan_id}})
@@ -67,7 +71,11 @@ async def create_plan(payload: dict):
         PlanBrief.model_validate(brief)
     except ValidationError as e:
         raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}}) from e
-    plan = pipeline.create_plan(brief)
+    try:
+        plan = pipeline.create_plan(brief)
+    except StrictModeError as e:
+        # 严格模式禁止 fixture/演示任务 → 409 业务冲突
+        raise HTTPException(409, detail={"error": {"code": "STRICT_REAL_MODE", "message": str(e)}}) from e
     return {"plan_id": plan["plan_id"], "status": plan["status"]}
 
 

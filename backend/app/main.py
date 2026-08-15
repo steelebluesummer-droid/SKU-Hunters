@@ -79,7 +79,8 @@ app.include_router(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "AI 新品企划工作室"}
+    from app.engine.strict_mode import mock_allowed, strict_real
+    return {"status": "ok", "service": "AI 新品企划工作室", "mock_allowed": mock_allowed(), "strict_real": strict_real()}
 
 
 # 生产模式：前端 build 产物由后端托管（npm run build 后一条 uvicorn 命令起全站）。
