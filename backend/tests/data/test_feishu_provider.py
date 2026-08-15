@@ -104,17 +104,67 @@ def test_normal_return(monkeypatch):
 
 def test_pagination(monkeypatch):
     """分页：page_token 游标翻页拉取全量"""
-    pages = {
-        "": _resp([_record(**_base_fields(record_id="r1"))], has_more=True, page_token="tok1"),
-        "tok1": _resp([_record(**_base_fields(record_id="r2"))], has_more=False),
-    }
+    responses = iter([
+        _resp([_record(**_base_fields(record_id="r1"))], has_more=True, page_token="tok1"),
+        _resp([_record(**_base_fields(record_id="r2"))], has_more=False),
+    ])
 
     def responder(url, body):
-        return pages[body.get("page_token") or ""]
+        return next(responses)
 
     provider = _provider_with(monkeypatch, responder)
     page = provider.search_records("小风扇")
     assert page.total == 2  # 两页都拉取到
+
+
+def test_pagination_uses_query_param_and_limit(monkeypatch):
+    """分页游标走 URL query，数量参数使用飞书 records/search 的 limit。"""
+    calls = []
+
+    def post(url, headers=None, json=None, params=None, timeout=None):
+        calls.append({"json": json, "params": params})
+        if len(calls) == 1:
+            return _FakeResponse(_resp([], has_more=True, page_token="next-token"))
+        return _FakeResponse(_resp([], has_more=False))
+
+    monkeypatch.setattr("requests.post", post)
+    provider = FeishuBaseProvider(
+        auth=_FakeAuth(), app_token="fake-app", data_table_id="tbl-data"
+    )
+    provider.search_records("小风扇")
+
+    assert calls[0]["json"] == {"limit": 500}
+    assert calls[0]["params"] == {}
+    assert calls[1]["json"] == {"limit": 500}
+    assert calls[1]["params"] == {"page_token": "next-token"}
+
+
+def test_text_fields_and_raw_heat_are_normalized(monkeypatch):
+    """飞书文本列表与超 100 的原始互动量可转换为合法 BaseRecord。"""
+    fields = _base_fields(
+        record_id=[{"text": "rec-list", "type": "text"}],
+        keyword=[{"text": "小风扇", "type": "text"}],
+        platform=[{"text": "xiaohongshu", "type": "text"}],
+        category=[{"text": "小风扇", "type": "text"}],
+        summary=[{"text": "摘要", "type": "text"}],
+        heat_index=30600,
+        brand=[{"text": "几素", "type": "text"}],
+        price_range=[{"text": "39-99 元", "type": "text"}],
+        snapshot_id=[{"text": "snap-list", "type": "text"}],
+        raw_value=[{"text": '{"likes": 30600}', "type": "text"}],
+    )
+
+    def responder(url, body):
+        return _resp([_record(**fields)])
+
+    provider = _provider_with(monkeypatch, responder)
+    record = provider.search_records("小风扇").records[0]
+
+    assert record.record_id == "rec-list"
+    assert record.keyword == "小风扇"
+    assert record.heat_index == 82.43
+    assert record.brand == "几素"
+    assert record.raw_value == {"likes": 30600}
 
 
 def test_missing_fields(monkeypatch):
@@ -210,6 +260,8 @@ def test_network_error(monkeypatch):
 
 def test_missing_config_fail_closed(monkeypatch):
     """缺 app_token/table_id → BaseUnavailable（fail-closed）"""
+    monkeypatch.delenv("FEISHU_BASE_APP_TOKEN", raising=False)
+    monkeypatch.delenv("FEISHU_DATA_TABLE_ID", raising=False)
     provider = FeishuBaseProvider(auth=_FakeAuth(), app_token=None, data_table_id=None)
     with pytest.raises(BaseUnavailable):
         provider.search_records("小风扇")
@@ -316,3 +368,92 @@ def test_get_summary_duplicate_as_of(monkeypatch):
     provider = _provider_with(monkeypatch, responder)
     with pytest.raises(BaseProviderError):
         provider.get_summary(category="小风扇")
+
+# ── 汇总表文本字段归一化 + brands 兼容补丁 ──────────────────────────
+
+def test_get_summary_text_list_fields_match(monkeypatch):
+    """category/snapshot_id 为飞书文本列表 [{"text": "...", "type": "text"}] 时可正常匹配"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                record_count=10, avg_heat_index=75.5,
+                brands=[{"text": '["几素", "哈尔斯"]', "type": "text"}],
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="小风扇", snapshot_id="snap-A")
+    assert summary["record_count"] == 10
+    assert summary["avg_heat_index"] == 75.5
+    assert summary["snapshot_id"] == "snap-A"
+    assert summary["brands"] == ["几素", "哈尔斯"]
+
+def test_get_summary_by_category_text_list(monkeypatch):
+    """get_summary(category='小风扇') 在 category 为文本列表时返回正确汇总（未指定 snapshot_id）"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                as_of=_date_ms("2026-08-10"),
+                record_count=216, avg_heat_index=80.0,
+                brands=["几素", "哈尔斯"],
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="小风扇")
+    assert summary["record_count"] == 216
+    assert summary["snapshot_id"] == "snap-A"
+    assert summary["brands"] == ["几素", "哈尔斯"]
+
+def test_brands_various_formats(monkeypatch):
+    """brands 兼容：JSON 字符串 / 文本列表 / 普通字符串 / 已 list / 缺失"""
+    def responder(url, body):
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    assert provider._to_brands('["几素", "哈尔斯"]') == ["几素", "哈尔斯"]
+    assert provider._to_brands([{"text": '["几素", "哈尔斯"]', "type": "text"}]) == ["几素", "哈尔斯"]
+    assert provider._to_brands("几素") == ["几素"]
+    assert provider._to_brands(["几素", "哈尔斯"]) == ["几素", "哈尔斯"]
+    assert provider._to_brands(None) == []
+    assert provider._to_brands("") == []
+
+def test_get_summary_missing_fields_no_fabrication(monkeypatch):
+    """汇总表字段缺失时：record_count/brands 不伪造，用 0/空"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                # 缺 record_count / avg_heat_index / brands
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="小风扇", snapshot_id="snap-A")
+    assert summary["record_count"] == 0
+    assert summary["avg_heat_index"] == 0.0
+    assert summary["brands"] == []  # 缺失不伪造
+
+def test_summary_avg_heat_normalized(monkeypatch):
+    """汇总表 avg_heat_index 为原始互动量时，对数归一化到 0-100"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "便携小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                avg_heat_index=440322838.4,  # 原始互动量均值
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="便携小风扇", snapshot_id="snap-A")
+    assert 0.0 <= summary["avg_heat_index"] <= 100.0  # 归一化到 0-100

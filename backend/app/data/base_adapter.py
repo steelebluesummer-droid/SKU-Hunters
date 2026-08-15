@@ -254,11 +254,18 @@ class FeishuBaseProvider:
             "Content-Type": "application/json; charset=utf-8",
         }
 
-    def _post(self, table_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    def _post(
+        self, table_id: str, body: dict[str, Any], page_token: str | None = None
+    ) -> dict[str, Any]:
         """调用飞书记录查询接口，返回 data；网络/超时/非零错误码 → BaseProviderError"""
         url = f"{self._API}/{self._app_token}/tables/{table_id}/records/search"
+        params: dict[str, str] = {}
+        if page_token:
+            params["page_token"] = page_token
         try:
-            resp = requests.post(url, headers=self._headers(), json=body, timeout=self._REQ_TIMEOUT)
+            resp = requests.post(
+                url, headers=self._headers(), json=body, params=params, timeout=self._REQ_TIMEOUT
+            )
         except requests.RequestException as e:
             raise BaseProviderError(f"飞书 Base 请求失败（网络/超时）: {e}") from e
         # 先检查 HTTP 状态码，避免 4xx/5xx 且 code=0 的异常响应被误判成功
@@ -282,6 +289,43 @@ class FeishuBaseProvider:
             return float(raw)
         except (ValueError, TypeError):
             return None
+
+    @staticmethod
+    def _to_text(raw: Any) -> str | None:
+        """将飞书文本/单选字段统一转换为纯文本。"""
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, list):
+            parts = []
+            for item in raw:
+                if isinstance(item, dict) and "text" in item:
+                    parts.append(str(item["text"]))
+                elif isinstance(item, str):
+                    parts.append(item)
+            return "".join(parts) if parts else None
+        if isinstance(raw, dict) and "text" in raw:
+            return str(raw["text"])
+        return str(raw) if raw else None
+
+    @staticmethod
+    def _normalize_heat(raw: float | None) -> float | None:
+        """将原始互动量按约定对数归一化到 0-100。"""
+        if raw is None:
+            return None
+        if raw <= 0:
+            return 0.0
+        if raw <= 100:
+            return round(raw, 2)
+        import math
+
+        lg = math.log10(raw)
+        if lg < 3:
+            return round(50 + (lg - 2) * 10, 2)
+        if lg < 4:
+            return round(70 + (lg - 3) * 5, 2)
+        return round(min(100, 80 + (lg - 4) * 5), 2)
 
     @staticmethod
     def _ms_to_date(ms: Any) -> str | None:
@@ -326,29 +370,57 @@ class FeishuBaseProvider:
         except (ValueError, TypeError):
             return None
 
+    def _to_brands(self, raw: Any) -> list[str]:
+        """飞书 brands 字段 → list[str]（兼容 JSON 字符串 / 文本列表 / 普通字符串 / 已 list）
+
+        不伪造品牌；无法解析时返回空列表。
+        """
+        if raw is None:
+            return []
+        if isinstance(raw, list):
+            if all(isinstance(x, str) for x in raw):
+                return [x for x in raw if x]
+            parts = []
+            for item in raw:
+                if isinstance(item, dict) and "text" in item:
+                    parts.append(str(item["text"]))
+                elif isinstance(item, str):
+                    parts.append(item)
+            text = "".join(parts)
+        elif isinstance(raw, dict) and "text" in raw:
+            text = str(raw["text"])
+        else:
+            text = str(raw) if raw else ""
+        parsed = self._to_json(text) if text else None
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed if x]
+        if text:
+            return [text]
+        return []
+
     def _to_base_record(self, fields: dict[str, Any], record_id: str) -> tuple[BaseRecord | None, dict[str, Any] | None]:
         """飞书字段 → BaseRecord；非法 platform/字段校验失败 → (None, caveat)（跳过但不静默吞掉）"""
-        platform_raw = fields.get("platform")
+        platform_raw = self._to_text(fields.get("platform"))
         try:
             platform = BasePlatform(platform_raw) if platform_raw else None
         except ValueError:
             return None, {"record_id": record_id, "field": "platform", "reason": f"非法 platform: {platform_raw!r}"}
 
         data = {
-            "record_id": fields.get("record_id") or record_id,
-            "keyword": fields.get("keyword"),
+            "record_id": self._to_text(fields.get("record_id")) or record_id,
+            "keyword": self._to_text(fields.get("keyword")),
             "platform": platform,
-            "category": fields.get("category") or "",
-            "summary": fields.get("summary") or "",
-            "heat_index": self._to_float(fields.get("heat_index")),
+            "category": self._to_text(fields.get("category")) or "",
+            "summary": self._to_text(fields.get("summary")) or "",
+            "heat_index": self._normalize_heat(self._to_float(fields.get("heat_index"))),
             "interaction": self._to_float(fields.get("interaction")),
-            "brand": fields.get("brand"),
-            "price_range": fields.get("price_range"),
+            "brand": self._to_text(fields.get("brand")),
+            "price_range": self._to_text(fields.get("price_range")),
             "record_date": self._ms_to_date(fields.get("record_date")),
             "source_url": self._to_url(fields.get("source_url")),
-            "snapshot_id": fields.get("snapshot_id"),
+            "snapshot_id": self._to_text(fields.get("snapshot_id")),
             "ingested_at": self._ms_to_iso(fields.get("ingested_at")),
-            "raw_value": self._to_json(fields.get("raw_value")),
+            "raw_value": self._to_json(self._to_text(fields.get("raw_value"))),
         }
         try:
             return BaseRecord.model_validate(data), None
@@ -367,10 +439,8 @@ class FeishuBaseProvider:
         page_token: str | None = None
         max_pages = 100  # 防御：异常时兜底
         for _ in range(max_pages):
-            body: dict[str, Any] = {"page_size": 500}
-            if page_token:
-                body["page_token"] = page_token
-            data = self._post(self._data_table_id, body)
+            body: dict[str, Any] = {"limit": 500}
+            data = self._post(self._data_table_id, body, page_token=page_token)
             for item in data.get("items", []):
                 record, caveat = self._to_base_record(item.get("fields", {}), item.get("record_id", ""))
                 if record is not None:
@@ -397,12 +467,15 @@ class FeishuBaseProvider:
         page_token: str | None = None
         max_pages = 100
         for _ in range(max_pages):
-            body: dict[str, Any] = {"page_size": 500}
-            if page_token:
-                body["page_token"] = page_token
-            data = self._post(self._summary_table_id, body)
+            body: dict[str, Any] = {"limit": 500}
+            data = self._post(self._summary_table_id, body, page_token=page_token)
             for item in data.get("items", []):
-                rows.append(item.get("fields", {}))
+                fields = item.get("fields", {})
+                row = dict(fields)
+                # 飞书文本字段为 [{"text": "...", "type": "text"}]，归一化为 str 便于匹配
+                row["category"] = self._to_text(row.get("category"))
+                row["snapshot_id"] = self._to_text(row.get("snapshot_id"))
+                rows.append(row)
             if not data.get("has_more"):
                 break
             page_token = data.get("page_token")
@@ -448,13 +521,13 @@ class FeishuBaseProvider:
             row = matched[0]
             if len(matched) > 1 and (matched[1].get("as_of") or 0) == (row.get("as_of") or 0):
                 raise BaseProviderError("汇总表存在多条相同 as_of 的快照，无法确定性选择")
-        brands = self._to_json(row.get("brands"))
+        brands = self._to_brands(row.get("brands"))
         return {
             "category": row.get("category") or category or "all",
             "snapshot_id": row.get("snapshot_id"),
             "record_count": int(self._to_float(row.get("record_count")) or 0),
-            "avg_heat_index": self._to_float(row.get("avg_heat_index")) or 0.0,
-            "brands": brands if isinstance(brands, list) else [],
+            "avg_heat_index": self._normalize_heat(self._to_float(row.get("avg_heat_index"))) or 0.0,
+            "brands": brands,
         }
 
     def get_date_distribution(self, keyword, as_of=None, snapshot_id=None) -> list[dict[str, Any]]:
