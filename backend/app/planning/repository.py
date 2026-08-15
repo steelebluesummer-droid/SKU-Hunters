@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import uuid
@@ -72,6 +73,7 @@ def _save_state() -> None:
                 # 链路中间产物：重启后企划卡依赖机会卡、机会/企划卡复用洞察缓存
                 "opportunities": p.get("opportunities", []),
                 "insights": p.get("insights"),
+                "data_context": p.get("data_context"),
             }
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -102,10 +104,15 @@ def create_plan(brief: dict[str, Any]) -> dict[str, Any]:
     # 先归一化键名（前端/DEMO_BRIEF 是 camelCase，PlanBrief 无别名会静默丢字段）
     validated = PlanBrief.model_validate(_snake_keys(brief))
     plan_id = f"plan_{datetime.now(timezone.utc):%Y%m%d}_{uuid.uuid4().hex[:4]}"
+    configured_mode = os.getenv("PLANNING_DEFAULT_MODE", "fixture").strip().lower()
+    requested_mode = str(brief.get("mode") or configured_mode).strip().lower()
+    mode = requested_mode if requested_mode in {"fixture", "live"} else "fixture"
+    stored_brief = validated.model_dump()
+    stored_brief["mode"] = mode
     plan = {
         "plan_id": plan_id,
-        "brief": validated.model_dump(),
-        "mode": brief.get("mode", "fixture"),  # fixture（默认）| live（真实 LLM，预留）
+        "brief": stored_brief,
+        "mode": mode,  # fixture（显式演示）| live（真实数据/Agent 链路）
         "created_at": _now(),
         "status": "brief_locked",
         "selected_opportunity": None,
