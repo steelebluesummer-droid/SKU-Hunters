@@ -1,13 +1,12 @@
 /* ============================================================
  * SKU Hunters · TaskCard（任务卡片，纯展示/事件组件）
  * 数据由 TaskCenter 拉取后传入，不 import fixtures、不发请求。
- * 整块可点击（含键盘 Enter/Space），卡片内部不再嵌套可点击元素。
+ * 整块可点击（含键盘 Enter/Space）；右上角删除按钮 stopPropagation，不触发整卡跳转。
  * 状态用「文字标签」表达，不依赖左侧颜色条。
  * ============================================================ */
 
-import { Card, Tag, Typography } from 'antd';
-import { LockOutlined } from '@ant-design/icons';
-import SourceTag from '../../../shared/components/SourceTag';
+import { Button, Card, Popconfirm, Tag, Typography } from 'antd';
+import { DeleteOutlined, LockOutlined } from '@ant-design/icons';
 
 const { Paragraph } = Typography;
 
@@ -23,12 +22,11 @@ const STATUS_META = {
 /**
  * @param {object} task     任务摘要（plan_id / theme / category / audience / status / created_at / mode）
  * @param {Function} onClick 整卡点击
+ * @param {Function} onDelete 删除回调（可选；Popconfirm 二次确认后触发，不冒泡整卡跳转）
  */
-export default function TaskCard({ task, onClick }) {
+export default function TaskCard({ task, onClick, onDelete }) {
   const meta = STATUS_META[task.status] || STATUS_META.brief_locked;
   const isArchived = task.status === 'archived';
-  // 数据来源：demo 任务以 plan_id 识别；其余按 mode，mode 缺失时显示「来源未知」，不误标 fixture
-  const runSource = task.plan_id === 'demo' ? 'demo' : task.mode || 'unknown';
   const created = (task.created_at || '').slice(0, 10);
 
   return (
@@ -47,11 +45,35 @@ export default function TaskCard({ task, onClick }) {
       }}
       style={{ cursor: 'pointer', height: '100%' }}
     >
-      {/* 阶段 + 归档只读标记（文字表达状态，不依赖颜色） */}
-      <div style={{ marginBottom: 8 }}>
+      {/* 阶段 + 归档只读标记（文字表达状态，不依赖颜色）+ 删除 */}
+      <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
         <Tag color={meta.color}>{meta.label}</Tag>
         {isArchived ? (
           <Tag icon={<LockOutlined />}>只读</Tag>
+        ) : null}
+        {onDelete ? (
+          <Popconfirm
+            title="删除该企划任务？"
+            description="删除后不可恢复"
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={(e) => {
+              e?.stopPropagation?.();
+              onDelete(task);
+            }}
+            onCancel={(e) => e?.stopPropagation?.()}
+          >
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={`删除企划：${task.theme || '未命名企划'}`}
+              style={{ marginLeft: 'auto' }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </Popconfirm>
         ) : null}
       </div>
 
@@ -69,7 +91,7 @@ export default function TaskCard({ task, onClick }) {
         {task.audience ? ` · ${task.audience}` : ''}
       </div>
 
-      {/* 创建时间 + 数据来源 */}
+      {/* 创建时间（数据来源在任务详情页按洞察 dataSource 展示，列表摘要不含该信息） */}
       <div
         style={{
           fontSize: 12,
@@ -82,7 +104,6 @@ export default function TaskCard({ task, onClick }) {
         }}
       >
         <span>{created || '—'}</span>
-        <SourceTag runSource={runSource} />
       </div>
     </Card>
   );

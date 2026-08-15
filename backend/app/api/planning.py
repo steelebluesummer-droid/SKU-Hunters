@@ -27,7 +27,9 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
-from app.planning import fixtures, pipeline
+from app.planning import fixtures, ip_resource, pipeline
+from app.planning.insight_resolver import LLMGenerationError
+from app.planning.repository import plan_write_lock
 from app.planning.service import StateTransitionError
 from app.schemas.planning import PlanBrief
 from app.schemas.planning_api_v2 import PlanListResponseV2
@@ -47,6 +49,11 @@ def _get_plan_or_404(plan_id: str) -> dict[str, Any]:
 def _state_transition_error(e: StateTransitionError) -> HTTPException:
     """状态机非法转移 → 409（原子动作前置状态校验失败）"""
     return HTTPException(409, detail={"error": {"code": "INVALID_TRANSITION", "message": str(e)}})
+
+
+def _llm_generation_error(e: LLMGenerationError) -> HTTPException:
+    """LLM 生成失败 → 503（无采集数据且 LLM 不可用/输出不合契约；不产假数据，诚实报错）"""
+    return HTTPException(503, detail={"error": {"code": "LLM_UNAVAILABLE", "message": str(e)}})
 
 
 @router.post("/plans", status_code=201)
@@ -111,19 +118,37 @@ async def get_plan(plan_id: str):
     }
 
 
+@router.delete("/plans/{plan_id}", status_code=204)
+async def delete_plan(plan_id: str):
+    """删除任务：套 plan 写锁与在途生成串行化；不存在 → 404"""
+    _get_plan_or_404(plan_id)
+    with plan_write_lock(plan_id):
+        pipeline.delete_plan(plan_id)
+
+
 @router.get("/plans/{plan_id}/insights")
 async def get_insights(plan_id: str):
     plan = _get_plan_or_404(plan_id)
-    return {"plan_id": plan_id, **pipeline.get_insights(plan)}
+    try:
+        return {"plan_id": plan_id, **pipeline.get_insights(plan)}
+    except LLMGenerationError as e:
+        raise _llm_generation_error(e) from e
 
 
 @router.get("/plans/{plan_id}/opportunities")
 async def get_opportunities(plan_id: str):
     plan = _get_plan_or_404(plan_id)
+    try:
+        opportunities = pipeline.get_opportunities(plan)
+    except LLMGenerationError as e:
+        raise _llm_generation_error(e) from e
     return {
         "plan_id": plan_id,
-        "opportunities": pipeline.get_opportunities(plan),
-        "processLog": fixtures.OPPORTUNITY_LOG,  # 机会生成思考过程（导师专项：呈现推理过程）
+        "opportunities": opportunities,
+        # 机会生成思考过程：按真实链路生成（只描述系统真实发生的动作）
+        "processLog": pipeline._opportunities_process_log(
+            plan["brief"].get("category", ""), plan.get("insights"), opportunities
+        ),
     }
 
 
@@ -159,7 +184,9 @@ async def action_generate_insights(plan_id: str):
     try:
         insights = pipeline.generate_insights(plan)
     except StateTransitionError as e:
-        raise _state_transition_error(e)
+        raise _state_transition_error(e) from e
+    except LLMGenerationError as e:
+        raise _llm_generation_error(e) from e
     return {"plan_id": plan_id, "status": plan["status"], "insights": insights}
 
 
@@ -169,12 +196,16 @@ async def action_generate_opportunities(plan_id: str):
     try:
         opportunities = pipeline.generate_opportunities(plan)
     except StateTransitionError as e:
-        raise _state_transition_error(e)
+        raise _state_transition_error(e) from e
+    except LLMGenerationError as e:
+        raise _llm_generation_error(e) from e
     return {
         "plan_id": plan_id,
         "status": plan["status"],
         "opportunities": opportunities,
-        "processLog": fixtures.OPPORTUNITY_LOG,
+        "processLog": pipeline._opportunities_process_log(
+            plan["brief"].get("category", ""), plan.get("insights"), opportunities
+        ),
     }
 
 
@@ -187,7 +218,9 @@ async def action_generate_plan_card(plan_id: str, payload: dict):
     try:
         card = await asyncio.to_thread(pipeline.generate_plan_card, plan, opportunity_id)
     except StateTransitionError as e:
-        raise _state_transition_error(e)
+        raise _state_transition_error(e) from e
+    except LLMGenerationError as e:
+        raise _llm_generation_error(e) from e
     if card is None:
         raise HTTPException(404, detail={"error": {"code": "OPPORTUNITY_NOT_FOUND", "message": opportunity_id}})
     return {"plan_id": plan_id, "status": plan["status"], "plan_card": card}
@@ -215,7 +248,9 @@ async def generate_plan_card(plan_id: str, payload: dict):
     try:
         card = await asyncio.to_thread(pipeline.generate_plan_card, plan, opportunity_id)
     except StateTransitionError as e:
-        raise _state_transition_error(e)
+        raise _state_transition_error(e) from e
+    except LLMGenerationError as e:
+        raise _llm_generation_error(e) from e
     if card is None:
         raise HTTPException(404, detail={"error": {"code": "OPPORTUNITY_NOT_FOUND", "message": opportunity_id}})
     return {"plan_id": plan_id, "plan_card": card}
@@ -278,6 +313,17 @@ async def review_plan(plan_id: str, payload: dict):
 
 
 # ── 策展数据独立页（非 Agent 现搜，提前策展）────────────────────
+
+@router.get("/ip-resource")
+async def get_ip_resource():
+    """名创内部 IP 资源库（策展数据：12 个代表性 IP + 官方披露数据带 + 筛选维度）"""
+    return {
+        "stats": ip_resource.IP_STATS,
+        "ips": ip_resource.IP_RESOURCE,
+        "audienceFilters": ip_resource.AUDIENCE_FILTERS,
+        "styleFilters": ip_resource.STYLE_FILTERS,
+    }
+
 
 def _load_curated_module(topic: str, key: str, fallback: dict):
     """策展数据：有社媒证据取真实数据，否则回退 fixtures"""

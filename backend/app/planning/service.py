@@ -19,7 +19,6 @@ from app.planning.opportunity_engine import (
     _opportunities_from_bundle,
 )
 from app.planning.plan_card_builder import (
-    _assemble_fixture_plan_card,
     _build_dynamic_plan_card,
     _find_opportunity,
 )
@@ -67,14 +66,18 @@ __all__ = [
 # ── ② 五看洞察 ─────────────────────────────────────────
 
 def get_insights(plan: dict[str, Any], advance: bool = False) -> dict[str, Any]:
-    """五看洞察（只读）：有社媒证据则返回真实数据，否则回退 fixtures
+    """五看洞察（只读）：真实社媒证据优先，无采集数据走 LLM 生成
 
     只读接口，不推进业务状态（advance 参数仅为旧兼容入口保留，新流程勿用）。
     """
     if advance and plan.get("status") != "archived":
         plan["status"] = "insights_ready"
-    bundle = _resolve_insight_bundle(plan["brief"].get("category", ""))
-    _ = InsightBundle.model_validate(_snake_keys(bundle))
+    bundle = plan.get("insights")  # 先读缓存：已生成过的任务只读重开不重复烧 LLM
+    if bundle is None:
+        bundle = _resolve_insight_bundle(plan["brief"].get("category", ""), plan["brief"])
+        _ = InsightBundle.model_validate(_snake_keys(bundle))
+        plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
+        _save_state()  # 落盘：服务重启后缓存仍在，不重复触发 LLM
     return bundle
 
 
@@ -87,8 +90,9 @@ def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
     with plan_write_lock(plan["plan_id"]):
         if plan.get("status") != "brief_locked":
             raise StateTransitionError("brief_locked", plan.get("status"), "generate-insights")
-        bundle = _resolve_insight_bundle(plan["brief"].get("category", ""))
+        bundle = _resolve_insight_bundle(plan["brief"].get("category", ""), plan["brief"])
         _ = InsightBundle.model_validate(_snake_keys(bundle))
+        plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
         plan["status"] = "insights_ready"
         _save_state()
     return bundle
@@ -105,11 +109,12 @@ def get_opportunities(plan: dict[str, Any], advance: bool = False) -> list[dict[
         plan["status"] = "opportunities_ready"
     category = plan["brief"].get("category", "")
     brief = plan["brief"]
-    try:
-        bundle = _resolve_insight_bundle(category)
-        opps = _opportunities_from_bundle(category, bundle, brief)
-    except FileNotFoundError:
-        opps = []
+    bundle = plan.get("insights")
+    if bundle is None:
+        bundle = _resolve_insight_bundle(category, brief)
+        plan["insights"] = bundle  # 重建时回写缓存：企划卡可复用洞察摘要
+        _save_state()  # 落盘：服务重启后缓存仍在，不重复触发 LLM
+    opps = _opportunities_from_bundle(category, bundle, brief)
     if not opps:
         opps = _fallback_opportunities(category, brief)
     for o in opps:
@@ -128,11 +133,11 @@ def generate_opportunities(plan: dict[str, Any]) -> list[dict[str, Any]]:
             raise StateTransitionError("insights_ready", plan.get("status"), "generate-opportunities")
         category = plan["brief"].get("category", "")
         brief = plan["brief"]
-        try:
-            bundle = _resolve_insight_bundle(category)
-            opps = _opportunities_from_bundle(category, bundle, brief)
-        except FileNotFoundError:
-            opps = []
+        bundle = plan.get("insights")
+        if bundle is None:
+            bundle = _resolve_insight_bundle(category, brief)
+            plan["insights"] = bundle  # 重建时回写缓存：企划卡可复用洞察摘要
+        opps = _opportunities_from_bundle(category, bundle, brief)
         if not opps:
             opps = _fallback_opportunities(category, brief)
         for o in opps:
@@ -148,23 +153,18 @@ def generate_opportunities(plan: dict[str, Any]) -> list[dict[str, Any]]:
 def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, Any] | None:
     """选定方向 → 生成完整新品企划卡（原子动作）
 
-    fixture 模板命中走冻结模板路径；未命中走 _build_dynamic_plan_card 模板化拼装。
+    一律走 _build_dynamic_plan_card（LLM 生成），无 fixture 模板路径。
     前置状态 opportunities_ready；成功后 status → plan_card_ready。
     返回值保持 camelCase 键名（前端契约）。
     """
     with plan_write_lock(plan["plan_id"]):
         if plan.get("status") != "opportunities_ready":
             raise StateTransitionError("opportunities_ready", plan.get("status"), "generate-plan-card")
-        template = fixtures.PLAN_TEMPLATES.get(opportunity_id)
         opportunity = _find_opportunity(plan, opportunity_id)
         if opportunity is None:
             return None
 
-        card = (
-            _assemble_fixture_plan_card(plan, template, opportunity, opportunity_id)
-            if template is not None
-            else _build_dynamic_plan_card(plan, opportunity)
-        )
+        card = _build_dynamic_plan_card(plan, opportunity)
 
         plan["selected_opportunity"] = opportunity_id
         plan["plan_card"] = card

@@ -8,9 +8,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Row, Col, Button, Divider, Empty } from 'antd';
+import { Row, Col, Button, Divider, Empty, message } from 'antd';
 import { PlusOutlined, ClockCircleOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { listPlans } from '../../../api/plans';
+import { listPlans, deletePlan } from '../../../api/plans';
 import TaskCard from '../components/TaskCard';
 import PageHeader from '../components/PageHeader';
 import StateCard from '../../../shared/components/StateCard';
@@ -40,6 +40,17 @@ export default function TaskCenter() {
 
   const active = (plans || []).filter((t) => t.status !== 'archived');
   const archived = (plans || []).filter((t) => t.status === 'archived');
+
+  // 删除任务：真实调后端 DELETE，成功后刷新列表（不做本地假删）
+  const onDelete = async (task) => {
+    try {
+      await deletePlan(task.plan_id);
+      message.success(`已删除「${task.theme || '未命名企划'}」`);
+      load();
+    } catch (e) {
+      message.error(`删除失败：${e?.message || '请检查后端服务'}`);
+    }
+  };
 
   const newPlanCta = (
     <Button type="primary" icon={<PlusOutlined />} onClick={() => nav('/new')}>
@@ -96,7 +107,7 @@ export default function TaskCenter() {
         <Row gutter={[16, 16]}>
           {active.map((t) => (
             <Col xs={24} md={12} lg={8} key={t.plan_id}>
-              <TaskCard task={t} onClick={() => nav(`/tasks/${t.plan_id}`)} />
+              <TaskCard task={t} onClick={() => nav(`/tasks/${t.plan_id}`)} onDelete={onDelete} />
             </Col>
           ))}
         </Row>
@@ -112,7 +123,7 @@ export default function TaskCenter() {
           <Row gutter={[16, 16]}>
             {archived.map((t) => (
               <Col xs={24} md={12} lg={8} key={t.plan_id}>
-                <TaskCard task={t} onClick={() => nav(`/tasks/${t.plan_id}`)} />
+                <TaskCard task={t} onClick={() => nav(`/tasks/${t.plan_id}`)} onDelete={onDelete} />
               </Col>
             ))}
           </Row>

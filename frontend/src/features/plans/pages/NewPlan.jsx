@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useBlocker } from 'react-router-dom';
 import { Form, Select, Input, InputNumber, Button, Card, Checkbox, Row, Col, Alert, Modal } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { createPlan } from '../../../api/plans';
 import { fromForm } from '../../../shared/utils/normalizeBrief';
 
@@ -117,11 +118,20 @@ export default function NewPlan() {
 
   return (
     <div style={{ maxWidth: 760 }}>
-      <div style={{ marginBottom: 16 }}>
-        <h2 style={{ margin: 0 }}>新建新品企划</h2>
-        <p style={{ margin: '4px 0 0', color: 'var(--color-text-secondary)', fontSize: 13 }}>
-          约束由商品经理下达，AI 在约束内做有依据的创意
-        </p>
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <Button
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          aria-label="返回任务中心"
+          onClick={() => nav('/')}
+          style={{ marginTop: 2 }}
+        />
+        <div>
+          <h2 style={{ margin: 0 }}>新建新品企划</h2>
+          <p style={{ margin: '4px 0 0', color: 'var(--color-text-secondary)', fontSize: 13 }}>
+            约束由商品经理下达，AI 在约束内做有依据的创意
+          </p>
+        </div>
       </div>
 
       {pageError ? (

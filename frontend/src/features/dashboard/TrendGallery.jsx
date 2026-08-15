@@ -144,7 +144,7 @@ export default function TrendGallery() {
       </Card>
 
       <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 16 }}>
-        数据来源：跨品类社媒公开样本（冻结 fixture，可切换实时）
+        数据来源：跨品类社媒采集样本
       </p>
     </div>
   );

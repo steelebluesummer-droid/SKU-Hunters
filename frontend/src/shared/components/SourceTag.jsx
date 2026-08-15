@@ -1,17 +1,15 @@
 /* ============================================================
  * SKU Hunters · SourceTag（数据来源标识）
  * 区分两类来源，可叠加：
- *   ① runSource（怎么产生的数据）：live | snapshot | fixture | demo
+ *   ① runSource（怎么产生的数据）：crawled 真实采集 | llm LLM 生成
  *   ② evidenceType（数据来自哪类系统）：local_kb | warehouse | rule | external
  * ============================================================ */
 
 import { Tag } from 'antd';
 
 const RUN_SOURCE_META = {
-  live: { label: '实时', color: 'purple' },
-  snapshot: { label: '快照', color: 'blue' },
-  fixture: { label: '冻结样本', color: 'cyan' },
-  demo: { label: '演示兜底', color: 'default' },
+  crawled: { label: '真实采集', color: 'green' },
+  llm: { label: 'LLM 生成', color: 'purple' },
   unknown: { label: '来源未知', color: 'default' },
 };
 

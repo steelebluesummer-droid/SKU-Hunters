@@ -19,3 +19,8 @@ export async function getTrendGallery(topic = '小风扇') {
 export async function getDataBoard() {
   return request('/data-board');
 }
+
+/** 名创内部 IP 资源库（12 个代表性 IP + 官方披露数据带 + 筛选维度） */
+export async function getIpResource() {
+  return request('/ip-resource');
+}

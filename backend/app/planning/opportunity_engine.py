@@ -137,6 +137,39 @@ def _opportunities_from_bundle(category: str, bundle: dict, brief: dict) -> list
     return [o for o in opps if o]
 
 
+def _opportunities_process_log(category: str, bundle: dict | None, opportunities: list[dict]) -> list[str]:
+    """机会生成过程日志：只描述系统真实发生的动作（按洞察数据来源区分）
+
+    纪律：不编造「用户调研/市场验证」等未发生的过程；
+    crawled 展示真实采集来源与分析步骤，llm 展示 LLM 洞察生成与机会推导步骤。
+    """
+    if not bundle:
+        return [f"围绕「{category}」品类与企划约束动态生成 {len(opportunities)} 张方向卡（洞察数据缺失）"]
+
+    tr = bundle.get("trendRadar", {})
+    cv = bundle.get("consumerVoice", {})
+    cm = bundle.get("competitiveMap", {})
+    gap_zone = cm.get("gapZone")
+    gap_label = gap_zone.get("label") if isinstance(gap_zone, dict) else gap_zone
+
+    if bundle.get("dataSource") == "llm":
+        source_line = f"「{category}」暂无社媒采集数据 → LLM 推理生成五看洞察"
+    else:
+        source_line = f"读取「{category}」社媒采集数据快照（趋势/评论/电商在售样本）"
+
+    extract_line = (
+        f"提取五看洞察：趋势信号 ×{len(tr.get('signals', []))} / 用户痛点 ×{len(cv.get('painPoints', []))}"
+        + (" / 竞品空白区已定位" if gap_label else "")
+    )
+    directions = " / ".join(dict.fromkeys(o.get("direction", "") for o in opportunities if o.get("direction")))
+    return [
+        source_line,
+        extract_line,
+        "按「趋势信号 × 用户痛点 × 竞品空白 × 名创 IP 资产」交叉比对，派生机会方向",
+        f"保留 {len(opportunities)} 张方向卡（{directions}），各挂四方依据链，等待商品经理选定",
+    ]
+
+
 def _fallback_opportunities(category: str, brief: dict) -> list[dict]:
     """无社媒证据品类：按品类名 + brief 动态生成 3 张方向卡（不再回退小风扇 fixture）"""
     price_band = _derive_price_band(brief)

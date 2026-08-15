@@ -6,17 +6,17 @@
 业务逻辑已按职责拆分到同目录的 6 个模块：
     service.py              业务流程编排（洞察→机会→企划卡→改稿→归档）
     repository.py           任务存储（内存 + 原子文件持久化，并发安全）
-    insight_resolver.py     五看洞察解析（真实社媒证据 vs 冻结 fixture）
+    insight_resolver.py     五看洞察解析（真实社媒证据优先，LLM 生成兜底）
     opportunity_engine.py   机会生成引擎（3 张方向卡，纯函数）
-    plan_card_builder.py    企划卡组装（冻结模板 / 动态拼装）
+    plan_card_builder.py    企划卡组装（LLM 动态生成）
     cost_rules.py           成本校验规则（毛利率红线）
 
 业务链路（对应全景设计文档 v2.0）：
     ① 企划约束 → ② 五看洞察（趋势/用户/竞品 + 名创内部 + 流行元素板）
     → ③ 机会生成 → ④ 创意设计 → ⑤ 商品策略 → ⑥ 新品企划卡
 
-数据策略：fixture 模式为默认（样本提前采集 + LLM 离线分析固化）；
-LLM 是增强层——mode="live" 时走真实调用，失败自动降级回 fixture。
+数据策略：真实社媒采集数据优先；无采集数据品类走真实 LLM 生成，
+LLM 不可用时报错（503），无 fixture 假数据回退。
 """
 
 from __future__ import annotations
@@ -42,15 +42,14 @@ from app.planning.opportunity_engine import (  # noqa: F401
     _derive_price_band,
     _fallback_opportunities,
     _opportunities_from_bundle,
+    _opportunities_process_log,
     _resolve_ip_for_opportunity,
     _short_ip,
 )
 
 # 企划卡组装
 from app.planning.plan_card_builder import (  # noqa: F401
-    _assemble_fixture_plan_card,
     _build_dynamic_plan_card,
-    _concept_prompt,
     _concept_prompt_dynamic,
     _derive_price_from_band,
     _find_opportunity,
@@ -67,6 +66,7 @@ from app.planning.repository import (  # noqa: F401
     _save_state,
     _snake_keys,
     create_plan,
+    delete_plan,
     get_plan,
     list_plans,
 )

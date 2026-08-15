@@ -7,12 +7,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Card, Col, Empty, Progress, Rate, Row, Segmented, Tag } from 'antd';
-import { getInsightBase } from '../../api/dashboard';
-import { AUDIENCE_FILTERS, IP_RESOURCE, IP_STATS, STYLE_FILTERS, ipAssetPath } from '../../fixtures/ipResource';
+import { getInsightBase, getIpResource } from '../../api/dashboard';
 import ResponsiveChart from '../../shared/components/ResponsiveChart';
 import StateCard from '../../shared/components/StateCard';
 import { readCssVar } from '../../shared/utils/cssTokens';
 import PageHeader from '../plans/components/PageHeader';
+
+// IP 图片静态资源路径（frontend/public/assets/ip/{slug}/…），素材缺失时前端自动降级
+const ipAssetPath = (slug, file) => `/assets/ip/${slug}/${file}`;
 
 function IpImage({ src, alt, className, fallback }) {
   const [failed, setFailed] = useState(false);
@@ -20,7 +22,7 @@ function IpImage({ src, alt, className, fallback }) {
   return <img src={src} alt={alt} className={className} onError={() => setFailed(true)} />;
 }
 
-function IpMatrix() {
+function IpMatrix({ ips }) {
   const option = {
     grid: { left: 40, right: 40, top: 40, bottom: 40 },
     xAxis: { min: 0, max: 1, show: false },
@@ -36,7 +38,7 @@ function IpMatrix() {
         fontSize: 11,
         color: readCssVar('--color-text-secondary'),
       },
-      data: IP_RESOURCE.map((ip) => [ip.matrix.x, ip.matrix.y, ip.nameCn]),
+      data: ips.map((ip) => [ip.matrix.x, ip.matrix.y, ip.nameCn]),
       markLine: {
         silent: true,
         symbol: 'none',
@@ -98,6 +100,7 @@ function IpCard({ ip }) {
 
 export default function InsightBase() {
   const [data, setData] = useState(null);
+  const [ipData, setIpData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [audience, setAudience] = useState('全部');
@@ -107,7 +110,9 @@ export default function InsightBase() {
     setLoading(true);
     setError(null);
     try {
-      setData((await getInsightBase()) || {});
+      const [base, ipResource] = await Promise.all([getInsightBase(), getIpResource()]);
+      setData(base || {});
+      setIpData(ipResource || {});
     } catch (requestError) {
       setError(requestError);
     } finally {
@@ -119,10 +124,15 @@ export default function InsightBase() {
     load();
   }, []);
 
-  const filteredIps = useMemo(() => IP_RESOURCE.filter((ip) => (
+  const ipStats = ipData?.stats || [];
+  const ipList = ipData?.ips || [];
+  const audienceFilters = ipData?.audienceFilters || ['全部'];
+  const styleFilters = ipData?.styleFilters || ['全部'];
+
+  const filteredIps = useMemo(() => ipList.filter((ip) => (
     (audience === '全部' || ip.audienceGroup === audience)
     && (style === '全部' || ip.styleGroup === style)
-  )), [audience, style]);
+  )), [ipList, audience, style]);
 
   if (loading) {
     return <><PageHeader title="名创内部 · IP 资源库" /><StateCard status="loading" /></>;
@@ -142,7 +152,7 @@ export default function InsightBase() {
       />
 
       <section className="ip-stats-band" aria-label="IP 资源概览">
-        {IP_STATS.map((stat) => (
+        {ipStats.map((stat) => (
           <div key={stat.label} className="ip-stat">
             <div className="ip-stat-value">{stat.value}</div>
             <div className="ip-stat-label">{stat.label}</div>
@@ -157,12 +167,12 @@ export default function InsightBase() {
         extra={<span className="ip-matrix-note">基于历史商品特征的 AI 定位，仅作演示参考</span>}
         style={{ marginBottom: 16 }}
       >
-        <IpMatrix />
+        <IpMatrix ips={ipList} />
       </Card>
 
       <div className="ip-filters" aria-label="IP 筛选">
-        <Segmented options={AUDIENCE_FILTERS} value={audience} onChange={setAudience} />
-        <Segmented options={STYLE_FILTERS} value={style} onChange={setStyle} />
+        <Segmented options={audienceFilters} value={audience} onChange={setAudience} />
+        <Segmented options={styleFilters} value={style} onChange={setStyle} />
       </div>
 
       {filteredIps.length === 0 ? (

@@ -1,6 +1,6 @@
 /* ============================================================
  * SKU Hunters · 企划链路 API（plans）
- * 原子业务动作 + CRUD。失败 throw，不静默 mock 回退（只有 demo 可 fixture 降级）。
+ * 原子业务动作 + CRUD。失败 throw，不静默 mock 回退。
  * 对应后端 Stage 5 原子端点：
  *   POST /plans/{id}/actions/generate-insights
  *   POST /plans/{id}/actions/generate-opportunities
@@ -23,6 +23,11 @@ export async function listPlans() {
 /** 任务详情（含 brief / status / plan_card） */
 export async function getPlan(planId) {
   return request(`/plans/${planId}`);
+}
+
+/** 删除任务 → 204 空响应 */
+export async function deletePlan(planId) {
+  return request(`/plans/${planId}`, { method: 'DELETE' });
 }
 
 /** ② 原子动作：生成五看洞察 → 返回 { status, insights } */

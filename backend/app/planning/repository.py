@@ -69,6 +69,9 @@ def _save_state() -> None:
                 "plan_card": p.get("plan_card"),
                 "revise_logs": p.get("revise_logs", []),
                 "archived_at": p.get("archived_at"),
+                # 链路中间产物：重启后企划卡依赖机会卡、机会/企划卡复用洞察缓存
+                "opportunities": p.get("opportunities", []),
+                "insights": p.get("insights"),
             }
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -158,3 +161,15 @@ def list_plans() -> list[dict[str, Any]]:
         for p in plans
     ]
     return [s.model_dump() for s in summaries]
+
+
+def delete_plan(plan_id: str) -> bool:
+    """删除任务：内存移除 + 清理写锁 + 立即落盘；不存在返回 False"""
+    with _lock:
+        if plan_id not in _PLANS:
+            return False
+        del _PLANS[plan_id]
+    with _plan_locks_guard:
+        _plan_locks.pop(plan_id, None)
+    _save_state()
+    return True

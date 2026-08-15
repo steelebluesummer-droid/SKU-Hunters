@@ -4,8 +4,8 @@
  *
  * 状态所有权：单一 hook 持有，页面组件只读。
  * 红线：展示组件只读 props + 触发事件回调，不 import fixtures、不发请求。
- * 降级：只有 demo 任务（planId === 'demo'）后端离线时可降级到本地 fixture，
- *       真实任务失败只报错，不静默回退。
+ * 数据纪律：全部数据来自后端真实链路（采集数据 / LLM 生成），
+ *          失败只报错，无任何本地 mock 回退。
  * ============================================================ */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -19,17 +19,12 @@ import {
   revisePlan,
 } from '../../../api/plans';
 import { getInsights, getOpportunities } from '../../../api/insights';
-import { DEMO_BRIEF } from '../../../fixtures/fanData';
 import { toCamelBrief } from '../../../shared/utils/normalizeBrief';
 
 // 后端落盘状态 → 流程 step 索引
 const STATUS_STEP = { brief_locked: 0, insights_ready: 1, opportunities_ready: 2, plan_card_ready: 3 };
 
-const IS_DEMO = (id) => id === 'demo';
-
 export default function usePlanWorkspace(planId) {
-  const isDemo = IS_DEMO(planId);
-
   // ── 数据状态 ───────────────────────────────────────────
   const [plan, setPlan] = useState(null);
   const [insights, setInsights] = useState(null);
@@ -43,7 +38,8 @@ export default function usePlanWorkspace(planId) {
   const [pendingAction, setPendingAction] = useState(null); // 当前原子动作名
   const [error, setError] = useState(null);           // 最近一次结构化错误
 
-  const source = plan?.mode === 'live' ? 'live' : (isDemo && plan?.__demo ? 'demo' : (plan?.mode || 'fixture'));
+  // 数据来源标识：取自后端洞察的 dataSource（crawled 真实采集 / llm LLM 生成），洞察未生成前不展示
+  const source = insights?.dataSource || null;
   const status = plan?.status || 'brief_locked';
   const selectedOpportunity = plan?.selected_opportunity || null;
   const planCard = plan?.plan_card || null;
@@ -69,14 +65,10 @@ export default function usePlanWorkspace(planId) {
       }
     } catch (e) {
       setError(e);
-      // 只有 demo 任务后端离线时才降级到本地 fixture
-      if (isDemo && e?.code === 'NETWORK_ERROR') {
-        setPlan({ brief: DEMO_BRIEF, status: 'plan_card_ready', mode: 'fixture', __demo: true });
-      }
     } finally {
       setLoading(false);
     }
-  }, [planId, isDemo]);
+  }, [planId]);
 
   useEffect(() => { loadPlan(); }, [loadPlan]);
 
@@ -205,7 +197,6 @@ export default function usePlanWorkspace(planId) {
     loading,
     pendingAction,
     error,
-    isDemo,
     actions,
   };
 }

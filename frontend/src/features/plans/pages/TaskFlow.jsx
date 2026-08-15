@@ -12,6 +12,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Steps, Card, Descriptions, Tag, Button, message, Spin } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 
 // 洞察驾驶舱含 ECharts，属实测重模块，按已批准方案做流程内二级懒加载
 const InsightCockpit = lazy(() => import('../../insights/InsightCockpit'));
@@ -100,7 +101,7 @@ export default function TaskFlow() {
   if (ws.loading) {
     return <StateCard status="loading" />;
   }
-  // 加载失败（非 demo 降级）
+  // 加载失败（无本地 mock 回退，只报错 + 重试）
   if (ws.error && !ws.plan) {
     return <StateCard status="error" onRetry={ws.actions.reload} />;
   }
@@ -123,6 +124,12 @@ export default function TaskFlow() {
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Button
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          aria-label="返回任务中心"
+          onClick={() => nav('/')}
+        />
         <h2 style={{ margin: 0 }}>{brief?.theme || '未命名企划'} · {brief?.category || ''}</h2>
         <SourceTag runSource={ws.source} />
       </div>
@@ -170,7 +177,7 @@ export default function TaskFlow() {
                 </div>
               }
             >
-              {ws.insights && <InsightCockpit insights={ws.insights} />}
+              {ws.insights && <InsightCockpit insights={ws.insights} category={brief?.category} />}
             </Suspense>
           </StateCard>
           <Button

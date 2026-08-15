@@ -5,8 +5,12 @@ import { ArrowRightOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import ProcessLog from '../../shared/components/ProcessLog';
 import { readCssVar } from '../../shared/utils/cssTokens';
+import { getInsightEnrichment } from './enrichment/resolver';
 
 const MODULE_TAG = { fontSize: 11, color: 'var(--color-section-label)', marginLeft: 8 };
+// Enrichment 区块标注：与「采集数据」标注区分，如实说明来自 AI 二次推理
+const AI_TAG = <Tag color="purple" style={{ fontSize: 11, marginLeft: 8 }}>AI 推理生成</Tag>;
+const BLOCK_TITLE = { fontSize: 13, fontWeight: 600, margin: '16px 0 8px' };
 
 // 洞察模块外壳：标题 + 过程日志 + 日志跑完后显现内容
 function InsightModule({ title, log, children }) {
@@ -22,7 +26,14 @@ function InsightModule({ title, log, children }) {
 }
 
 // 安全默认值：所有数组/曲线/颜色字段兜底，避免 ECharts 因空数据抛错
-function TrendRadar({ trendRadar = {} }) {
+// 趋势雷达双模式：有 AI Enrichment → 五段式决策视图；无 → 基础视图（原渲染）
+function TrendRadar({ trendRadar = {}, enrichment = null }) {
+  if (!enrichment) return <TrendRadarBasic trendRadar={trendRadar} />;
+  return <TrendRadarEnriched trendRadar={trendRadar} enrichment={enrichment} />;
+}
+
+// 基础视图：无 enrichment 数据品类的原始渲染（保持不变）
+function TrendRadarBasic({ trendRadar = {} }) {
   const weeks = trendRadar.heatCurve?.weeks || [];
   const series = (trendRadar.heatCurve?.series || []).map(s => ({ ...s, type: 'line', smooth: true, showSymbol: false }));
   const heatOption = {
@@ -56,6 +67,143 @@ function TrendRadar({ trendRadar = {} }) {
         </div>
       </Col>
     </Row>
+  );
+}
+
+// 五段式决策视图：市场发生什么 → 用户讨论什么 → 细分机会 → 上市窗口 → AI建议
+function TrendRadarEnriched({ trendRadar = {}, enrichment }) {
+  const { trendSummary, topicClusters = [], subCategoryTrends = [], seasonPlan, opportunityJudgment } = enrichment;
+
+  // 品类热度曲线：真实采集快照（Google Trends），作为总览的采集证据
+  const weeks = trendRadar.heatCurve?.weeks || [];
+  const series = (trendRadar.heatCurve?.series || []).map(s => ({ ...s, type: 'line', smooth: true, showSymbol: false }));
+  const heatOption = {
+    tooltip: { trigger: 'axis' },
+    legend: { bottom: 0, textStyle: { fontSize: 11 } },
+    grid: { left: 40, right: 16, top: 16, bottom: 48 },
+    xAxis: { type: 'category', data: weeks },
+    yAxis: { type: 'value', name: '热度' },
+    series,
+  };
+
+  // 子品类趋势：横向柱状图（样本量 × 同比增速），独立语义，不复用品类热度曲线
+  const MOMENTUM_ARROW = { surge: '↑↑↑', rising: '↑↑', stable: '→', emerging: '↗ 新' };
+  const subSorted = [...subCategoryTrends].sort((a, b) => (a.records || 0) - (b.records || 0));
+  const subOption = {
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => {
+        const d = subSorted[ps[0].dataIndex];
+        return `${d.name}<br/>样本量：${d.records} 条 · 同比：${d.growthPct != null ? `+${d.growthPct}%` : '—'}<br/>${d.note || ''}`;
+      },
+    },
+    grid: { left: 100, right: 64, top: 8, bottom: 24 },
+    xAxis: { type: 'value', name: '样本量（条）', nameTextStyle: { fontSize: 11 } },
+    yAxis: { type: 'category', data: subSorted.map(d => d.name), axisLabel: { fontSize: 11 } },
+    series: [{
+      type: 'bar', barWidth: 14,
+      itemStyle: { color: readCssVar('--color-action-primary'), opacity: 0.85, borderRadius: [0, 4, 4, 0] },
+      label: {
+        show: true, position: 'right', fontSize: 11,
+        formatter: p => {
+          const d = subSorted[p.dataIndex];
+          return `${MOMENTUM_ARROW[d.momentum] || ''} ${d.growthPct != null ? `+${d.growthPct}%` : '大盘'}`;
+        },
+      },
+      data: subSorted.map(d => d.records || 0),
+    }],
+  };
+
+  const oj = opportunityJudgment || {};
+  return (
+    <div>
+      {/* 1. 品类趋势总览：一句话判断 + 核心指标 + 真实热度曲线 */}
+      <div style={{ ...BLOCK_TITLE, marginTop: 0 }}>市场趋势总览<Tag style={{ fontSize: 11, marginLeft: 8 }}>采集数据</Tag>{AI_TAG}</div>
+      <Card size="small" style={{ background: 'var(--color-surface-alt)', border: '1px solid var(--color-border-strong)', marginBottom: 12 }}>
+        <b style={{ color: 'var(--color-action-primary)' }}>AI 判断：</b>{trendSummary?.verdict || ''}
+      </Card>
+      <Row gutter={[12, 12]}>
+        {(trendSummary?.metrics || []).map(m => (
+          <Col key={m.label} xs={24} md={8}>
+            <Card size="small">
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{m.label}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: m.direction === 'up' ? 'var(--color-brand-accent)' : 'inherit' }}>
+                {m.direction === 'up' ? '↑ ' : ''}{m.value}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{m.note}</div>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+      {weeks.length > 0 && <ReactECharts option={heatOption} style={{ height: 200, marginTop: 12 }} />}
+      <div style={{ marginTop: 8 }}>
+        {(trendSummary?.keywords || []).map(w => <Tag key={w} color="purple" style={{ marginBottom: 4 }}>{w}</Tag>)}
+      </div>
+
+      {/* 2. 用户正在讨论什么：TOP 话题按需求类型聚类 */}
+      <div style={BLOCK_TITLE}>用户正在讨论{AI_TAG}</div>
+      <Row gutter={[12, 12]}>
+        {topicClusters.map(c => (
+          <Col key={c.type} xs={24} md={8}>
+            <Card size="small" title={<span style={{ fontSize: 12 }}>{c.type}</span>}>
+              {(c.topics || []).map(t => (
+                <div key={t.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span># {t.name}</span>
+                  <span style={{ color: 'var(--color-text-muted)' }}>{t.count}</span>
+                </div>
+              ))}
+            </Card>
+          </Col>
+        ))}
+      </Row>
+
+      {/* 3. 子品类趋势：选赛道依据 */}
+      <div style={BLOCK_TITLE}>子品类趋势 · 选赛道{AI_TAG}</div>
+      <ReactECharts option={subOption} style={{ height: 260 }} />
+
+      {/* 4. 季节窗口：零售供应链节奏 → 上市决策 */}
+      <div style={BLOCK_TITLE}>季节窗口 · 上市节奏{AI_TAG}</div>
+      {(seasonPlan?.cycle || []).map((p, i) => (
+        <div key={p.phase} style={{ display: 'flex', gap: 12, marginBottom: 8, alignItems: 'flex-start' }}>
+          <Tag color="red" style={{ minWidth: 64, textAlign: 'center' }}>{p.phase}</Tag>
+          <span style={{ fontSize: 12, color: 'var(--color-text-secondary)', minWidth: 56 }}>{p.months}</span>
+          <span style={{ fontSize: 12 }}>{p.action}</span>
+        </div>
+      ))}
+      {seasonPlan?.launchSuggestion && (
+        <Card size="small" style={{ background: 'var(--color-surface-alt)', border: '1px solid var(--color-border-strong)', marginTop: 4 }}>
+          <b style={{ color: 'var(--color-action-primary)' }}>上市建议：</b>{seasonPlan.launchSuggestion}
+        </Card>
+      )}
+
+      {/* 5. AI 机会判断：收口大卡（判断 + 置信度 + 依据 + 推理链） */}
+      <div style={BLOCK_TITLE}>AI 机会判断{AI_TAG}</div>
+      <Card style={{ background: 'var(--surface-danger)', border: '1px solid var(--border-danger)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <b style={{ fontSize: 15, color: 'var(--color-brand-accent)' }}>{oj.summary || ''}</b>
+          <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+            置信度 <b style={{ fontSize: 16, color: 'var(--color-brand-accent)' }}>{oj.confidence ?? '—'}%</b>
+          </span>
+        </div>
+        {oj.confidence != null && (
+          <Progress percent={oj.confidence} showInfo={false} strokeColor="var(--color-brand-accent)" size="small" style={{ margin: '8px 0' }} />
+        )}
+        <div style={{ fontSize: 12, fontWeight: 600, margin: '8px 0 4px' }}>判断依据</div>
+        {(oj.evidence || []).map(e => (
+          <div key={e} style={{ fontSize: 12, marginBottom: 4 }}>
+            <span style={{ color: 'var(--color-brand-accent)', marginRight: 6 }}>✓</span>{e}
+          </div>
+        ))}
+        <div style={{ fontSize: 12, fontWeight: 600, margin: '12px 0 4px' }}>推理链：信号 → 解读 → 机会</div>
+        {(oj.reasoning || []).map(r => (
+          <Row key={r.signal} gutter={[8, 4]} style={{ marginBottom: 8, fontSize: 12 }} align="middle">
+            <Col xs={24} md={7}><Tag color="purple">{r.signal}</Tag></Col>
+            <Col xs={24} md={9}><ArrowRightOutlined style={{ marginRight: 6, color: 'var(--color-text-muted)' }} />{r.interpretation}</Col>
+            <Col xs={24} md={8}><b style={{ color: 'var(--color-action-primary)' }}>{r.opportunity}</b></Col>
+          </Row>
+        ))}
+      </Card>
+    </div>
   );
 }
 
@@ -178,7 +326,8 @@ function CompetitorGallery({ products = [] }) {
 }
 
 // 洞察驾驶舱：props 驱动（数据由 TaskFlow 拉取后传入，不再 import 全局 mock）
-export default function InsightCockpit({ insights }) {
+// category 可选：用于匹配 AI Insight Enrichment（无匹配品类回退基础渲染）
+export default function InsightCockpit({ insights, category }) {
   const {
     trendRadar = {},
     consumerVoice = {},
@@ -187,9 +336,14 @@ export default function InsightCockpit({ insights }) {
     trendGallery = {},
   } = insights || {};
 
+  const enrichment = getInsightEnrichment(category);
+  const trendLog = enrichment
+    ? [...(trendRadar.processLog || []), 'AI 洞察增强：基于采集数据的二次推理（Enrichment Layer）']
+    : trendRadar.processLog;
+
   return (
     <div>
-      <InsightModule title="趋势机会雷达" log={trendRadar.processLog}><TrendRadar trendRadar={trendRadar} /></InsightModule>
+      <InsightModule title="趋势机会雷达" log={trendLog}><TrendRadar trendRadar={trendRadar} enrichment={enrichment} /></InsightModule>
       <InsightModule title="Consumer Voice · 用户需求" log={consumerVoice.processLog}><ConsumerVoice consumerVoice={consumerVoice} /></InsightModule>
       <InsightModule title="Competitive Map · 竞品分析" log={competitiveMap.processLog}><CompetitiveMap competitiveMap={competitiveMap} /></InsightModule>
 
