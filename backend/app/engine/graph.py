@@ -42,6 +42,7 @@ from app.agents.creative_agent import get_creative_agent_class
 from app.agents.creative_contract import validate_proposals
 from app.agents.gtm_agent import get_gtm_agent_class
 from app.agents.ip_agent import get_ip_agent_class
+from app.agents.learning_agent import get_learning_agent_class
 from app.agents.trend_agent import get_trend_agent_class
 from app.engine import llm
 from app.engine.connector_gateway import (
@@ -66,6 +67,7 @@ from app.schemas import (
     IPAssessment,
     OpportunityScore,
     ProposalSet,
+    RetroReport,
     UserSentiment,
     Weights,
     WeightTemplate,
@@ -153,6 +155,7 @@ AGENT_REGISTRY: dict[str, type] = {
     "creative": get_creative_agent_class(),
     "business": get_business_agent_class(),
     "gtm": get_gtm_agent_class(),
+    "learning": get_learning_agent_class(),
 }
 
 # ── Agent 短键 → AGENT_DATA_ACCESS 白名单键映射 ────────────────
@@ -163,6 +166,7 @@ _AGENT_ACCESS_KEY = {
     "creative": "product_ideation_agent",
     "business": "business_evaluation_agent",
     "gtm": "go_to_market_agent",
+    "learning": "learning_agent",
 }
 
 
@@ -636,9 +640,36 @@ async def learning_node(state: CommitteeState) -> dict[str, Any]:
         "retro_turns": retro_turns,
         "status": "rejected" if gate2.get("decision") == "reject" else "archived",
     }
+    # 首过：经学习官生成归一化实际信号 + 复盘报告（不伪造销量/上市结果）
+    agent = _instantiate_agent("learning")
+    learning_ctx = {
+        "brief": state["brief"],
+        "category": state["brief"].get("category", ""),
+        "market": state["brief"].get("market", ""),
+        "proposal": rec.get("proposal", {}),
+        "opportunity_score": rec.get("opportunity_score", {}),
+        "decision": rec.get("decision", ""),
+        "human_action": snapshot["human_action"],
+        "session_id": state.get("session_id", ""),
+        "snapshot_id": state.get("session_id", ""),
+    }
+    learning_out = await agent.run(learning_ctx)
+    retro_report = learning_out["retro_report"]
+    RetroReport.model_validate(retro_report)  # 复盘契约校验：失败即阻断
+    normalized = learning_out["normalized_actual_signal"]
+    snapshot = {
+        **snapshot,
+        "normalized_actual_signal": normalized,
+        "retro_report": retro_report,
+    }
     return {
         "current_act": "act5",
-        "review_logs": [{"node": "learning", "act": "act5", "snapshot": snapshot}],
+        "retro_reports": [retro_report],
+        "review_logs": [{
+            "node": "learning", "act": "act5",
+            "snapshot": snapshot,
+            "normalized_actual_signal": normalized,
+        }],
     }
 
 

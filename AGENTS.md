@@ -30,6 +30,7 @@ LangGraph 编排，FastAPI + 飞书机器人交互。代码在 `backend/`。
 | `creative` | `ProposalSet` |
 | `business` | `{"opportunity_scores": [OpportunityScore, ...]}` |
 | `gtm` | `{"gtm_plans": [GTMPlan, ...]}` |
+| `learning` | `{"normalized_actual_signal": NormalizedActualSignal, "retro_report": RetroReport, "archive_update": {...}}` |
 
 3. 洞察官（trend/user/ip）的 `evidence_refs` 必须非空，否则节点边界拒绝
    （例外：`confidence="unknown"` 时合法，自动记 C5 冲突——"无法判断"是合法输出）
@@ -38,6 +39,7 @@ LangGraph 编排，FastAPI + 飞书机器人交互。代码在 `backend/`。
    - creative：+ `feature_matrix`、`user_sentiment`、`ip_assessment`
    - business：+ `weights`、`proposal_set`、`upstream_confidences`、`feature_matrix`、`user_sentiment`、`ip_assessment`
    - gtm：+ `proposal_set`、`challenges`、`opportunity_scores`、`ip_assessment`、`feedback`
+   - learning：+ `proposal`、`opportunity_score`、`decision`、`human_action`、`session_id`、`category`、`market`
 5. 接入方式：改 `graph.py` 里 `AGENT_REGISTRY` 对应键的类，**其他一律不动**
 6. 禁止：Agent 返回未过 schema 的 dict；依赖 state 里未声明的键
 
