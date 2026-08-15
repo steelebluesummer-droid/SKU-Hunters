@@ -21,8 +21,7 @@ from __future__ import annotations
 import os
 
 # 各供应商的 base_url 与推荐模型（全部为 OpenAI 兼容格式）
-PROVIDERS: dict[str, dict[str, str]] = {
-    "zhipu": {
+PROVIDERS: dict[str, dict[str, str]] = {    "zhipu": {
         "base_url": "https://open.bigmodel.cn/api/paas/v4",
         "model": "glm-4-flash",          # 永久免费，无 Token 上限
     },
@@ -58,6 +57,24 @@ def get_llm_config() -> dict[str, str] | None:
         "base_url": os.getenv("LLM_BASE_URL", preset["base_url"]),
         "model": os.getenv("LLM_MODEL", preset["model"]),
     }
+
+
+# Prompt 保险丝：连接器 payload 不可控（热搜词条/评论文本可能超长），
+# user prompt 超限时取首尾、截中段并显式标记。指令在 system prompt 不受影响。
+# 各 Agent 已有条数帽，这是最后一道总量兜底；可用 LLM_MAX_PROMPT_CHARS 覆盖。
+MAX_PROMPT_CHARS = int(os.getenv("LLM_MAX_PROMPT_CHARS", "12000"))
+
+
+def cap_user_prompt(text: str, max_chars: int | None = None) -> str:
+    """超长 user prompt 截断：保留首尾（Brief 在头、反馈/历史在尾），截中段。"""
+    limit = max_chars if max_chars is not None else MAX_PROMPT_CHARS
+    if len(text) <= limit:
+        return text
+    head = limit * 2 // 3
+    tail = limit - head
+    omitted = len(text) - head - tail
+    return (f"{text[:head]}\n……（材料过长，中段 {omitted} 字符已省略）……\n"
+            f"{text[-tail:]}")
 
 
 def complete(
@@ -96,7 +113,7 @@ def complete(
             model=config["model"],
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": cap_user_prompt(user_prompt)},
             ],
             temperature=temperature,
             max_tokens=max_tokens,
