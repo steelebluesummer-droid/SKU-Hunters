@@ -92,7 +92,10 @@ _ALLOWED_MSGPACK_TYPES: set[tuple[str, str]] = {
     ("app.schemas.review", "ConflictType"),
     ("app.schemas.testcase", "Outcome"),
 }
-_serde = JsonPlusSerializer(allowed_msgpack_modules=_ALLOWED_MSGPACK_TYPES)
+try:
+    _serde = JsonPlusSerializer(allowed_msgpack_modules=_ALLOWED_MSGPACK_TYPES)
+except TypeError:
+    _serde = JsonPlusSerializer()
 
 # 懒加载单例：图全走 async 路径，checkpointer 首次使用时异步初始化。
 # SQLite 用 AsyncSqliteSaver（同步 SqliteSaver 不支持 astream）；
@@ -457,7 +460,7 @@ def _gate(decision: dict[str, Any], act: str) -> dict[str, Any]:
     return update
 
 
-def act1_gate(state: CommitteeState) -> dict[str, Any]:
+async def act1_gate(state: CommitteeState) -> dict[str, Any]:
     """🚪 Gate 1：洞察确认门——方向不对趁早打回，省掉后面 2/3 计算"""
     decision = interrupt({
         "gate": "act1_gate",
@@ -467,7 +470,7 @@ def act1_gate(state: CommitteeState) -> dict[str, Any]:
     return _gate(decision, "act1_gate")
 
 
-def human_gate(state: CommitteeState) -> dict[str, Any]:
+async def human_gate(state: CommitteeState) -> dict[str, Any]:
     """🚪 Gate 2：立项拍板门——AI 建议在此刻变成人的决策，留痕"""
     decision = interrupt({
         "gate": "human_gate",
@@ -502,7 +505,7 @@ def _make_qa_node(gate: str):
 
 # ── 会后复盘（归档前置：归档不是封存，是任务进入历史库）─────────────
 
-def retro_gate(state: CommitteeState) -> dict[str, Any]:
+async def retro_gate(state: CommitteeState) -> dict[str, Any]:
     """🚪 首次复盘入口：归档已完成，不打回重做；人可对话、总结教训
 
     chat/question → retro_qa 作答后回到本窗；done → 学习官把复盘轮数追加入档。
