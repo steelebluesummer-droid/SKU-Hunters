@@ -95,6 +95,27 @@ class IPDataView(_ReadView):
         records = self._port.search_all("", category="IP", as_of=as_of, snapshot_id=snapshot_id)
         return [{"brand": r.brand, "summary": r.summary} for r in records if r.brand]
 
+    def get_ip_signals(self, candidates: list[str] | None = None, as_of: str | None = None, snapshot_id: str | None = None) -> dict[str, Any]:
+        """返回 IP 聚合信号 + 证据引用。
+
+        只读取 IP 类型数据（category="IP"），不把普通品类热度伪装成 IP 授权结论；
+        不返回原始评论全文；source_url 缺失不伪造。
+
+        candidates 非空：只返回候选池中的 IP（按 brand 匹配）；
+        candidates 为空/None：显式返回全库 Top IP（非隐含“空 keyword 不过滤”行为）。
+        """
+        records = self._port.search_all("", category="IP", as_of=as_of, snapshot_id=snapshot_id)
+        if candidates:
+            candidate_set = set(candidates)
+            records = [r for r in records if r.brand in candidate_set]
+        signals = [
+            {"keyword": r.keyword, "brand": r.brand, "heat_index": r.heat_index,
+             "summary": r.summary, "platform": r.platform, "record_date": r.record_date}
+            for r in records
+        ]
+        evidence = self._port.build_evidence_refs(records)
+        return {"signals": signals, "evidence": evidence}
+
     def build_evidence_refs(self, records: list[Any]) -> list[dict[str, str]]:
         return self._port.build_evidence_refs(records)
 

@@ -39,10 +39,10 @@ from app.agents.challenge_agents import CHALLENGE_REGISTRY
 from app.agents.consumer_agent import get_consumer_agent_class
 from app.agents.creative_agent import get_creative_agent_class
 from app.agents.creative_contract import validate_proposals
+from app.agents.ip_agent import get_ip_agent_class
 from app.agents.mock_agents import (
     MockBusinessAgent,
     MockGTMAgent,
-    MockIPAgent,
 )
 from app.agents.trend_agent import get_trend_agent_class
 from app.engine import llm
@@ -151,7 +151,7 @@ atexit.register(_close_sqlite)
 AGENT_REGISTRY: dict[str, type] = {
     "trend": get_trend_agent_class(),
     "user": get_consumer_agent_class(),
-    "ip": MockIPAgent,
+    "ip": get_ip_agent_class(),
     "creative": get_creative_agent_class(),
     "business": MockBusinessAgent,
     "gtm": MockGTMAgent,
