@@ -10,6 +10,7 @@ import asyncio
 
 import pytest
 from app.agents.business_agent import (
+    BusinessAgent,
     BusinessEvaluationAgent,
     clamp,
     get_business_agent_class,
@@ -293,12 +294,14 @@ def test_view_injection():
 def test_mock_real_switch(monkeypatch):
     assert get_business_agent_class() is MockBusinessAgent
     monkeypatch.setenv("BUSINESS_AGENT_PROVIDER", "real")
-    assert get_business_agent_class() is BusinessEvaluationAgent
+    assert get_business_agent_class() is BusinessAgent  # LLM 评审版
+    monkeypatch.setenv("BUSINESS_AGENT_PROVIDER", "deterministic")
+    assert get_business_agent_class() is BusinessEvaluationAgent  # 确定性评分版
     monkeypatch.setenv("BUSINESS_AGENT_PROVIDER", "mock")
     assert get_business_agent_class() is MockBusinessAgent
 
 def test_real_mode_no_fallback(monkeypatch):
-    monkeypatch.setenv("BUSINESS_AGENT_PROVIDER", "real")
+    monkeypatch.setenv("BUSINESS_AGENT_PROVIDER", "deterministic")
     assert get_business_agent_class() is BusinessEvaluationAgent
     view = _FakeView(exc=BaseUnavailable("无配置"))
     result = _run(_agent(view), _full_context())

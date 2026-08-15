@@ -538,6 +538,39 @@ def _capture_llm(monkeypatch, payload):
     return captured
 
 
+# 创意官测试上下文：三官 Artifact 齐全（输出契约硬校验的前置），
+# 用户官 summary 含全部 product_form 形态信号（契约 4：形态须有用户信号依据）
+_CREATIVE_FM = {"summary": "小风扇趋势上行", "evidence_refs": []}
+_CREATIVE_US = {
+    "summary": "学生与通勤族偏好摆件、挂脖、桌面形态的小风扇",
+    "pain_points": [{"description": "宿舍噪音大"}],
+    "motivation_tags": ["静音"],
+}
+_CREATIVE_IP = {
+    "summary": "库洛米热度高",
+    "ip_ranking": [{"ip_name": "库洛米", "heat_score": 88, "window_estimate": "6-9个月"}],
+}
+_CREATIVE_CTX = {
+    "brief": BRIEF,
+    "feature_matrix": _CREATIVE_FM,
+    "user_sentiment": _CREATIVE_US,
+    "ip_assessment": _CREATIVE_IP,
+}
+
+# 三方案两两至少两维不同（契约 2：形态/场景/价位），价格带均在 mid 预算内
+_CREATIVE_PAYLOAD = {"proposals": [
+    {"name": "方案A", "concept": "宿舍静音摆件", "product_form": "摆件",
+     "target_segment": "学生", "price_band": "¥39-59",
+     "differentiation": "静音"},
+    {"name": "方案B", "concept": "通勤挂脖", "product_form": "挂脖",
+     "target_segment": "通勤族", "price_band": "¥39-59",
+     "differentiation": "便携"},
+    {"name": "方案C", "concept": "桌面大风力", "product_form": "桌面",
+     "target_segment": "学生", "price_band": "¥49-69",
+     "differentiation": "风力"},
+], "ideation_note": "note"}
+
+
 class TestHistoryFeedback:
     def test_business_material_has_analogs(self, monkeypatch):
         captured = _capture_llm(monkeypatch, BUSINESS_LLM)
@@ -555,14 +588,8 @@ class TestHistoryFeedback:
     def test_creative_negative_examples(self, monkeypatch):
         from app.agents.creative_agent import CreativeAgent
 
-        payload = {"proposals": [
-            {"name": f"方案{i}", "concept": f"概念{i}", "product_form": "摆件",
-             "target_segment": "学生", "price_band": "¥39-59",
-             "differentiation": f"差异{i}"}
-            for i in range(3)
-        ], "ideation_note": "note"}
-        captured = _capture_llm(monkeypatch, payload)
-        ctx = {"brief": BRIEF, "history_analogs": [ANALOG]}
+        captured = _capture_llm(monkeypatch, _CREATIVE_PAYLOAD)
+        ctx = {**_CREATIVE_CTX, "history_analogs": [ANALOG]}
         result = _run(CreativeAgent(), ctx)
         assert "历史教训" in captured["user"]
         assert "库洛米旧款风扇" in captured["user"]
@@ -571,12 +598,6 @@ class TestHistoryFeedback:
     def test_creative_no_analogs_no_section(self, monkeypatch):
         from app.agents.creative_agent import CreativeAgent
 
-        payload = {"proposals": [
-            {"name": f"方案{i}", "concept": f"概念{i}", "product_form": "摆件",
-             "target_segment": "学生", "price_band": "¥39-59",
-             "differentiation": f"差异{i}"}
-            for i in range(3)
-        ], "ideation_note": "note"}
-        captured = _capture_llm(monkeypatch, payload)
-        _run(CreativeAgent(), {"brief": BRIEF})  # 无 history_analogs 键
+        captured = _capture_llm(monkeypatch, _CREATIVE_PAYLOAD)
+        _run(CreativeAgent(), dict(_CREATIVE_CTX))  # 无 history_analogs 键
         assert "历史教训" not in captured["user"]

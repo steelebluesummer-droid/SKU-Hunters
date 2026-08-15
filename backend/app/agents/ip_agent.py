@@ -37,7 +37,6 @@ from app.data.errors import ConnectorFetchError
 from app.data.taobao_suggest import TaobaoSuggestConnector
 from app.schemas import Confidence, EvidenceRef, IPAssessment, IPCandidate
 
-
 # ══════════════════ 确定性实现：IPStrategyAgent ══════════════════
 
 class IPStrategyAgent(BaseAgent):

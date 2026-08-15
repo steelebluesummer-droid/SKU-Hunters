@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from app.agents.ip_agent import IPStrategyAgent, get_ip_agent_class
+from app.agents.ip_agent import IPAgent, IPStrategyAgent, get_ip_agent_class
 from app.agents.mock_agents import MockIPAgent
 from app.data.base_adapter import (
     BaseDataAdapter,
@@ -249,7 +249,7 @@ def test_base_provider_error_returns_unknown():
 # ── 11. real 模式不回退 Mock ──────────────────────────
 
 def test_real_mode_does_not_fallback(monkeypatch):
-    monkeypatch.setenv("IP_AGENT_PROVIDER", "real")
+    monkeypatch.setenv("IP_AGENT_PROVIDER", "deterministic")
     assert get_ip_agent_class() is IPStrategyAgent
     agent = IPStrategyAgent(views={"IPDataView": _FailingView(BaseUnavailable("无配置"))})
     result = _run(agent)
@@ -261,7 +261,9 @@ def test_real_mode_does_not_fallback(monkeypatch):
 def test_mock_real_switch(monkeypatch):
     assert get_ip_agent_class() is MockIPAgent  # 默认 mock
     monkeypatch.setenv("IP_AGENT_PROVIDER", "real")
-    assert get_ip_agent_class() is IPStrategyAgent
+    assert get_ip_agent_class() is IPAgent  # LLM 研判版
+    monkeypatch.setenv("IP_AGENT_PROVIDER", "deterministic")
+    assert get_ip_agent_class() is IPStrategyAgent  # 确定性聚合版
     monkeypatch.setenv("IP_AGENT_PROVIDER", "mock")
     assert get_ip_agent_class() is MockIPAgent
 

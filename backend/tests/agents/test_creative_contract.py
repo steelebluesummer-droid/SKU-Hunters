@@ -221,8 +221,11 @@ def test_no_key_falls_back_to_mock(monkeypatch):
     assert "proposals" in result  # 降级 Mock 返回合法 ProposalSet（已过契约校验）
 
 
-def test_mock_agent_is_default():
-    """默认 provider=mock，get_creative_agent_class 返回 MockCreativeAgent"""
+def test_mock_agent_is_default(monkeypatch):
+    """默认 provider=mock，get_creative_agent_class 返回 MockCreativeAgent
+    （清环境变量：本地 .env / 上游测试可能设了 real 开关，默认值判定须与环境无关）"""
+    monkeypatch.delenv("CREATIVE_AGENT_PROVIDER", raising=False)
+    monkeypatch.delenv("AGENT_PROVIDER", raising=False)
     assert get_creative_agent_class() is MockCreativeAgent
 
 
