@@ -15,8 +15,12 @@ import {
   generateOpportunities,
   generatePlanCard,
   getPlan,
+  rechooseOpportunity,
   reviewPlan,
   revisePlan,
+  revisePreview,
+  reviseApply,
+  reviseCancel,
 } from '../../../api/plans';
 import { getInsights, getOpportunities } from '../../../api/insights';
 import { toCamelBrief } from '../../../shared/utils/normalizeBrief';
@@ -32,6 +36,8 @@ export default function usePlanWorkspace(planId) {
   const [opportunitiesLog, setOpportunitiesLog] = useState([]);
   const [reviseLogs, setReviseLogs] = useState([]);
   const [reviewLogs, setReviewLogs] = useState([]);
+  const [reviseDraft, setReviseDraft] = useState(null);   // 改稿草案（含修改前后对比）
+  const [planCardHistory, setPlanCardHistory] = useState([]); // 企划卡版本历史
 
   // ── UI 状态 ───────────────────────────────────────────
   const [loading, setLoading] = useState(true);       // 初始加载中
@@ -53,6 +59,7 @@ export default function usePlanWorkspace(planId) {
     try {
       const p = await getPlan(planId);
       setPlan(p);
+      setPlanCardHistory(Array.isArray(p?.plan_card_history) ? p.plan_card_history : []);
       // 按落盘状态恢复已生成产物（只读接口）
       if (p?.status === 'insights_ready' || p?.status === 'opportunities_ready' || p?.status === 'plan_card_ready' || p?.status === 'archived') {
         try { setInsights(await getInsights(planId)); } catch { /* 只读恢复失败不阻断 */ }
@@ -140,6 +147,59 @@ export default function usePlanWorkspace(planId) {
     }
   }, [planId]);
 
+  // ── 改稿两步式：预览草案 / 确认应用 / 取消 ─────────
+  const runRevisePreview = useCallback(async (message) => {
+    setPendingAction('revise-preview');
+    setError(null);
+    try {
+      const data = await revisePreview(message, planId);
+      setReviseDraft({ reply: data.reply, changes: data.changes || [], card: data.card || {}, message });
+      return data;
+    } catch (e) {
+      setError(e);
+      throw e;
+    } finally {
+      setPendingAction(null);
+    }
+  }, [planId]);
+
+  const runReviseApply = useCallback(async () => {
+    setPendingAction('revise-apply');
+    setError(null);
+    try {
+      const data = await reviseApply(planId);
+      setPlan((p) => (p ? { ...p, plan_card: data.plan_card, plan_card_history: p.plan_card_history || [] } : p));
+      // 追加版本历史
+      setPlanCardHistory((hist) => {
+        const newHist = Array.isArray(hist) ? hist : [];
+        const last = newHist.length > 0 ? newHist[newHist.length - 1] : null;
+        const version = last ? last.version + 1 : 1;
+        return [...newHist, { version: data.version || version, applied_at: new Date().toISOString() }];
+      });
+      setReviseDraft(null);
+      return data;
+    } catch (e) {
+      setError(e);
+      throw e;
+    } finally {
+      setPendingAction(null);
+    }
+  }, [planId]);
+
+  const runReviseCancel = useCallback(async () => {
+    setPendingAction('revise-cancel');
+    setError(null);
+    try {
+      await reviseCancel(planId);
+      setReviseDraft(null);
+    } catch (e) {
+      setError(e);
+      throw e;
+    } finally {
+      setPendingAction(null);
+    }
+  }, [planId]);
+
   // ── 复盘追问（只读，归档后）────────────────────────
   const runReview = useCallback(async (question) => {
     setPendingAction('review');
@@ -147,6 +207,22 @@ export default function usePlanWorkspace(planId) {
     try {
       const data = await reviewPlan(question, planId);
       setReviewLogs((logs) => [...logs, { question, answer: data.answer }]);
+      return data;
+    } catch (e) {
+      setError(e);
+      throw e;
+    } finally {
+      setPendingAction(null);
+    }
+  }, [planId]);
+
+  // ── 重新选择机会方向（plan_card_ready → opportunities_ready）────
+  const runRechooseOpportunity = useCallback(async () => {
+    setPendingAction('rechoose');
+    setError(null);
+    try {
+      const data = await rechooseOpportunity(planId);
+      setPlan((p) => (p ? { ...p, status: data.status, selected_opportunity: null, plan_card: null, product_proposal: null } : p));
       return data;
     } catch (e) {
       setError(e);
@@ -176,11 +252,15 @@ export default function usePlanWorkspace(planId) {
     generateInsights: runGenerateInsights,
     generateOpportunities: runGenerateOpportunities,
     generatePlanCard: runGeneratePlanCard,
+    rechooseOpportunity: runRechooseOpportunity,
     revise: runRevise,
+    revisePreview: runRevisePreview,
+    reviseApply: runReviseApply,
+    reviseCancel: runReviseCancel,
     review: runReview,
     archive: runArchive,
     reload: loadPlan,
-  }), [runGenerateInsights, runGenerateOpportunities, runGeneratePlanCard, runRevise, runReview, runArchive, loadPlan]);
+  }), [runGenerateInsights, runGenerateOpportunities, runGeneratePlanCard, runRechooseOpportunity, runRevise, runRevisePreview, runReviseApply, runReviseCancel, runReview, runArchive, loadPlan]);
 
   return {
     plan,
@@ -189,6 +269,8 @@ export default function usePlanWorkspace(planId) {
     opportunitiesLog,
     reviseLogs,
     reviewLogs,
+    reviseDraft,
+    planCardHistory,
     status,
     source,
     brief,

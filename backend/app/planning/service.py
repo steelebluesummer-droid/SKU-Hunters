@@ -14,7 +14,8 @@ from typing import Any
 from app.engine import llm
 from app.engine.strict_mode import is_demo_hidden
 from app.planning import fixtures
-from app.planning.insight_resolver import _resolve_insight_bundle
+from app.planning.cost_rules import cost_check
+from app.planning.insight_resolver import _parse_llm_json, _resolve_insight_bundle
 from app.planning.opportunity_discovery import build_opportunity_pool
 from app.planning.opportunity_engine import (
     _fallback_opportunities,
@@ -36,7 +37,7 @@ from app.planning.repository import (
     list_plans,
     plan_write_lock,
 )
-from app.schemas.planning import InsightBundle, Opportunity, PlanBrief
+from app.schemas.planning import InsightBundle, Opportunity, PlanBrief, PlanCard
 
 
 class StateTransitionError(Exception):
@@ -60,8 +61,12 @@ __all__ = [
     "get_opportunities",
     "get_plan",
     "list_plans",
+    "rechoose_opportunity",
     "review_plan",
+    "revise_apply",
+    "revise_cancel",
     "revise_plan",
+    "revise_preview",
     "seed_demo",
 ]
 
@@ -336,6 +341,203 @@ def revise_plan(plan: dict[str, Any], message: str) -> dict[str, Any]:
         plan["revise_logs"].append(turn)
     return turn
 
+
+# ── 改稿两步式：预览草案 / 确认应用 / 取消 ─────────────────
+
+# 可被改稿覆盖的企划卡字段 → 中文标签
+_REVISE_FIELD_LABELS = {
+    "name": "产品名称",
+    "concept": "产品概念",
+    "designLanguage": "设计语言",
+    "keywords": "关键词",
+    "features": "功能点",
+    "fusion": "跨品类融合",
+    "pricing.price": "零售价",
+    "pricing.reason": "定价理由",
+    "schedule": "上新节奏",
+    "validation": "验证指标",
+}
+
+
+def _norm_str(v: Any) -> str:
+    return "" if v is None else str(v)
+
+
+def _revise_draft_changes(draft_card: dict, plan_card: dict) -> list[dict]:
+    """对比草案 card 与当前 plan_card，生成「修改前后对比」changes 列表"""
+    changes: list[dict] = []
+    for key, after in draft_card.items():
+        if key == "pricing" and isinstance(after, dict):
+            for sub, sub_val in after.items():
+                changes.append({
+                    "field": f"pricing.{sub}",
+                    "label": _REVISE_FIELD_LABELS.get(f"pricing.{sub}", f"pricing.{sub}"),
+                    "before": (plan_card.get("pricing") or {}).get(sub, ""),
+                    "after": sub_val,
+                })
+        else:
+            changes.append({
+                "field": key,
+                "label": _REVISE_FIELD_LABELS.get(key, key),
+                "before": plan_card.get(key, ""),
+                "after": after,
+            })
+    return changes
+
+
+def _apply_draft_to_card(plan_card: dict, draft_card: dict) -> dict:
+    """把草案字段覆盖到企划卡副本（类型规整，仅覆盖草案中出现的字段）"""
+    import copy as _copy
+    new_card = _copy.deepcopy(plan_card)
+    for key, val in draft_card.items():
+        if key == "pricing" and isinstance(val, dict):
+            pricing = dict(new_card.get("pricing") or {})
+            for sub, sub_val in val.items():
+                pricing[sub] = _norm_str(sub_val)
+            new_card["pricing"] = pricing
+        elif key in ("keywords", "features", "validation"):
+            new_card[key] = [_norm_str(x) for x in (val or []) if _norm_str(x).strip()]
+        elif key == "schedule":
+            new_card[key] = [
+                {"time": _norm_str(x.get("time", "")), "action": _norm_str(x.get("action", ""))}
+                for x in (val or []) if isinstance(x, dict)
+            ]
+        else:
+            new_card[key] = _norm_str(val)
+    return new_card
+
+
+def revise_preview(plan: dict[str, Any], message: str) -> dict[str, Any]:
+    """改稿草案：LLM 分析意见生成「拟修改内容」，不落盘正式数据
+
+    仅非 archived 可改稿；草案暂存 plan.revise_draft（持久化），
+    不改 plan_card、不改 status；由 revise_apply 确认后正式应用。
+    """
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") == "archived":
+            raise StateTransitionError("plan_card_ready", "archived", "revise-preview")
+        card = plan.get("plan_card") or {}
+        raw = llm.complete(
+            system_prompt=(
+                "你是 SKU Hunters 新品企划工作室的改稿助手。商品经理会对已生成的企划卡提出修改意见。"
+                "你要：1) 分析意见，说明将如何调整；2) 生成「拟修改内容」草稿。"
+                "只修改与意见相关的字段，无关字段不输出。"
+                "输出 JSON（不要输出其他文字）：\n"
+                '{"reply": "对修改意见的分析说明（150 字以内）", "card": {'
+                '拟修改字段的新值，键为企划卡 camelCase 字段：'
+                '"name","concept","designLanguage","keywords","features","fusion",'
+                '"pricing":{"price":"55 元","reason":"..."},"schedule","validation"}}'
+            ),
+            user_prompt=(
+                f"【当前企划卡】\n名称：{card.get('name', '')}\n概念：{card.get('concept', '')}\n"
+                f"设计语言：{card.get('designLanguage', '')}\n功能点：{card.get('features', [])}\n"
+                f"定价：{card.get('pricing', {})}\n成本校验：{card.get('costCheck', {})}\n\n"
+                f"【修改意见】{message}"
+            ),
+            max_tokens=1200,
+        )
+        draft_card: dict[str, Any] = {}
+        reply = "已生成修改草案，请确认后再应用。"
+        if raw:
+            data = _parse_llm_json(raw)
+            if isinstance(data, dict):
+                reply = _norm_str(data.get("reply", "") or reply)
+                dc = data.get("card")
+                if isinstance(dc, dict):
+                    draft_card = {
+                        k: v for k, v in dc.items()
+                        if k in _REVISE_FIELD_LABELS or (k == "pricing" and isinstance(v, dict))
+                    }
+        changes = _revise_draft_changes(draft_card, card)
+        plan["revise_draft"] = {"message": message, "reply": reply, "card": draft_card}
+        _save_state()
+    return {"reply": reply, "changes": changes, "card": draft_card}
+
+
+def revise_apply(plan: dict[str, Any]) -> dict[str, Any]:
+    """确认应用修改：二次校验成本/价格/schema，通过后更新企划卡并保存旧版本
+
+    前置：已有 revise_draft（preview 生成）；非 archived。
+    成功：旧 plan_card 快照追加到 plan_card_history，更新 plan_card，
+    写 revise_logs，清除草案。
+    """
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") == "archived":
+            raise StateTransitionError("plan_card_ready", "archived", "revise-apply")
+        draft = plan.get("revise_draft")
+        if not draft:
+            raise ValueError("没有待应用的修改草案，请先提交修改意见生成草案")
+        old_card = plan.get("plan_card") or {}
+        draft_card = draft.get("card") or {}
+        if not draft_card:
+            raise ValueError("草案为空，无可应用修改")
+        new_card = _apply_draft_to_card(old_card, draft_card)
+        # 二次校验：成本 + schema
+        brief = plan.get("brief") or {}
+        cost_limit = float(brief.get("cost_limit", brief.get("costLimit", 25)))
+        check = cost_check(
+            {"pricing": {"price": (new_card.get("pricing") or {}).get("price", "")}},
+            cost_limit,
+        )
+        new_card["costCheck"] = check.model_dump()
+        if not check.passed:
+            raise ValueError(f"修改后未通过成本校验：{check.reason}")
+        try:
+            PlanCard.model_validate(_snake_keys(new_card))
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"修改后企划卡未通过 schema 校验：{e}")
+        # 保存旧版本
+        history = plan.setdefault("plan_card_history", [])
+        history.append({
+            "version": len(history) + 1,
+            "applied_at": _now(),
+            "message": draft.get("message", ""),
+            "card": old_card,
+        })
+        # 更新企划卡
+        plan["plan_card"] = new_card
+        # 写改稿日志（标记已应用）
+        plan["revise_logs"].append({
+            "message": draft.get("message", ""),
+            "reply": draft.get("reply", ""),
+            "applied": True,
+            "version": len(history),
+            "timestamp": _now(),
+        })
+        # 清除草案
+        plan["revise_draft"] = None
+        _save_state()
+    return {"plan_card": new_card, "version": len(history), "history_count": len(history)}
+
+
+def revise_cancel(plan: dict[str, Any]) -> dict[str, Any]:
+    """取消本次改稿：清除草案，不修改任何内容"""
+    with plan_write_lock(plan["plan_id"]):
+        plan["revise_draft"] = None
+        _save_state()
+    return {"plan_card": plan.get("plan_card") or {}}
+
+
+# ── 重新选择机会方向 ───────────────────────────────────
+
+def rechoose_opportunity(plan: dict[str, Any]) -> dict[str, Any]:
+    """重新选择机会方向：plan_card_ready → opportunities_ready（原子动作）
+
+    返回换方向（前端「返回换方向」按钮）需要回到机会选择步骤。
+    清除已选方向及相关产物，使后续能再次 generate-plan-card，避免触发状态机保护。
+    清除：selected_opportunity、plan_card、product_proposal、revise_logs。
+    前置状态 plan_card_ready；成功后 status → opportunities_ready。
+    """
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") != "plan_card_ready":
+            raise StateTransitionError("plan_card_ready", plan.get("status"), "rechoose-opportunity")
+        plan["selected_opportunity"] = None
+        plan["plan_card"] = None
+        plan["product_proposal"] = None
+        plan["revise_logs"] = []
+        plan["status"] = "opportunities_ready"
+        _save_state()
+    return plan
 
 # ── 归档 ───────────────────────────────────────────────
 

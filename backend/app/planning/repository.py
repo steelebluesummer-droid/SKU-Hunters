@@ -76,6 +76,8 @@ def _save_state() -> None:
                 "plan_card": p.get("plan_card"),
                 "product_proposal": p.get("product_proposal"),
                 "revise_logs": p.get("revise_logs", []),
+                "revise_draft": p.get("revise_draft"),
+                "plan_card_history": p.get("plan_card_history", []),
                 "archived_at": p.get("archived_at"),
                 # 链路中间产物：重启后企划卡依赖机会卡、机会/企划卡复用洞察缓存
                 "opportunities": p.get("opportunities", []),

@@ -83,6 +83,17 @@ export default function TaskFlow() {
     }
   };
 
+  // ── 返回换方向：调用原子动作回退到机会选择，再切到第 2 步 ──
+  const onRechooseOpportunity = async () => {
+    try {
+      await ws.actions.rechooseOpportunity();
+      message.success('已清除当前方向，可重新选择');
+      setStep(2);
+    } catch (e) {
+      message.error(`返回换方向失败：${e?.message || '请检查后端服务'}`);
+    }
+  };
+
   // ── 归档 ──────────────────────────────────────────────
   const onArchive = async () => {
     setArchiving(true);
@@ -225,8 +236,13 @@ export default function TaskFlow() {
             brief={brief}
             status={planCardState}
             isArchived={isArchived}
+            reviseDraft={ws.reviseDraft}
+            planCardHistory={ws.planCardHistory}
             onGenerate={ws.actions.generatePlanCard}
             onRevise={ws.actions.revise}
+            onRevisePreview={ws.actions.revisePreview}
+            onReviseApply={ws.actions.reviseApply}
+            onReviseCancel={ws.actions.reviseCancel}
             onReview={ws.actions.review}
           />
           <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -237,7 +253,7 @@ export default function TaskFlow() {
               </>
             ) : (
               <>
-                <Button onClick={() => setStep(2)}>返回换方向</Button>
+                <Button onClick={onRechooseOpportunity}>返回换方向</Button>
                 <Button type="primary" loading={archiving} onClick={onArchive}>归档企划案</Button>
               </>
             )}

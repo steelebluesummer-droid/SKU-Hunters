@@ -53,9 +53,26 @@ export async function revisePlan(message, planId) {
   return request(`/plans/${planId}/revise`, { method: 'POST', body: { message } });
 }
 
+export async function revisePreview(message, planId) {
+  return request(`/plans/${planId}/revise/preview`, { method: 'POST', body: { message } });
+}
+
+export async function reviseApply(planId) {
+  return request(`/plans/${planId}/revise/apply`, { method: 'POST', body: {} });
+}
+
+export async function reviseCancel(planId) {
+  return request(`/plans/${planId}/revise/cancel`, { method: 'POST', body: {} });
+}
+
 /** 归档 → 返回 { status, archived_at } */
 export async function archivePlan(planId) {
   return request(`/plans/${planId}/actions/archive`, { method: 'POST', body: {} });
+}
+
+/** 重新选择机会方向（plan_card_ready → opportunities_ready，清除已选方向与企划产物） */
+export async function rechooseOpportunity(planId) {
+  return request(`/plans/${planId}/actions/rechoose-opportunity`, { method: 'POST', body: {} });
 }
 
 /** 复盘追问（只读）→ 返回 { question, answer } */

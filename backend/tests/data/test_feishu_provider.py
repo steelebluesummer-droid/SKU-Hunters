@@ -90,6 +90,43 @@ def _provider_with(monkeypatch, responder):
         auth=auth, app_token="fake-app", data_table_id="tbl-data", summary_table_id="tbl-summary"
     )
 
+def _competitor_provider_with(monkeypatch, responder):
+    """构造带竞品表配置的 provider，mock requests.post 为 responder(url, json)"""
+    auth = _FakeAuth()
+    monkeypatch.setattr(
+        "requests.post",
+        lambda url, headers=None, json=None, timeout=None, **kw: _FakeResponse(responder(url, json or {})),
+    )
+    return FeishuBaseProvider(
+        auth=auth, app_token="fake-app", data_table_id="tbl-data",
+        summary_table_id="tbl-summary", competitor_table_id="tbl-competitor",
+    )
+
+def _competitor_fields(**overrides):
+    """构造一条合法飞书竞品行字段"""
+    fields = {
+        "competitor_id": "c-001",
+        "product_name": "便携小风扇Pro",
+        "brand": "几素",
+        "category": "风扇",
+        "price": 89.0,
+        "price_min": 79.0,
+        "price_max": 99.0,
+        "price_band": "60-100",
+        "image_url": "https://example.com/img/001.jpg",
+        "selling_points": '[{"text": "轻巧", "type": "text"}, {"text": "静音", "type": "text"}]',
+        "design_score": 7.5,
+        "source_url": "https://example.com/c/001",
+        "source_platform": "tiktok",
+        "evidence_quote": "实测出风强劲",
+        "record_date": _date_ms("2026-08-01"),
+        "snapshot_id": "snap-comp-1",
+        "ingested_at": _date_ms("2026-08-10"),
+        "verification_status": "unverified",
+    }
+    fields.update(overrides)
+    return fields
+
 
 def test_normal_return(monkeypatch):
     """正常返回：飞书字段正确转换为 BaseRecord"""
@@ -606,3 +643,186 @@ def test_category_matches_exact_for_normal_categories():
     assert category_matches("雨伞", "雨伞") is True
     assert category_matches("香薰", "雨伞") is False
     assert category_matches("雨伞", None) is True
+
+
+# ── 商品级竞品表（base_competitors）─────────────────────────
+
+def test_competitor_records_normal_read(monkeypatch):
+    """竞品表正常读取：字段正确转换为 CompetitorRecord"""
+    def responder(url, body):
+        if "/tbl-competitor/" in url:
+            return _resp([_record(**_competitor_fields())])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records(category="风扇")
+    assert len(recs) == 1
+    r = recs[0]
+    assert r.product_name == "便携小风扇Pro"
+    assert r.brand == "几素"
+    assert r.category == "风扇"
+    assert r.price == 89.0
+    assert r.design_score == 7.5
+    assert r.selling_points == ["轻巧", "静音"]
+    assert r.source_url == "https://example.com/c/001"
+    assert r.snapshot_id == "snap-comp-1"
+    assert r.verification_status.value == "unverified"
+
+def test_competitor_records_pagination(monkeypatch):
+    """竞品表分页读取：has_more 翻页收集全部"""
+    pages = {"n": 0}
+
+    def responder(url, body):
+        pages["n"] += 1
+        if "/tbl-competitor/" in url:
+            if pages["n"] == 1:
+                return _resp([_record(record_id="c1", **_competitor_fields(competitor_id="c1"))],
+                             has_more=True, page_token="tok-2")
+            return _resp([_record(record_id="c2", **_competitor_fields(competitor_id="c2"))])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records()
+    assert len(recs) == 2
+    assert {r.competitor_id for r in recs} == {"c1", "c2"}
+
+def test_competitor_records_category_filter(monkeypatch):
+    """竞品表按 category 过滤：只返回匹配品类"""
+    def responder(url, body):
+        if "/tbl-competitor/" in url:
+            return _resp([
+                _record(**_competitor_fields(competitor_id="c1", product_name="风扇A", category="风扇")),
+                _record(**_competitor_fields(competitor_id="c2", product_name="雨伞B", category="雨伞")),
+            ])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records(category="风扇")
+    assert len(recs) == 1
+    assert recs[0].product_name == "风扇A"
+    # 雨伞不混入
+    recs2 = provider.get_competitor_records(category="雨伞")
+    assert len(recs2) == 1 and recs2[0].product_name == "雨伞B"
+
+def test_competitor_records_snapshot_filter(monkeypatch):
+    """竞品表按 snapshot_id 隔离过滤"""
+    def responder(url, body):
+        if "/tbl-competitor/" in url:
+            return _resp([
+                _record(**_competitor_fields(competitor_id="c1", snapshot_id="snap-a")),
+                _record(**_competitor_fields(competitor_id="c2", snapshot_id="snap-b")),
+            ])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records(snapshot_id="snap-a")
+    assert len(recs) == 1 and recs[0].snapshot_id == "snap-a"
+
+def test_competitor_records_missing_config_fail_closed(monkeypatch):
+    """竞品表缺配置 → BaseUnavailable（fail-closed，不伪造数据）"""
+    # 显式清除竞品表配置（避免本地 .env 注入导致误判），模拟缺配置环境
+    monkeypatch.delenv("FEISHU_COMPETITOR_TABLE_ID", raising=False)
+    auth = _FakeAuth()
+    monkeypatch.setattr(
+        "requests.post",
+        lambda url, headers=None, json=None, timeout=None, **kw: _FakeResponse(_resp([])),
+    )
+    provider = FeishuBaseProvider(auth=auth, app_token="fake-app", data_table_id="tbl-data",
+                                  summary_table_id="tbl-summary")  # 无 competitor_table_id
+    with pytest.raises(BaseUnavailable):
+        provider.get_competitor_records()
+
+def test_competitor_records_http_error(monkeypatch):
+    """竞品表 HTTP 4xx/5xx → BaseProviderError"""
+    class _ErrorResponse:
+        status_code = 500
+        def json(self):
+            return {"code": 0, "msg": "success", "data": {}}
+
+    auth = _FakeAuth()
+    monkeypatch.setattr("requests.post", lambda *a, **k: _ErrorResponse())
+    provider = FeishuBaseProvider(auth=auth, app_token="fake-app", data_table_id="tbl-data",
+                                  summary_table_id="tbl-summary", competitor_table_id="tbl-competitor")
+    with pytest.raises(BaseProviderError):
+        provider.get_competitor_records()
+
+def test_competitor_records_business_error(monkeypatch):
+    """竞品表飞书业务错误（code != 0）→ BaseProviderError"""
+    auth = _FakeAuth()
+    monkeypatch.setattr(
+        "requests.post",
+        lambda *a, **k: _FakeResponse({"code": 190001, "msg": "权限不足", "data": {}}),
+    )
+    provider = FeishuBaseProvider(auth=auth, app_token="fake-app", data_table_id="tbl-data",
+                                  summary_table_id="tbl-summary", competitor_table_id="tbl-competitor")
+    with pytest.raises(BaseProviderError):
+        provider.get_competitor_records()
+
+def test_competitor_records_invalid_price_skipped(monkeypatch):
+    """非法价格（负值）→ 跳过记录并记录 caveat"""
+    def responder(url, body):
+        if "/tbl-competitor/" in url:
+            return _resp([
+                _record(**_competitor_fields(competitor_id="c1", price=-5.0)),
+                _record(**_competitor_fields(competitor_id="c2", product_name="正常品")),
+            ])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records()
+    assert len(recs) == 1 and recs[0].product_name == "正常品"
+    assert any("price" in str(c.get("field")) for c in provider.caveats)
+
+def test_competitor_records_invalid_design_score_no_fabrication(monkeypatch):
+    """design_score 超 0-10 → 置 None（不伪造），记录 caveat"""
+    def responder(url, body):
+        if "/tbl-competitor/" in url:
+            return _resp([_record(**_competitor_fields(design_score=15.0))])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records()
+    assert len(recs) == 1
+    assert recs[0].design_score is None  # 不补 0、不伪造
+    assert any("design_score" in str(c.get("field")) for c in provider.caveats)
+
+def test_competitor_records_broken_selling_points(monkeypatch):
+    """selling_points JSON 损坏 → 空列表 + caveat（不抛异常）"""
+    def responder(url, body):
+        if "/tbl-competitor/" in url:
+            return _resp([_record(**_competitor_fields(selling_points="{broken"))])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records()
+    assert len(recs) == 1
+    assert recs[0].selling_points == []
+    assert any("selling_points" in str(c.get("field")) for c in provider.caveats)
+
+def test_competitor_records_missing_source_url(monkeypatch):
+    """source_url 缺失 → None（保留记录，不伪造链接）"""
+    def responder(url, body):
+        if "/tbl-competitor/" in url:
+            return _resp([_record(**_competitor_fields(source_url=None))])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records()
+    assert len(recs) == 1
+    assert recs[0].source_url is None
+
+def test_competitor_records_verification_status_validation(monkeypatch):
+    """verification_status 只接受 unverified/reviewed/rejected；非法默认 unverified + caveat"""
+    def responder(url, body):
+        if "/tbl-competitor/" in url:
+            return _resp([
+                _record(**_competitor_fields(competitor_id="c1", verification_status="reviewed")),
+                _record(**_competitor_fields(competitor_id="c2", verification_status="illegal-value")),
+            ])
+        return _resp([])
+
+    provider = _competitor_provider_with(monkeypatch, responder)
+    recs = provider.get_competitor_records()
+    by_id = {r.competitor_id: r for r in recs}
+    assert by_id["c1"].verification_status.value == "reviewed"
+    assert by_id["c2"].verification_status.value == "unverified"  # 非法 → 默认，不显示已核验

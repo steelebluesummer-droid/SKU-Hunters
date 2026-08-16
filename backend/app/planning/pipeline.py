@@ -84,8 +84,12 @@ from app.planning.service import (  # noqa: F401
     generate_plan_card,
     get_insights,
     get_opportunities,
+    rechoose_opportunity,
     review_plan,
+    revise_apply,
+    revise_cancel,
     revise_plan,
+    revise_preview,
     seed_demo,
 )
 from app.services import jimeng  # noqa: F401

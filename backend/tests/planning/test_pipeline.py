@@ -15,9 +15,10 @@ Stage 5 原子动作契约：
 import json
 
 import pytest
+from pydantic import ValidationError
+
 from app.planning import fixtures, pipeline, repository
 from app.planning.service import StateTransitionError
-from pydantic import ValidationError
 
 VALID_BRIEF = {
     "theme": "2027夏季户外生活系列",
@@ -233,6 +234,112 @@ def test_revise_plan_uses_llm_answer_when_available(monkeypatch):
     turn = pipeline.revise_plan(plan, "把配色改成薄荷绿")
     assert turn["reply"] == "可以，配色方案将调整为薄荷绿。"
 
+
+# ── 改稿两步式：预览草案 / 确认应用 / 取消 ─────────────────
+
+def test_revise_preview_generates_draft_without_applying(monkeypatch):
+    fake = json.dumps({
+        "reply": "将把零售价压到 55 元以内，并补充挂绳功能",
+        "card": {"pricing": {"price": "55 元"}, "features": ["挂绳挂扣", "磨砂质感"]},
+    }, ensure_ascii=False)
+    monkeypatch.setattr(pipeline.llm, "complete", lambda **kwargs: fake)
+    plan = _make_plan()
+    plan["plan_card"] = {"name": "测试企划卡", "concept": "测试概念",
+                         "pricing": {"price": "69 元", "reason": ""}, "features": ["原功能"]}
+    plan["status"] = "plan_card_ready"
+    original_card = dict(plan["plan_card"])
+    result = pipeline.revise_preview(plan, "价格压到55元以内")
+    assert result["reply"] == "将把零售价压到 55 元以内，并补充挂绳功能"
+    assert len(result["changes"]) >= 1
+    # 不落盘正式数据：plan_card 与 status 均不变
+    assert plan["plan_card"] == original_card
+    assert plan["status"] == "plan_card_ready"
+    # 草案已暂存（持久化，供 apply 使用）
+    assert plan["revise_draft"]["message"] == "价格压到55元以内"
+    assert plan["revise_draft"]["card"]["pricing"]["price"] == "55 元"
+
+
+def test_revise_apply_applies_draft_and_saves_history(monkeypatch):
+    fake = json.dumps({"reply": "已调整定价", "card": {"pricing": {"price": "55 元"}}}, ensure_ascii=False)
+    monkeypatch.setattr(pipeline.llm, "complete", lambda **kwargs: fake)
+    plan = _make_plan()
+    plan["plan_card"] = {"name": "测试企划卡", "concept": "测试概念",
+                         "pricing": {"price": "69 元", "reason": ""}, "features": ["原功能"],
+                         "keywords": [], "validation": [], "schedule": []}
+    plan["status"] = "plan_card_ready"
+    pipeline.revise_preview(plan, "价格压到55元")
+    result = pipeline.revise_apply(plan)
+    assert result["version"] == 1
+    assert result["history_count"] == 1
+    assert plan["plan_card"]["pricing"]["price"] == "55 元"
+    assert plan["revise_draft"] is None          # 应用后清除草案
+    assert len(plan["plan_card_history"]) == 1   # 保存旧版本
+    assert plan["plan_card_history"][0]["version"] == 1
+    assert plan["plan_card_history"][0]["card"]["pricing"]["price"] == "69 元"
+    assert plan["revise_logs"][-1]["applied"] is True
+
+
+def test_revise_apply_requires_draft():
+    plan = _make_plan()
+    plan["plan_card"] = {"name": "x"}
+    plan["status"] = "plan_card_ready"
+    with pytest.raises(ValueError):
+        pipeline.revise_apply(plan)
+
+
+def test_revise_cancel_clears_draft_without_modifying(monkeypatch):
+    fake = json.dumps({"reply": "r", "card": {"name": "新名字"}}, ensure_ascii=False)
+    monkeypatch.setattr(pipeline.llm, "complete", lambda **kwargs: fake)
+    plan = _make_plan()
+    plan["plan_card"] = {"name": "旧名字", "concept": "c"}
+    plan["status"] = "plan_card_ready"
+    pipeline.revise_preview(plan, "改名字")
+    pipeline.revise_cancel(plan)
+    assert plan["revise_draft"] is None
+    assert plan["plan_card"]["name"] == "旧名字"  # 未修改任何内容
+
+
+def test_revise_preview_and_apply_reject_when_archived():
+    plan = _make_plan()
+    plan["status"] = "archived"
+    plan["plan_card"] = {"name": "x"}
+    with pytest.raises(StateTransitionError):
+        pipeline.revise_preview(plan, "改")
+    with pytest.raises(StateTransitionError):
+        pipeline.revise_apply(plan)
+
+
+def test_revise_apply_rejects_cost_overrun(monkeypatch):
+    """成本校验阻断：apply 后定价低于成本红线 → 拒绝应用，不改企划卡、不清草案"""
+    fake = json.dumps({"reply": "r", "card": {"pricing": {"price": "15 元"}}}, ensure_ascii=False)
+    monkeypatch.setattr(pipeline.llm, "complete", lambda **kwargs: fake)
+    plan = _make_plan()
+    plan["plan_card"] = {"name": "测试", "concept": "c", "pricing": {"price": "69 元", "reason": ""},
+                         "features": [], "keywords": [], "validation": [], "schedule": []}
+    plan["status"] = "plan_card_ready"
+    pipeline.revise_preview(plan, "压到15元")
+    original = dict(plan["plan_card"])
+    with pytest.raises(ValueError):
+        pipeline.revise_apply(plan)
+    # 阻断后：企划卡不变、草案保留、无版本记录
+    assert plan["plan_card"] == original
+    assert plan["revise_draft"] is not None
+    assert len(plan.get("plan_card_history", [])) == 0
+
+
+def test_save_state_persists_revise_draft_and_history():
+    """持久化：revise_draft / plan_card_history 落盘后可恢复（重启不丢）"""
+    plan = _make_plan()
+    plan["revise_draft"] = {"message": "改", "reply": "r", "card": {"name": "新名"}}
+    plan["plan_card_history"] = [{"version": 1, "applied_at": "2026-01-01T00:00:00Z", "message": "m", "card": {}}]
+    repository._save_state()
+    repository._PLANS.clear()
+    loaded = repository._load_state()
+    p = loaded[plan["plan_id"]]
+    assert p["revise_draft"] == {"message": "改", "reply": "r", "card": {"name": "新名"}}
+    assert p["plan_card_history"] == [{"version": 1, "applied_at": "2026-01-01T00:00:00Z", "message": "m", "card": {}}]
+
+
 # ── 归档 ─────────────────────────────────────────────────
 
 def test_archive_plan_requires_plan_card():
@@ -250,6 +357,32 @@ def test_archive_plan_marks_archived_and_readonly_apis_keep_status():
     pipeline.get_insights(plan)
     pipeline.get_opportunities(plan)
     assert plan["status"] == "archived"
+
+# ── 重新选择机会方向（plan_card_ready → opportunities_ready）──
+
+def test_rechoose_opportunity_returns_to_opportunities_and_clears_products():
+    # 直接构造 plan_card_ready 状态（rechoose 仅校验状态并清除字段，不涉 LLM）
+    plan = _make_plan()
+    plan["status"] = "plan_card_ready"
+    plan["selected_opportunity"] = "opp-1"
+    plan["plan_card"] = {"name": "测试企划卡"}
+    plan["product_proposal"] = {"concept": "测试提案"}
+    plan["revise_logs"] = [{"message": "改一下", "reply": "好的"}]
+
+    result = pipeline.rechoose_opportunity(plan)
+    assert result["status"] == "opportunities_ready"
+    assert plan["selected_opportunity"] is None
+    assert plan["plan_card"] is None
+    assert plan["product_proposal"] is None
+    assert plan["revise_logs"] == []
+    # 回退到 opportunities_ready 后即可再次 generate-plan-card，不再触发状态机保护
+    assert plan["status"] == "opportunities_ready"
+
+def test_rechoose_opportunity_rejects_when_not_plan_card_ready():
+    plan = _make_plan()
+    plan["status"] = "opportunities_ready"  # 尚未生成企划卡
+    with pytest.raises(StateTransitionError):
+        pipeline.rechoose_opportunity(plan)
 
 # ── 状态持久化 ───────────────────────────────────────────
 

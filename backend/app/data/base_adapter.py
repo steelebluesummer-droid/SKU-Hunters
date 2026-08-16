@@ -19,6 +19,7 @@ import requests
 from pydantic import ValidationError
 
 from app.schemas.base_data import BasePlatform, BaseQuery, BaseRecord, BaseRecordPage
+from app.schemas.competitor_data import CompetitorRecord, VerificationStatus
 
 
 class BaseUnavailable(Exception):
@@ -82,6 +83,13 @@ class BaseProvider(Protocol):
         as_of: str | None = None,
         snapshot_id: str | None = None,
     ) -> list[dict[str, Any]]: ...
+
+    def get_competitor_records(
+        self,
+        category: str | None = None,
+        snapshot_id: str | None = None,
+        as_of: str | None = None,
+    ) -> list[CompetitorRecord]: ...
 
 
 # ── 本地 fixture provider（演示/测试用，非真实数据）────────────
@@ -235,6 +243,10 @@ class MockBaseProvider:
             dist[r.record_date] = dist.get(r.record_date, 0) + 1
         return [{"date": d, "count": c} for d, c in sorted(dist.items())]
 
+    def get_competitor_records(self, category=None, snapshot_id=None, as_of=None) -> list[CompetitorRecord]:
+        """Mock provider 无真实竞品数据：返回空（不伪造竞品），供降级路径验证"""
+        return []
+
 
 class FeishuBaseProvider:
     """真实飞书 Base provider（只读）— 从飞书多维表格读取采集记录
@@ -255,14 +267,17 @@ class FeishuBaseProvider:
         app_token: str | None = None,
         data_table_id: str | None = None,
         summary_table_id: str | None = None,
+        competitor_table_id: str | None = None,
     ):
         self._auth = auth
         self._app_token = app_token or os.getenv("FEISHU_BASE_APP_TOKEN")
         self._data_table_id = data_table_id or os.getenv("FEISHU_DATA_TABLE_ID")
         self._summary_table_id = summary_table_id or os.getenv("FEISHU_SUMMARY_TABLE_ID")
+        self._competitor_table_id = competitor_table_id or os.getenv("FEISHU_COMPETITOR_TABLE_ID")
         self._caveats: list[dict[str, Any]] = []
         self._records_cache: list[BaseRecord] | None = None
         self._summary_cache: list[dict[str, Any]] | None = None
+        self._competitor_cache: list[CompetitorRecord] | None = None
 
     # ── 配置与认证 ──────────────────────────────
 
@@ -654,15 +669,156 @@ class FeishuBaseProvider:
             dist[r.record_date] = dist.get(r.record_date, 0) + 1
         return [{"date": d, "count": c} for d, c in sorted(dist.items())]
 
+    # ── 商品级竞品表（base_competitors）────────────────
+
+    def _to_competitor_record(
+        self, fields: dict[str, Any], record_id: str
+    ) -> tuple[CompetitorRecord | None, list[dict[str, Any]]]:
+        """飞书竞品行 → CompetitorRecord；非法记录跳过并返回 caveat（不静默吞掉）。
+
+        规则：
+        - product_name / category / snapshot_id 必须有合法值，否则跳过。
+        - source_url / image_url 缺失 → None（不伪造）；非法值 → None + caveat。
+        - price / price_min / price_max 必须非负数字，否则跳过。
+        - design_score 缺失保持 None；超出 0-10 置 None + caveat（不补 0、不伪造）。
+        - selling_points JSON 损坏 → [] + caveat。
+        - verification_status 非法 → unverified + caveat。
+        """
+        caveats: list[dict[str, Any]] = []
+
+        product_name = self._to_text(fields.get("product_name"))
+        category = self._to_text(fields.get("category"))
+        snapshot_id = self._to_text(fields.get("snapshot_id"))
+        if not product_name or not product_name.strip():
+            return None, [{"record_id": record_id, "field": "product_name", "reason": "product_name 缺失"}]
+        if not category or not category.strip():
+            return None, [{"record_id": record_id, "field": "category", "reason": "category 缺失"}]
+        if not snapshot_id or not snapshot_id.strip():
+            return None, [{"record_id": record_id, "field": "snapshot_id", "reason": "snapshot_id 缺失"}]
+
+        price = self._to_float(fields.get("price"))
+        price_min = self._to_float(fields.get("price_min"))
+        price_max = self._to_float(fields.get("price_max"))
+        for name, val in [("price", price), ("price_min", price_min), ("price_max", price_max)]:
+            if val is not None and val < 0:
+                return None, [{"record_id": record_id, "field": name, "reason": f"价格必须非负，收到 {val}"}]
+
+        design_score = self._to_float(fields.get("design_score"))
+        if design_score is not None and not (0 <= design_score <= 10):
+            caveats.append({"record_id": record_id, "field": "design_score",
+                            "reason": f"设计评分超出 0-10，收到 {design_score}，置为 None 待核验"})
+            design_score = None
+
+        selling_points = self._to_selling_points(fields.get("selling_points"))
+        if selling_points is None:
+            selling_points = []
+            caveats.append({"record_id": record_id, "field": "selling_points",
+                            "reason": "selling_points JSON 损坏，置为空列表"})
+
+        source_url = self._to_url(fields.get("source_url"))
+        if source_url is None and self._to_text(fields.get("source_url")) not in (None, ""):
+            caveats.append({"record_id": record_id, "field": "source_url", "reason": "source_url 非法，置为 None"})
+
+        verification_status = VerificationStatus.UNVERIFIED
+        raw_vs = self._to_text(fields.get("verification_status"))
+        if raw_vs:
+            try:
+                verification_status = VerificationStatus(raw_vs)
+            except ValueError:
+                caveats.append({"record_id": record_id, "field": "verification_status",
+                                "reason": f"非法 verification_status: {raw_vs!r}，置为 unverified"})
+
+        data = {
+            "competitor_id": self._to_text(fields.get("competitor_id")) or record_id,
+            "product_name": product_name,
+            "brand": self._to_text(fields.get("brand")),
+            "category": category,
+            "price": price,
+            "price_min": price_min,
+            "price_max": price_max,
+            "price_band": self._to_text(fields.get("price_band")),
+            "image_url": self._to_url(fields.get("image_url")),
+            "selling_points": selling_points,
+            "design_score": design_score,
+            "source_url": source_url,
+            "source_platform": self._to_text(fields.get("source_platform")),
+            "evidence_quote": self._to_text(fields.get("evidence_quote")),
+            "record_date": self._ms_to_date(fields.get("record_date")),
+            "snapshot_id": snapshot_id,
+            "ingested_at": self._ms_to_iso(fields.get("ingested_at")),
+            "verification_status": verification_status,
+        }
+        try:
+            return CompetitorRecord.model_validate(data), caveats
+        except ValidationError as e:
+            return None, caveats + [{"record_id": record_id, "field": None, "reason": str(e)}]
+
+    @staticmethod
+    def _to_selling_points(raw: Any) -> list[str] | None:
+        """飞书 selling_points 字段 → list[str]；JSON 损坏 → None（调用方置空 + caveat）"""
+        parsed = FeishuBaseProvider._to_json(FeishuBaseProvider._unwrap_text_list(raw))
+        if not isinstance(parsed, list):
+            return None
+        out: list[str] = []
+        for item in parsed:
+            if isinstance(item, str) and item.strip():
+                out.append(item.strip())
+            elif isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
+                out.append(item["text"].strip())
+        return out
+
+    def _fetch_competitor_records(self) -> list[CompetitorRecord]:
+        """page_token 游标拉取竞品表全量并转 CompetitorRecord（跳过非法、记 caveat；带请求级缓存）"""
+        if self._competitor_cache is not None:
+            return self._competitor_cache
+        if not self._competitor_table_id:
+            raise BaseUnavailable("飞书竞品表未配置：FEISHU_COMPETITOR_TABLE_ID")
+        self._ensure_config()
+        records: list[CompetitorRecord] = []
+        caveats: list[dict[str, Any]] = []
+        page_token: str | None = None
+        max_pages = 100
+        for _ in range(max_pages):
+            body: dict[str, Any] = {"limit": 500}
+            data = self._post(self._competitor_table_id, body, page_token=page_token)
+            for item in data.get("items", []):
+                record, cs = self._to_competitor_record(item.get("fields", {}), item.get("record_id", ""))
+                if record is not None:
+                    records.append(record)
+                caveats.extend(cs)
+            if not data.get("has_more"):
+                break
+            page_token = data.get("page_token")
+            if not page_token:
+                break
+        self._competitor_cache = records
+        self._caveats.extend(caveats)
+        return records
+
+    def get_competitor_records(self, category=None, snapshot_id=None, as_of=None) -> list[CompetitorRecord]:
+        """竞品表查询（只读）：category / snapshot_id / as_of 隔离过滤；缺配置 → BaseUnavailable"""
+        records = self._fetch_competitor_records()
+        filtered: list[CompetitorRecord] = []
+        for r in records:
+            if category is not None and r.category != category:
+                continue
+            if snapshot_id is not None and r.snapshot_id != snapshot_id:
+                continue
+            if as_of is not None and (not r.record_date or r.record_date > as_of):
+                continue
+            filtered.append(r)
+        return filtered
+
     @property
     def caveats(self) -> list[dict[str, Any]]:
         """最近一次拉取中被跳过的非法记录（结构化 caveat，供审计，不静默吞掉）"""
         return list(self._caveats)
 
     def clear_cache(self) -> None:
-        """清空明细/汇总表缓存与 caveat（下一次查询重新拉取飞书）"""
+        """清空明细/汇总/竞品表缓存与 caveat（下一次查询重新拉取飞书）"""
         self._records_cache = None
         self._summary_cache = None
+        self._competitor_cache = None
         self._caveats = []
 
 
@@ -761,6 +917,15 @@ class BaseDataAdapter:
             })
         return refs
 
+    def get_competitor_records(self, category=None, snapshot_id=None, as_of=None) -> list[CompetitorRecord]:
+        """竞品表只读查询（带缓存）：category / snapshot_id / as_of 隔离"""
+        key = self._cache_key("get_competitor_records", category=category, snapshot_id=snapshot_id, as_of=as_of)
+        if key in self._cache:
+            return self._cache[key]
+        result = self.provider.get_competitor_records(category, snapshot_id, as_of)
+        self._cache[key] = result
+        return result
+
     def clear_cache(self) -> None:
         self._cache.clear()
 
@@ -837,3 +1002,6 @@ class RestrictedQueryPort:
 
     def build_evidence_refs(self, records):
         return self._adapter.build_evidence_refs(records)
+
+    def get_competitor_records(self, category=None, snapshot_id=None, as_of=None):
+        return self._adapter.get_competitor_records(category, snapshot_id, as_of)

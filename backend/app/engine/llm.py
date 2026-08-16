@@ -108,6 +108,7 @@ def complete(
         client = openai.OpenAI(
             api_key=config["api_key"],
             base_url=config["base_url"],
+            timeout=int(os.getenv("LLM_TIMEOUT", "120")),
         )
         resp = client.chat.completions.create(
             model=config["model"],

@@ -412,7 +412,9 @@ function CompetitiveMap({ competitiveMap = {}, opportunityPool = [] }) {
       type: 'scatter', symbolSize: 18,
       itemStyle: { color: readCssVar('--color-action-primary'), opacity: 0.8 },
       label: { show: true, position: 'top', formatter: p => p.data[2], fontSize: 11 },
-      data: (competitiveMap.products || []).map(p => [p.price, p.design, p.name]),
+      data: (competitiveMap.products || [])
+        .filter(p => p.price != null && p.designScore != null)
+        .map(p => [p.price, p.designScore, p.name]),
       markArea: gapZone ? {
         itemStyle: { color: readCssVar('--chart-accent-fill') },
         label: { show: true, position: 'insideTop', color: readCssVar('--color-brand-accent'), fontSize: 11 },
@@ -536,6 +538,11 @@ function CompetitiveMap({ competitiveMap = {}, opportunityPool = [] }) {
               <b style={{ color: 'var(--color-brand-accent)' }}>价格×设计感空白（辅助）：</b>{gapZone.label}
             </Card>
           )}
+          {!gapZone?.label && competitiveMap.gapZoneNote ? (
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 12 }}>
+              {competitiveMap.gapZoneNote}
+            </div>
+          ) : null}
         </Col>
       </Row>
     </div>
@@ -556,8 +563,15 @@ function CompetitorGallery({ products = [] }) {
                 : <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg)', color: 'var(--color-text-muted)', fontSize: 12 }}>{p.name.slice(0, 2)}</div>
             }>
               <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
-              <div style={{ fontSize: 12, color: 'var(--color-brand-accent)' }}>¥{p.price} · 设计 {p.design}</div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4 }}>{p.sellingPoint || '—'}</div>
+              {p.brand && <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>{p.brand}</div>}
+              <div style={{ fontSize: 12, color: 'var(--color-brand-accent)' }}>¥{p.price} · 设计 {p.designScore != null ? p.designScore : '待核验'}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4 }}>{(p.sellingPoints || []).join('、') || p.sellingPoint || '—'}</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>{({ reviewed: '已核验', unverified: '待核验', rejected: '已拒绝' })[p.verificationStatus] || '待核验'}</div>
+              {p.sourceUrl ? (
+                <a href={p.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--color-brand-accent)' }}>查看来源</a>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>来源缺失</span>
+              )}
             </Card>
           </Col>
         ))}

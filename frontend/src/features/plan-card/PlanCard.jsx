@@ -34,6 +34,17 @@ const QUICK_SUGGESTIONS = [
 // 从「39-99 元」「69 元」里提取数字
 function nums(s) { return (s || '').match(/\d+(?:\.\d+)?/g)?.map(Number) || []; }
 
+// 值展示（数组/对象/空值统一为文本）
+function fmtVal(v) {
+  if (Array.isArray(v)) return v.join('、');
+  if (v && typeof v === 'object') return JSON.stringify(v);
+  return v === undefined || v === null || v === '' ? '(空)' : String(v);
+}
+function fmtTime(ts) {
+  if (!ts) return '';
+  try { return new Date(ts).toLocaleString('zh-CN', { hour12: false }); } catch { return ts; }
+}
+
 // 企划案六模块外壳（带顶部一句战略判断）
 function ModuleCard({ title, subtitle, judge, children }) {
   return (
@@ -184,17 +195,18 @@ function ProductProposalView({ proposal = {}, opportunity }) {
   );
 }
 
-export default function PlanCard({ card, proposal, opportunity, brief, status, isArchived, onGenerate, onRevise, onReview }) {
+export default function PlanCard({ card, proposal, opportunity, brief, status, isArchived, reviseDraft, planCardHistory, onGenerate, onRevise, onRevisePreview, onReviseApply, onReviseCancel, onReview }) {
   const [chats, setChats] = useState([]);
   const [reviewChats, setReviewChats] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [logDone, setLogDone] = useState(false);
   const chatEnd = useRef(null);
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }); }, [chats, reviewChats]);
 
-  // 改稿（仅 plan_card_ready）
+  // 改稿第一步：提交意见 → 生成草案（preview，不落盘正式数据）
   const sendRevise = async (text) => {
     const message = (text || input).trim();
     if (!message || sending || isArchived) return;
@@ -202,12 +214,43 @@ export default function PlanCard({ card, proposal, opportunity, brief, status, i
     setSending(true);
     setChats((cs) => [...cs, { role: 'user', text: message }]);
     try {
-      const data = await onRevise(message);
-      setChats((cs) => [...cs, { role: 'ai', text: data?.reply || '(无回复)' }]);
+      const data = await onRevisePreview(message);
+      setChats((cs) => [...cs, { role: 'ai', text: data?.reply || '已生成修改草案，请确认是否应用。' }]);
     } catch (e) {
-      setChats((cs) => [...cs, { role: 'ai', text: `改稿沟通失败：${e?.message || '请确认后端在线'}` }]);
+      setChats((cs) => [...cs, { role: 'ai', text: `生成修改草案失败：${e?.message || '请确认后端在线'}` }]);
     } finally {
       setSending(false);
+    }
+  };
+
+  // 改稿第二步：同意修改 → 二次校验成本/价格/schema 后正式应用，保存旧版本
+  const applyRevise = async () => {
+    if (applying || isArchived) return;
+    setApplying(true);
+    try {
+      await onReviseApply();
+      setChats((cs) => [...cs, { role: 'ai', text: '已应用本次修改，旧版本已存档。' }]);
+    } catch (e) {
+      setChats((cs) => [...cs, { role: 'ai', text: `应用修改失败：${e?.message || '请检查后端'}` }]);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  // 继续沟通：不应用，保留草案继续对话
+  const keepRevise = () => {
+    if (isArchived) return;
+    setChats((cs) => [...cs, { role: 'ai', text: '已暂缓应用，草案保留。可继续提新意见，或稍后点击「同意修改」。' }]);
+  };
+
+  // 取消：清除草案，不修改任何内容
+  const cancelRevise = async () => {
+    if (isArchived) return;
+    try {
+      await onReviseCancel();
+      setChats((cs) => [...cs, { role: 'ai', text: '已取消本次修改，企划案保持不变。' }]);
+    } catch (e) {
+      setChats((cs) => [...cs, { role: 'ai', text: `取消失败：${e?.message || '请检查后端'}` }]);
     }
   };
 
@@ -397,6 +440,43 @@ export default function PlanCard({ card, proposal, opportunity, brief, status, i
                 ))}
               </Space>
             </div>
+          )}
+
+          {planCardHistory && planCardHistory.length > 0 && (
+            <Card size="small" title="📚 企划卡版本历史" style={{ marginBottom: 12 }}>
+              <List size="small" split={false} dataSource={[...planCardHistory].reverse()} renderItem={(h) => (
+                <List.Item style={{ padding: '4px 0', border: 'none' }}>
+                  <Tag color="blue">v{h.version}</Tag>
+                  <span style={{ fontSize: 12 }}>{h.message || '修改企划卡'}</span>
+                  <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 'auto' }}>{fmtTime(h.applied_at)}</span>
+                </List.Item>
+              )} />
+            </Card>
+          )}
+
+          {reviseDraft && !isArchived && (
+            <Card size="small" style={{ marginBottom: 12, border: '1px solid var(--color-brand-accent)' }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>📋 修改草案（尚未应用）</div>
+              {reviseDraft.reply && <div style={{ fontSize: 13, marginBottom: 8 }}>{reviseDraft.reply}</div>}
+              {reviseDraft.changes && reviseDraft.changes.length > 0 ? (
+                <div>
+                  {reviseDraft.changes.map((ch, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, padding: '4px 0', borderBottom: '1px dashed var(--color-border)' }}>
+                      <span style={{ width: 72, flexShrink: 0, color: 'var(--color-text-muted)' }}>{ch.label}</span>
+                      <span style={{ textDecoration: 'line-through', color: 'var(--color-text-muted)', flex: 1 }}>{fmtVal(ch.before)}</span>
+                      <span style={{ color: 'var(--color-brand-accent)', flex: 1 }}>→ {fmtVal(ch.after)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Alert type="warning" message="草案为空，未识别到可修改字段" showIcon style={{ fontSize: 12 }} />
+              )}
+              <Space style={{ marginTop: 10 }} wrap>
+                <Button type="primary" size="small" loading={applying} onClick={applyRevise} disabled={!reviseDraft.changes || reviseDraft.changes.length === 0}>同意修改</Button>
+                <Button size="small" onClick={keepRevise} disabled={applying}>继续沟通</Button>
+                <Button size="small" onClick={cancelRevise} disabled={applying}>取消</Button>
+              </Space>
+            </Card>
           )}
 
           <Input.Search

@@ -13,10 +13,11 @@ adapter 管理方法；但 Python 反射可绕过，非进程级安全边界。
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
-from app.data.base_adapter import BaseQueryPort
+from app.data.base_adapter import BaseProviderError, BaseQueryPort, BaseUnavailable
 
 
 class _ReadView:
@@ -209,3 +210,168 @@ class RetroLedgerWriter:
         }
         self._ledger.append(entry)
         return entry
+
+
+class CompetitorDataView(_ReadView):
+    """竞品数据视图 — 只读商品级竞品表（base_competitors）
+
+    权限：只暴露竞品表查询与确定性聚合；不暴露 BaseDataAdapter / Feishu provider、
+    不访问其他 View、不调用 LLM、不生成缺失数据。
+
+    get_competitor_map 返回：
+    - products: 商品级真实记录（product_name/brand/price/selling_points/source_url/verification_status/designScore…）
+    - price_bands: 真实 price_band 或由合法 price 分桶
+    - selling_points: 真实结构化卖点 word 频次
+    - brands: 真实 brand 频次
+    - evidence_refs: 真实 source_url 证据引用
+    - gap_zone: 仅当有合法 design_score + price + 足够样本 + 明确规则时计算；否则 None + caveat
+    - caveats: 计算层面的说明（如样本不足、竞品表不可用）
+    """
+
+    _MIN_GAP_SAMPLES = 5  # 设计评分+价格有效样本下限，不足不计算竞品空白区
+
+    def get_competitor_map(self, category: str, as_of: str | None = None, snapshot_id: str | None = None) -> dict[str, Any]:
+        caveats: list[dict[str, Any]] = []
+        try:
+            records = self._port.get_competitor_records(category=category, snapshot_id=snapshot_id, as_of=as_of)
+        except (BaseUnavailable, BaseProviderError) as e:
+            # 竞品表不可用（未配置/网络/HTTP/权限）→ fail-closed，不返回 500、不伪造、不调用 LLM
+            return {
+                "products": [], "record_count": 0, "product_count": 0, "skipped_count": 0,
+                "price_bands": [], "selling_points": [], "brands": [], "evidence_refs": [],
+                "gap_zone": None, "caveats": [{"source": "competitors", "reason": f"竞品表不可用：{e!s}"}],
+            }
+        products, skipped_count = self._build_products(records)
+        if skipped_count:
+            caveats.append({"source": "competitors", "reason": f"{skipped_count} 条商品缺少价格，未进入商品卡"})
+        gap_zone, gap_caveat = self._build_gap_zone(records)
+        if gap_caveat:
+            caveats.append(gap_caveat)
+        return {
+            "products": products,
+            "record_count": len(records),
+            "product_count": len(products),
+            "skipped_count": skipped_count,
+            "price_bands": self._build_price_bands(records),
+            "selling_points": self._build_selling_points(records),
+            "brands": self._build_brands(records),
+            "evidence_refs": self._build_evidence_refs(records),
+            "gap_zone": gap_zone,
+            "caveats": caveats,
+        }
+
+    # ── 确定性计算（不伪造、不估算、不调 LLM）────────────────
+
+    def _build_products(self, records: list[Any]) -> tuple[list[dict[str, Any]], int]:
+        """商品卡构建：只保留 price 或 price_min 合法非负数字的商品；缺价格跳过（不补 0、不编造）。
+
+        返回 (products, skipped_count)。返回的商品卡 price 必为合法数字。
+        """
+        products = []
+        skipped = 0
+        for r in records:
+            price = r.price
+            if price is None and r.price_min is not None:
+                price = r.price_min
+            if price is None or price < 0:
+                skipped += 1
+                continue
+            products.append({
+                "name": r.product_name,
+                "brand": r.brand,
+                "price": price,
+                "priceMin": r.price_min,
+                "priceMax": r.price_max,
+                "priceBand": r.price_band,
+                "imageUrl": r.image_url,
+                "sellingPoints": list(r.selling_points or []),
+                "designScore": r.design_score,
+                "sourceUrl": r.source_url,
+                "sourcePlatform": r.source_platform,
+                "verificationStatus": r.verification_status.value,
+                "evidenceQuote": r.evidence_quote,
+            })
+        products.sort(key=lambda p: (p["price"] is None, p["price"] or 0))
+        return products, skipped
+
+    def _build_price_bands(self, records: list[Any]) -> list[dict[str, Any]]:
+        """优先真实 price_band；缺失时由合法 price 分桶；无合法价格跳过"""
+        bands: Counter[str] = Counter()
+        for r in records:
+            if r.price_band:
+                bands[r.price_band] += 1
+            elif r.price is not None:
+                bands[self._price_to_band(r.price)] += 1
+        total = sum(bands.values())
+        if not total:
+            return []
+        return [{"band": b, "count": c, "pct": round(c / total * 100, 1)} for b, c in bands.most_common()]
+
+    @staticmethod
+    def _price_to_band(price: float) -> str:
+        """确定性价格分桶（元）"""
+        if price < 30:
+            return "0-30"
+        if price < 60:
+            return "30-60"
+        if price < 100:
+            return "60-100"
+        return "100+"
+
+    def _build_selling_points(self, records: list[Any]) -> list[dict[str, Any]]:
+        """只统计 selling_points JSON 中真实存在的 word；无结构化卖点返回空"""
+        counter: Counter[str] = Counter()
+        for r in records:
+            for word in (r.selling_points or []):
+                counter[word] += 1
+        return [{"word": w, "count": c} for w, c in counter.most_common()]
+
+    def _build_brands(self, records: list[Any]) -> list[dict[str, Any]]:
+        """统计真实 brand；空品牌跳过（不把 keyword 当 brand）"""
+        counter: Counter[str] = Counter()
+        for r in records:
+            if r.brand:
+                counter[r.brand] += 1
+        return [{"brand": b, "count": c} for b, c in counter.most_common()]
+
+    def _build_evidence_refs(self, records: list[Any]) -> list[dict[str, str]]:
+        refs = []
+        for r in records:
+            if r.source_url:
+                refs.append({"url": r.source_url, "title": r.product_name,
+                             "snippet": (r.evidence_quote or "")[:200]})
+        return refs
+
+    def _build_gap_zone(self, records: list[Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """竞品空白区：仅当有合法 design_score + price + 足够样本 + 明确规则时计算。
+
+        规则（确定性）：以价格中位数 P50、设计评分中位数 D50 划分四象限，
+        样本最稀少的象限作为机会区；样本不足 _MIN_GAP_SAMPLES → None + caveat。
+        """
+        valid = [(r.price, r.design_score) for r in records
+                 if r.price is not None and r.design_score is not None]
+        if len(valid) < self._MIN_GAP_SAMPLES:
+            return None, {"source": "competitors", "reason": "设计评分或价格样本不足，暂不计算竞品空白区"}
+        prices = sorted(v[0] for v in valid)
+        designs = sorted(v[1] for v in valid)
+        p50 = prices[len(prices) // 2]
+        d50 = designs[len(designs) // 2]
+        quads: Counter[str] = Counter()
+        for price, design in valid:
+            quads[("H" if price >= p50 else "L") + ("H" if design >= d50 else "L")] += 1
+        sparse = min(quads, key=quads.get)
+        p_lo, p_hi = min(prices), max(prices)
+        d_lo, d_hi = min(designs), max(designs)
+        if sparse == "LL":
+            x, y = [p_lo, p50], [d_lo, d50]
+            label = "低价格 × 低设计机会"
+        elif sparse == "HL":
+            x, y = [p50, p_hi], [d_lo, d50]
+            label = "高价格 × 低设计（改进空间）"
+        elif sparse == "LH":
+            x, y = [p_lo, p50], [d50, d_hi]
+            label = "低价格 × 高设计（性价比机会）"
+        else:  # HH
+            x, y = [p50, p_hi], [d50, d_hi]
+            label = "高价格 × 高设计机会"
+        return {"x": [round(x[0], 1), round(x[1], 1)], "y": [round(y[0], 1), round(y[1], 1)], "label": label}, None

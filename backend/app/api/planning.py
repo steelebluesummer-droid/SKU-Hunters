@@ -142,16 +142,17 @@ async def delete_plan(plan_id: str):
 async def get_insights(plan_id: str):
     plan = _get_plan_or_404(plan_id)
     try:
-        return {"plan_id": plan_id, **pipeline.get_insights(plan)}
+        insights = await asyncio.to_thread(pipeline.get_insights, plan)
     except LLMGenerationError as e:
         raise _llm_generation_error(e) from e
+    return {"plan_id": plan_id, **insights}
 
 
 @router.get("/plans/{plan_id}/opportunities")
 async def get_opportunities(plan_id: str):
     plan = _get_plan_or_404(plan_id)
     try:
-        opportunities = pipeline.get_opportunities(plan)
+        opportunities = await asyncio.to_thread(pipeline.get_opportunities, plan)
     except LLMGenerationError as e:
         raise _llm_generation_error(e) from e
     return {
@@ -194,11 +195,13 @@ async def advance_plan(plan_id: str, payload: dict):
 async def action_generate_insights(plan_id: str):
     plan = _get_plan_or_404(plan_id)
     try:
-        insights = pipeline.generate_insights(plan)
+        insights = await asyncio.to_thread(pipeline.generate_insights, plan)
     except StateTransitionError as e:
         raise _state_transition_error(e) from e
     except LLMGenerationError as e:
         raise _llm_generation_error(e) from e
+    except (BaseUnavailable, BaseProviderError) as e:
+        raise HTTPException(503, detail={"error": {"code": "BASE_UNAVAILABLE", "message": str(e)}}) from e
     return {"plan_id": plan_id, "status": plan["status"], "insights": insights}
 
 
@@ -206,11 +209,13 @@ async def action_generate_insights(plan_id: str):
 async def action_generate_opportunities(plan_id: str):
     plan = _get_plan_or_404(plan_id)
     try:
-        opportunities = pipeline.generate_opportunities(plan)
+        opportunities = await asyncio.to_thread(pipeline.generate_opportunities, plan)
     except StateTransitionError as e:
         raise _state_transition_error(e) from e
     except LLMGenerationError as e:
         raise _llm_generation_error(e) from e
+    except (BaseUnavailable, BaseProviderError) as e:
+        raise HTTPException(503, detail={"error": {"code": "BASE_UNAVAILABLE", "message": str(e)}}) from e
     return {
         "plan_id": plan_id,
         "status": plan["status"],
@@ -238,6 +243,16 @@ async def action_generate_plan_card(plan_id: str, payload: dict):
     return {"plan_id": plan_id, "status": plan["status"], "plan_card": card,
             "product_proposal": plan.get("product_proposal")}
 
+
+@router.post("/plans/{plan_id}/actions/rechoose-opportunity")
+async def action_rechoose_opportunity(plan_id: str):
+    """返回换方向：plan_card_ready → opportunities_ready（清除已选方向与企划产物）"""
+    plan = _get_plan_or_404(plan_id)
+    try:
+        plan = await asyncio.to_thread(pipeline.rechoose_opportunity, plan)
+    except StateTransitionError as e:
+        raise _state_transition_error(e) from e
+    return {"plan_id": plan_id, "status": plan["status"]}
 
 @router.post("/plans/{plan_id}/actions/archive")
 async def action_archive(plan_id: str, background_tasks: BackgroundTasks):
@@ -283,6 +298,43 @@ async def revise_plan(plan_id: str, payload: dict):
         return {"plan_id": plan_id, **result}
     except StateTransitionError as e:
         raise _state_transition_error(e)
+
+
+@router.post("/plans/{plan_id}/revise/preview")
+async def revise_preview(plan_id: str, payload: dict):
+    """改稿草案：生成拟修改内容，不落盘正式数据（preview）"""
+    plan = _get_plan_or_404(plan_id)
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(422, detail={"error": {"code": "MESSAGE_REQUIRED", "message": "message 必填"}})
+    if plan.get("plan_card") is None:
+        raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": "请先生成企划卡"}})
+    try:
+        result = await asyncio.to_thread(pipeline.revise_preview, plan, message)
+        return {"plan_id": plan_id, **result}
+    except StateTransitionError as e:
+        raise _state_transition_error(e) from e
+
+
+@router.post("/plans/{plan_id}/revise/apply")
+async def revise_apply(plan_id: str):
+    """确认应用修改：二次校验成本/价格/schema，通过后更新企划卡并保存旧版本"""
+    plan = _get_plan_or_404(plan_id)
+    try:
+        result = await asyncio.to_thread(pipeline.revise_apply, plan)
+        return {"plan_id": plan_id, **result}
+    except StateTransitionError as e:
+        raise _state_transition_error(e) from e
+    except ValueError as e:
+        raise HTTPException(409, detail={"error": {"code": "NO_REVISE_DRAFT", "message": str(e)}}) from e
+
+
+@router.post("/plans/{plan_id}/revise/cancel")
+async def revise_cancel(plan_id: str):
+    """取消本次改稿：清除草案，不修改任何内容"""
+    plan = _get_plan_or_404(plan_id)
+    result = await asyncio.to_thread(pipeline.revise_cancel, plan)
+    return {"plan_id": plan_id, **result}
 
 
 def _run_archive_hooks(plan: dict[str, Any]) -> None:

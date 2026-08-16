@@ -229,3 +229,55 @@ Stage 9A 的 `FeishuBaseProvider` 用了三枚环境变量，其中两枚的语�
 
 > 门禁已通过（2026-08-14）。进入 Stage 9B 第 2 步「实现只读 Feishu Provider」。
 > 注意：真实字段名与真实 `app_token`/`table_id` 尚未核对，Provider 必须继续 fail-closed，只做 Mock API 测试。
+
+
+---
+
+## 十一、商品级竞品表（base_competitors）
+
+> Stage：竞品分析接入（商品级竞品数据）。用于 `competitiveMap`，与 `base_records`（采集明细）严格区分。
+
+### 11.1 配置
+
+| 环境变量 | 说明 |
+|---------|------|
+| `FEISHU_COMPETITOR_TABLE_ID` | 商品级竞品表 `base_competitors` 的 table_id |
+
+同一 `FEISHU_BASE_APP_TOKEN` 下新建，认证复用 `FeishuAuth`。**只从环境变量读取，不硬编码。**
+
+### 11.2 字段映射（CompetitorRecord ↔ 飞书字段）
+
+| CompetitorRecord | 飞书字段 | 规则 |
+|-----------------|---------|------|
+| `competitor_id` | competitor_id | 缺失用 record_id |
+| `product_name` | product_name | **必填非空**，否则跳过+caveat |
+| `brand` | brand | 可空；空品牌不在 brands 统计 |
+| `category` | category | **必填**，按品类过滤，风扇/雨伞不混用 |
+| `price` / `price_min` / `price_max` | 同名 | 必须非负，非法跳过+caveat |
+| `price_band` | price_band | 优先用真实值，缺失按 price 分桶 |
+| `image_url` / `source_url` | 同名 | 缺失→None（不伪造）；非法 http → None |
+| `selling_points` | selling_points(JSON) | 损坏→[]+caveat |
+| `design_score` | design_score | 缺失→None（不补0）；超出 0-10 → None+caveat |
+| `source_platform` / `evidence_quote` / `record_date` / `ingested_at` | 同名 | 透传 |
+| `snapshot_id` | snapshot_id | **必填**，支持快照隔离 |
+| `verification_status` | verification_status | 仅 unverified/reviewed/rejected；非法→unverified+caveat |
+
+### 11.3 读取与隔离
+
+- `get_competitor_records(category, snapshot_id, as_of)`：只读，沿用分页/缓存/HTTP错误/飞书 code 错误处理。
+- 支持 `snapshot_id` / `as_of`（record_date <= as_of）隔离。
+- **缺 `FEISHU_COMPETITOR_TABLE_ID` → `BaseUnavailable`（fail-closed）**，不伪造、不调 LLM。
+
+### 11.4 竞品分析规则（确定性，不调 LLM）
+
+- `products`：真实 product_name/brand/price/selling_points/source_url/verification_status；按 category+snapshot 过滤，按 price 排序。
+- `price_bands`：优先真实 price_band，缺失由合法 price 分桶（0-30/30-60/60-100/100+）。
+- `selling_points`：只统计 selling_points JSON 真实 word；不从 summary 截取。
+- `brands`：真实 brand 统计；空品牌跳过。
+- `gap_zone`：仅当有合法 design_score + price + 样本>=5 + 明确规则时计算；否则 `None` + caveat「设计评分或价格样本不足，暂不计算竞品空白区」。
+
+### 11.5 降级路径
+
+商品级竞品表缺失或无匹配时：`competitiveMap` 保留 base_records 明细样本，processLog 明确标注
+「商品级竞品表暂无匹配，当前仅展示 Base 明细样本；设计评分不伪造」，`design_score` 不伪造、`gapZone` 保持 `None`，
+**不回退 Mock / fixture / LLM**；`dataSource` 仍为 `feishu`。
