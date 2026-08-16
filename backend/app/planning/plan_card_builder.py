@@ -16,7 +16,7 @@ from typing import Any
 
 from app.planning.cost_rules import cost_check
 from app.planning.insight_resolver import LLMGenerationError, _parse_llm_json
-from app.planning.repository import _snake_keys
+from app.planning.repository import _snake_keys, localize_concept_image
 from app.schemas.planning import PlanCard, ProductProposal
 from app.services import jimeng
 
@@ -297,6 +297,7 @@ def _build_product_proposal(plan: dict, opportunity: dict) -> dict:
         f"{opportunity.get('scenario', '')}场景，产品设计渲染图，名创优品风格，柔光高质感"
     )
     image_url = jimeng.generate_concept_image(prompt=image_prompt, fallback=None)
+    image_url = localize_concept_image(plan["plan_id"], image_url)
 
     check = cost_check({"pricing": {"price": f"{price:g} 元"}}, cost_limit)
 

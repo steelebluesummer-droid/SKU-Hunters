@@ -171,22 +171,59 @@ def plan_write_lock(plan_id: str):
         yield
 
 
+# ── 概念图本地化 ─────────────────────────────────────────
+_CONCEPTS_DIR = Path(__file__).resolve().parents[2] / "data" / "evidence" / "images" / "concepts"
+
+
+def localize_concept_image(plan_id: str, concept_image: str) -> str:
+    """概念图本地化：即梦临时 URL → 本地 concepts 目录，返回本地路径
+
+    即梦 URL 带 x-expires 签名会过期，落本地永久有效；前端 <img src> 直接读返回值。
+    已是本地路径（/evidence/、/assets/）或空 → 原样返回；下载失败 → 降级原 URL。
+    """
+    if not concept_image or concept_image.startswith(("/evidence/", "/assets/")):
+        return concept_image
+    local_file = _CONCEPTS_DIR / f"concept_{plan_id}.png"
+    if local_file.is_file():
+        return f"/evidence/concepts/concept_{plan_id}.png"
+    try:
+        import urllib.request
+
+        _CONCEPTS_DIR.mkdir(parents=True, exist_ok=True)
+        req = urllib.request.Request(concept_image, headers={"User-Agent": "Mozilla/5.0"})
+        data = urllib.request.urlopen(req, timeout=20).read()
+        if not data:
+            return concept_image
+        local_file.write_bytes(data)
+        return f"/evidence/concepts/concept_{plan_id}.png"
+    except Exception:
+        return concept_image
+
+
 def list_plans() -> list[dict[str, Any]]:
     with _lock:
         plans = [_PLANS[k] for k in _PLANS if not (k == "demo" and is_demo_hidden())]
         plans = sorted(plans, key=lambda p: p["created_at"], reverse=True)
-    summaries = [
-        PlanSummaryV2(
-            plan_id=p["plan_id"],
-            theme=p["brief"].get("theme", ""),
-            category=p["brief"].get("category", ""),
-            audience=p["brief"].get("audience", ""),
-            status=p["status"],
-            created_at=p["created_at"],
-            mode=p["mode"],
+    summaries = []
+    for p in plans:
+        card = p.get("plan_card") or {}
+        pp = p.get("product_proposal") or {}
+        # 封面图以企划案（product_proposal.design.imageUrl）为准，无则回退企划卡 conceptImage
+        concept_img = (pp.get("design") or {}).get("imageUrl", "") or card.get("conceptImage", "")
+        summaries.append(
+            PlanSummaryV2(
+                plan_id=p["plan_id"],
+                theme=p["brief"].get("theme", ""),
+                category=p["brief"].get("category", ""),
+                audience=p["brief"].get("audience", ""),
+                status=p["status"],
+                created_at=p["created_at"],
+                mode=p["mode"],
+                concept_image=localize_concept_image(p["plan_id"], concept_img),
+                price=(card.get("pricing") or {}).get("price", ""),
+                margin=(card.get("costCheck") or {}).get("margin"),
+            )
         )
-        for p in plans
-    ]
     return [s.model_dump() for s in summaries]
 
 

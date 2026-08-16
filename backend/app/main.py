@@ -104,6 +104,13 @@ class SPAStaticFiles(StaticFiles):
             raise
 
 
+
+# 竞品图片本地托管：/evidence/competitors/xxx.jpg → backend/data/evidence/images/competitors/
+# 外链图床（品牌官网/电商CDN）404/防盗链不可控，演示用图片统一落本地由后端服务。
+_EVIDENCE_IMAGES = Path(__file__).resolve().parents[1] / "data" / "evidence" / "images"
+if _EVIDENCE_IMAGES.is_dir():
+    app.mount("/evidence", StaticFiles(directory=_EVIDENCE_IMAGES), name="evidence")
+
 if _DIST.is_dir():
     app.mount("/", SPAStaticFiles(directory=_DIST, html=True), name="frontend")
 

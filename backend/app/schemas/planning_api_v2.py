@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 
 class PlanSummaryV2(BaseModel):
-    """企划任务列表项 v2（含数据来源 mode）"""
+    """企划任务列表项 v2（含数据来源 mode 与企划卡摘要）"""
 
     plan_id: str
     theme: str = ""
@@ -25,6 +25,9 @@ class PlanSummaryV2(BaseModel):
     status: str = ""      # brief_locked → insights_ready → opportunities_ready → plan_card_ready → archived
     created_at: str = ""
     mode: str = ""        # fixture | live | snapshot | demo（空串表示未知）
+    concept_image: str = ""       # 企划卡概念图（即梦/冻结图）；未出企划卡为空
+    price: str = ""               # 定价（如 "59 元"）；未出企划卡为空
+    margin: float | None = None   # 毛利率（0-1）；未出企划卡或无成本校验为 None
 
 
 class PlanListResponseV2(BaseModel):
