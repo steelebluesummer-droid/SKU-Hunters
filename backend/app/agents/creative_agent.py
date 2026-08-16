@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from typing import Any
 
@@ -20,6 +19,7 @@ from app.agents.base_agent import BaseAgent
 from app.agents.creative_contract import ContractError, validate_proposals
 from app.agents.mock_agents import MockCreativeAgent
 from app.engine.ledger import format_analogs
+from app.engine.strict_mode import require_mock_allowed, resolve_provider
 from app.schemas import ProposalSet, SourceRef
 
 # 预算带 → 建议价格带（名创优品实际价位段）
@@ -120,7 +120,8 @@ class CreativeAgent(BaseAgent):
                 break
         if last_error is not None:
             raise last_error  # 重试仍失败 → 明确 ContractError
-        # 降级 Mock：Mock 产物也必须通过契约校验（只有输出契约合法才允许降级）
+        # 降级 Mock：仅非严格模式可达；严格模式在此阻断（LLM 失败即抛错）
+        require_mock_allowed("创意官 LLM 故障回退 Mock")
         mock_result = await MockCreativeAgent().run(context)
         validate_proposals(
             mock_result.get("proposals", []),
@@ -218,8 +219,7 @@ def get_creative_agent_class() -> type[BaseAgent]:
     """注册表切换：默认 MockCreativeAgent（离线/确定/快）；
     设 CREATIVE_AGENT_PROVIDER=real 时返回真 CreativeAgent（LLM 故障时内部回退 Mock）。
     """
-    provider = (os.getenv("CREATIVE_AGENT_PROVIDER")
-                or os.getenv("AGENT_PROVIDER", "mock")).strip().lower()
+    provider = resolve_provider("创意官", "CREATIVE_AGENT_PROVIDER")
     if provider == "real":
         return CreativeAgent
     return MockCreativeAgent

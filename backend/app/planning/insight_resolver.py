@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,45 @@ def _resolve_insight_bundle(category: str, brief: dict | None = None) -> dict[st
     Raises:
         LLMGenerationError: 无采集数据且 LLM 不可用/输出不合契约
     """
+    brief = brief or {}
+    if brief.get("mode") == "live":
+        # live 任务：只允许 feishu，失败显式报错；拒绝静默回退 fixture/crawled/llm
+        provider = os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower()
+        if provider != "feishu":
+            raise LLMGenerationError(
+                f"live 任务「{category}」要求 feishu 数据源，但 BASE_PROVIDER_MODE={provider}，拒绝回退 fixture/crawled/llm"
+            )
+        from app.planning.live_insights import build_live_insight_bundle
+
+        try:
+            return build_live_insight_bundle(category, brief)
+        except Exception as exc:
+            raise LLMGenerationError(f"品类「{category}」的飞书实时洞察不可用：{exc}") from exc
+
+    if brief.get("mode") == "fixture":
+        # fixture 任务：显式返回演示数据（冻结 fixtures 五看洞察），标 dataSource=fixture
+        # 禁止 mode=fixture 却携带 dataSource=crawled/llm 的混合状态
+        from app.planning.fixtures import (
+            COMPETITIVE_MAP,
+            CONSUMER_VOICE,
+            INSIGHT_BASE,
+            TREND_GALLERY,
+            TREND_RADAR,
+        )
+
+        return {
+            "trendRadar": {
+                **TREND_RADAR,
+                "heatCurve": _load_heat_curve(),
+                "processLog": ["演示数据（fixture）：冻结 fixtures.py 五看洞察，非真实采集"],
+            },
+            "consumerVoice": CONSUMER_VOICE,
+            "competitiveMap": COMPETITIVE_MAP,
+            "insightBase": INSIGHT_BASE,
+            "trendGallery": TREND_GALLERY,
+            "dataSource": "fixture",
+        }
+
     try:
         from app.insights.loaders.social_evidence import SocialEvidenceLoader
         bundle = SocialEvidenceLoader().get_insight_bundle(category)

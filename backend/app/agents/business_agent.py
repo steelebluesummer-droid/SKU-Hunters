@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
@@ -30,10 +29,10 @@ from app.agents.real_common import (
     fuzzy_get,
     min_confidence,
     parse_llm_json,
-    provider_enabled,
 )
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
 from app.engine.ledger import format_analogs
+from app.engine.strict_mode import require_mock_allowed, resolve_provider
 from app.schemas import (
     Confidence,
     DimensionScore,
@@ -351,6 +350,7 @@ class BusinessAgent(BaseAgent):
                 return result
         except Exception:  # noqa: BLE001,S110 — 降级纪律：任何故障回退 Mock
             pass
+        require_mock_allowed("商业官 LLM/数据故障回退 Mock")
         return await MockBusinessAgent().run(context)
 
     def _generate(self, context: dict[str, Any]) -> dict[str, Any] | None:
@@ -493,8 +493,9 @@ def get_business_agent_class() -> type[BaseAgent]:
       （LLM 评审打分，LLM/数据故障时内部回退 Mock）
     注意：注册表在 import 时求值，env 必须在进程启动前设置。
     """
-    if provider_enabled("BUSINESS_AGENT_PROVIDER"):
+    provider = resolve_provider("商业官", "BUSINESS_AGENT_PROVIDER", ("real", "deterministic"))
+    if provider == "real":
         return BusinessAgent
-    if os.getenv("BUSINESS_AGENT_PROVIDER", "").strip().lower() == "deterministic":
+    if provider == "deterministic":
         return BusinessEvaluationAgent
     return MockBusinessAgent

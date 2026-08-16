@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.engine import llm
+from app.engine.strict_mode import is_demo_hidden
 from app.planning import fixtures
 from app.planning.insight_resolver import _resolve_insight_bundle
 from app.planning.opportunity_discovery import build_opportunity_pool
@@ -178,6 +179,30 @@ def get_insights(plan: dict[str, Any], advance: bool = False) -> dict[str, Any]:
     return bundle
 
 
+def _build_plan_data_context(plan: dict[str, Any], bundle: dict[str, Any]) -> dict[str, Any]:
+    """按任务 mode 构造并写入 data_context（live→feishu，fixture→fixture）"""
+    from datetime import datetime, timezone
+
+    from app.engine.task_data_context import build_fixture_context, build_live_context
+
+    plan_id = plan["plan_id"]
+    brief_mode = plan["brief"].get("mode", plan.get("mode", "fixture"))
+    now = datetime.now(timezone.utc).isoformat()
+    if brief_mode == "live":
+        dc = bundle.get("dataContext") or {}
+        ctx = build_live_context(
+            plan_id=plan_id,
+            record_count=dc.get("record_count", 0),
+            evidence_count=dc.get("evidence_count", 0),
+            snapshot_ids=[dc.get("snapshot_id", "")],
+            generated_at=dc.get("generated_at") or now,
+        )
+    else:
+        ctx = build_fixture_context(plan_id, now)
+    plan["data_context"] = ctx.to_dict()
+    return plan["data_context"]
+
+
 def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
     """原子业务动作：生成洞察，成功才推进状态并持久化（失败状态与产物不变）
 
@@ -194,6 +219,7 @@ def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
         _ensure_asset_fit(plan, bundle)
         _ = InsightBundle.model_validate(_snake_keys(bundle))
         plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
+        _build_plan_data_context(plan, bundle)
         plan["status"] = "insights_ready"
         _save_state()
     return bundle
@@ -373,6 +399,8 @@ def seed_demo() -> None:
         if "demo" in _PLANS:
             return
 
+    if is_demo_hidden():
+        return  # 严格模式不预置演示任务（已有持久化 demo 已在上方恢复，且 API 层隐藏）
     _PLANS["demo"] = {
         "plan_id": "demo",
         # 与 create_plan 同路径归一化：camelCase fixtures → snake_case brief

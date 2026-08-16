@@ -8,7 +8,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-from app.data.base_adapter import BaseProviderError, BaseUnavailable, FeishuBaseProvider
+
+from app.data.base_adapter import (
+    BaseProviderError,
+    BaseUnavailable,
+    FeishuBaseProvider,
+    category_matches,
+    normalize_category,
+)
 from app.schemas.base_data import BasePlatform
 
 
@@ -457,3 +464,145 @@ def test_summary_avg_heat_normalized(monkeypatch):
     provider = _provider_with(monkeypatch, responder)
     summary = provider.get_summary(category="便携小风扇", snapshot_id="snap-A")
     assert 0.0 <= summary["avg_heat_index"] <= 100.0  # 归一化到 0-100
+
+
+# ── 汇总表 pain_points / scenes 解析 ──────────────────────────
+
+def test_summary_pain_points_scenes_json_text(monkeypatch):
+    """汇总行 pain_points/scenes 为 JSON 文本字符串 → 正确解析为 list[dict]"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                pain_points='[{"text": "噪音大", "count": 5}, {"text": "续航短", "count": 3}]',
+                scenes='[{"name": "桌面办公", "value": 8}, {"name": "户外通勤", "value": 6}]',
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="小风扇", snapshot_id="snap-A")
+    assert summary["pain_points"] == [
+        {"text": "噪音大", "count": 5.0}, {"text": "续航短", "count": 3.0},
+    ]
+    assert summary["scenes"] == [
+        {"name": "桌面办公", "value": 8.0}, {"name": "户外通勤", "value": 6.0},
+    ]
+
+def test_summary_pain_points_scenes_text_list(monkeypatch):
+    """pain_points/scenes 为飞书文本列表字段（[{"text": ..., "type": "text"}]）也可解析"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                pain_points=[{"text": '[{"text": "噪音大", "count": 5}]', "type": "text"}],
+                scenes=[{"text": '[{"name": "桌面办公", "value": 8}]', "type": "text"}],
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="小风扇", snapshot_id="snap-A")
+    assert summary["pain_points"] == [{"text": "噪音大", "count": 5.0}]
+    assert summary["scenes"] == [{"name": "桌面办公", "value": 8.0}]
+
+def test_summary_pain_points_scenes_missing(monkeypatch):
+    """pain_points/scenes 字段缺失 → []，不伪造"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                # 缺 pain_points / scenes
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="小风扇", snapshot_id="snap-A")
+    assert summary["pain_points"] == []
+    assert summary["scenes"] == []
+
+def test_summary_pain_points_scenes_broken_json(monkeypatch):
+    """pain_points/scenes 为损坏 JSON / dict / 普通字符串 → []，不抛异常"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                pain_points='{broken json',        # 损坏 JSON
+                scenes='{"not": "a list"}',         # dict，非 list
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="小风扇", snapshot_id="snap-A")
+    assert summary["pain_points"] == []
+    assert summary["scenes"] == []
+
+def test_summary_pain_points_scenes_invalid_entries_skipped(monkeypatch):
+    """非法条目（非 dict / 空 text / 无 count / 负 count / 不可转 float）跳过且不抛异常"""
+    def responder(url, body):
+        if "/tbl-summary/" in url:
+            return _resp([_record(
+                record_id="s1",
+                category=[{"text": "小风扇", "type": "text"}],
+                snapshot_id=[{"text": "snap-A", "type": "text"}],
+                pain_points='['
+                    '{"text": "有效痛点", "count": 3},'
+                    '"not-a-dict",'
+                    '{"text": "  ", "count": 1},'        # 空白 text
+                    '{"count": 2},'                       # 缺 text
+                    '{"text": "缺count"},'                # 缺 count
+                    '{"text": "负count", "count": -1},'   # 负 count
+                    '{"text": "坏count", "count": "abc"}' # count 不可转 float
+                    ']',
+                scenes='['
+                    '{"name": "有效场景", "value": 8},'
+                    '{"name": "负value", "value": -2},'
+                    '{"name": "坏value", "value": "xyz"}'
+                    ']',
+            )])
+        return _resp([])
+
+    provider = _provider_with(monkeypatch, responder)
+    summary = provider.get_summary(category="小风扇", snapshot_id="snap-A")
+    assert summary["pain_points"] == [{"text": "有效痛点", "count": 3.0}]
+    assert summary["scenes"] == [{"name": "有效场景", "value": 8.0}]
+
+
+# ── 企划品类归一化与父品类匹配 ──────────────────────────
+
+def test_normalize_category_maps_fan_subcategories_to_parent():
+    """含「扇」的子品类（含旧任务名「小风扇」）统一归一化为父品类「风扇」"""
+    assert normalize_category("小风扇") == "风扇"
+    assert normalize_category("便携小风扇") == "风扇"
+    assert normalize_category("手持小风扇") == "风扇"
+    assert normalize_category("桌面风扇") == "风扇"
+    assert normalize_category("塔扇") == "风扇"
+    assert normalize_category("循环扇") == "风扇"
+    assert normalize_category("风扇") == "风扇"
+
+def test_normalize_category_keeps_non_fan_categories():
+    """不含「扇」的品类（雨伞/香薰）原样返回，不归入风扇"""
+    assert normalize_category("雨伞") == "雨伞"
+    assert normalize_category("香薰") == "香薰"
+    assert normalize_category("") == ""
+    assert normalize_category(None) is None
+
+def test_category_matches_fan_parent_substring_rule():
+    """父品类「风扇」按子串规则匹配：明细 category 含「扇」即匹配"""
+    assert category_matches("便携小风扇", "风扇") is True
+    assert category_matches("落地扇", "风扇") is True
+    assert category_matches("塔扇", "风扇") is True
+    assert category_matches("循环扇", "风扇") is True
+    assert category_matches("雨伞", "风扇") is False  # 不含「扇」不混入
+
+def test_category_matches_exact_for_normal_categories():
+    """普通品类等值匹配，不混入子串"""
+    assert category_matches("雨伞", "雨伞") is True
+    assert category_matches("香薰", "雨伞") is False
+    assert category_matches("雨伞", None) is True

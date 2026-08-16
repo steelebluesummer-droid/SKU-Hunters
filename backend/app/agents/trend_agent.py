@@ -26,6 +26,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+from app.engine.strict_mode import resolve_provider
+
 from ..data.bilibili_hot import BilibiliConnector
 from ..data.errors import ConnectorFetchError
 from ..data.google_trends import GoogleTrendsConnector
@@ -415,8 +417,7 @@ def get_trend_agent_class() -> type[BaseAgent]:
     设 TREND_AGENT_PROVIDER=real 时返回本真实 TrendAgent。
     Mock 作为可回退实现保留，不删除。
     """
-    provider = (os.getenv("TREND_AGENT_PROVIDER")
-                or os.getenv("AGENT_PROVIDER", "mock")).strip().lower()
+    provider = resolve_provider("趋势官", "TREND_AGENT_PROVIDER")
     if provider == "real":
         return TrendAgent
     from .mock_agents import MockTrendAgent
