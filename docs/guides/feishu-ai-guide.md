@@ -1,7 +1,7 @@
 # 飞书 AI 联动方案（v2 · AI 新品企划工作室）
 
 > 本文档替代 v1 评审会口径。v1 中的"七委员圆桌""Aily 编排委员会流程"等内容已废弃，
-> 现有编排逻辑在 LangGraph pipeline 中实现（`backend/app/planning/pipeline.py`），飞书侧不重复建设。
+> 现有编排逻辑在六步状态机 pipeline 中实现（`backend/app/planning/pipeline.py`），飞书侧不重复建设。
 > 字段事实以 `backend/app/schemas/planning.py` 与 `backend/app/api/planning.py` 为准。
 
 ## 一、核心定位
