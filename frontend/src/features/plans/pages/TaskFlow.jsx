@@ -16,6 +16,7 @@ import { ArrowLeftOutlined } from '@ant-design/icons';
 
 // 洞察驾驶舱含 ECharts，属实测重模块，按已批准方案做流程内二级懒加载
 const InsightCockpit = lazy(() => import('../../insights/InsightCockpit'));
+const InsightGeneratingSteps = lazy(() => import('../../insights/InsightGeneratingSteps'));
 import OpportunityCards from '../../opportunities/OpportunityCards';
 import PlanCard from '../../plan-card/PlanCard';
 import StateCard from '../../../shared/components/StateCard';
@@ -174,6 +175,11 @@ export default function TaskFlow() {
           >
             确认约束，开始洞察分析
           </Button>
+          {ws.pendingAction === 'insights' && (
+            <Suspense fallback={null}>
+              <InsightGeneratingSteps />
+            </Suspense>
+          )}
         </Card>
       )}
 

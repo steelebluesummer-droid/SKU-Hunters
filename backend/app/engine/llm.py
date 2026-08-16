@@ -102,27 +102,37 @@ def complete(
     if config is None:
         return None
 
+    timeout = float(os.getenv("LLM_TIMEOUT", "45"))
+    max_retries = int(os.getenv("LLM_MAX_RETRIES", "1"))
     try:
         import openai
-
-        client = openai.OpenAI(
-            api_key=config["api_key"],
-            base_url=config["base_url"],
-            timeout=int(os.getenv("LLM_TIMEOUT", "120")),
-        )
-        resp = client.chat.completions.create(
-            model=config["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": cap_user_prompt(user_prompt)},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return resp.choices[0].message.content
-    except Exception:  # noqa: BLE001 — LLM 故障刻意降级，不阻塞会议
-        # 降级纪律：LLM 故障不阻塞会议，规则引擎兜底
+    except ImportError:  # pragma: no cover
         return None
+
+    for attempt in range(max_retries + 1):
+        try:
+            client = openai.OpenAI(
+                api_key=config["api_key"],
+                base_url=config["base_url"],
+                timeout=timeout,
+            )
+            resp = client.chat.completions.create(
+                model=config["model"],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": cap_user_prompt(user_prompt)},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = resp.choices[0].message.content
+            if content:
+                return content
+        except Exception:  # noqa: BLE001 — LLM 故障刻意降级，不阻塞会议
+            # 降级纪律：单次失败未达重试上限则重试，否则返回 None（调用方降级）
+            if attempt >= max_retries:
+                return None
+    return None
 
 
 def load_prompt(agent_name: str) -> str:

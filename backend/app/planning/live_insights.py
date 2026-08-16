@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import re
+import time
 from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 from typing import Any
@@ -17,6 +20,21 @@ from app.data.base_adapter import (
 )
 from app.data.scoped_views import CompetitorDataView
 from app.schemas.base_data import BaseRecord
+
+_LIVE_LOG = logging.getLogger("insights.timing")
+
+
+def _log_live_node(node, duration_ms, status, data_source="feishu", snapshot_id=None, cache_hit=False):
+    """结构化耗时日志（不含 token/app_secret/原始完整记录）"""
+    _LIVE_LOG.info(json.dumps({
+        "event": "insight_node",
+        "node": node,
+        "duration_ms": round(duration_ms, 1),
+        "status": status,
+        "data_source": data_source,
+        "snapshot_id": snapshot_id,
+        "cache_hit": cache_hit,
+    }, ensure_ascii=False))
 
 
 def _matches_category(record: BaseRecord, category: str) -> bool:
@@ -129,7 +147,13 @@ def build_live_insight_bundle(
     source = adapter or BaseDataAdapter()
     # 企划层品类归一化：旧任务「小风扇」等含「扇」子品类统一为父品类「风扇」
     category = normalize_category(category) or ""
-    records = _records_for_category(source, category)
+    _t0 = time.monotonic()
+    try:
+        records = _records_for_category(source, category)
+        _log_live_node("feishu_detail", (time.monotonic() - _t0) * 1000, "success")
+    except Exception:
+        _log_live_node("feishu_detail", (time.monotonic() - _t0) * 1000, "error")
+        raise
     if not records:
         raise ValueError(f"Feishu Base 没有匹配品类：{category}")
 
@@ -143,11 +167,14 @@ def build_live_insight_bundle(
     # （明细快照与汇总快照不同源，禁止互相复用）
     summary: dict[str, Any] | None = None
     summary_error: str | None = None
+    _ts = time.monotonic()
     try:
         summary = source.get_summary(category=category)
+        _log_live_node("feishu_summary", (time.monotonic() - _ts) * 1000, "success")
     except (BaseUnavailable, BaseProviderError, ValueError) as exc:
         summary = None
         summary_error = str(exc)
+        _log_live_node("feishu_summary", (time.monotonic() - _ts) * 1000, "unavailable")
     summary_snapshot_id = (summary or {}).get("snapshot_id")
 
     pain_points, pain_caveats = _normalize_pain_points((summary or {}).get("pain_points"))
@@ -211,7 +238,13 @@ def build_live_insight_bundle(
     # 优先读取商品级真实竞品；缺失/无匹配则降级 Base 明细样本（不 Mock、不 LLM、不伪造）
     competitor_view = CompetitorDataView(RestrictedQueryPort(source))
     # 竞品表使用自身的快照体系，不套用明细表快照（明细 snapshot 与竞品 snapshot 不同源）
-    comp_map = competitor_view.get_competitor_map(category)
+    _tc = time.monotonic()
+    try:
+        comp_map = competitor_view.get_competitor_map(category)
+        _log_live_node("feishu_competitor", (time.monotonic() - _tc) * 1000, "success")
+    except Exception:
+        _log_live_node("feishu_competitor", (time.monotonic() - _tc) * 1000, "error")
+        raise
     # 「是否匹配到竞品表」用 record_count 判断：即使所有商品缺价格无商品卡，也不算降级
     record_count = comp_map.get("record_count", 0)
     product_count = comp_map.get("product_count", 0)
@@ -302,6 +335,8 @@ def build_live_insight_bundle(
         "dataContext": {
             "data_source": "feishu",
             "snapshot_id": selected_snapshot or "",
+            "summary_snapshot_id": summary_snapshot_id or "",
+            "competitor_snapshot_id": (comp_map.get("snapshot_id") or "") if has_competitors else "",
             "ingestion_run_id": selected_snapshot or "",
             "record_count": len(records),
             "evidence_count": len(evidence),

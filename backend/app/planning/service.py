@@ -9,11 +9,18 @@ API 层（api/planning.py）只负责 HTTP：解析入参、调用 service、拼
 
 from __future__ import annotations
 
+import copy
+import json
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+from pydantic import ValidationError
 
 from app.engine import llm
 from app.engine.strict_mode import is_demo_hidden
-from app.planning import fixtures
+from app.planning import fixtures, insight_cache
 from app.planning.cost_rules import cost_check
 from app.planning.insight_resolver import _parse_llm_json, _resolve_insight_bundle
 from app.planning.opportunity_discovery import build_opportunity_pool
@@ -48,6 +55,35 @@ class StateTransitionError(Exception):
         self.actual = actual
         self.action = action
         super().__init__(f"状态不匹配：{action} 需要 {expected}，当前 {actual}")
+
+
+_TIMING_LOG = logging.getLogger("insights.timing")
+
+
+def _run_timed(node, fn, *args, data_source=None, snapshot_id=None, cache_hit=False, **kwargs):
+    """执行 fn 并记录结构化耗时日志；异常照常抛出（finally 记录 status=error）
+
+    日志不含 token / app_secret / 原始完整记录，仅元数据。
+    """
+    t0 = time.monotonic()
+    status = "success"
+    try:
+        result = fn(*args, **kwargs)
+        return result
+    except Exception:
+        status = "error"
+        raise
+    finally:
+        dur_ms = (time.monotonic() - t0) * 1000
+        _TIMING_LOG.info(json.dumps({
+            "event": "insight_node",
+            "node": node,
+            "duration_ms": round(dur_ms, 1),
+            "status": status,
+            "data_source": data_source,
+            "snapshot_id": snapshot_id,
+            "cache_hit": cache_hit,
+        }, ensure_ascii=False))
 
 
 __all__ = [
@@ -208,25 +244,170 @@ def _build_plan_data_context(plan: dict[str, Any], bundle: dict[str, Any]) -> di
     return plan["data_context"]
 
 
+def _merge_competitive_map(bundle: dict[str, Any], result: dict | None) -> None:
+    """主线程合并 competitive map 结果；失败写 processLog caveat，不污染其他模块"""
+    cm = bundle.setdefault("competitiveMap", {})
+    if result:
+        cm["needDimensions"] = result.get("needDimensions")
+        cm["needSatisfaction"] = result.get("needSatisfaction")
+        cm["opportunityGaps"] = result.get("opportunityGaps")
+    else:
+        plog = bundle.setdefault("trendRadar", {}).setdefault("processLog", [])
+        if not any("竞品满足矩阵" in str(p) for p in plog):
+            plog.append("竞品满足矩阵生成失败（LLM 暂不可用）")
+
+
+def _merge_asset_fit(bundle: dict[str, Any], result: dict | None) -> None:
+    """主线程合并 asset fit 结果；失败不写 assetFit 键（保持 schema 默认空 list）+ processLog caveat"""
+    if result:
+        bundle["assetFit"] = result
+    else:
+        plog = bundle.setdefault("trendRadar", {}).setdefault("processLog", [])
+        if not any("资产适配" in str(p) for p in plog):
+            plog.append("资产适配生成失败（LLM 暂不可用）")
+
+
+def _ensure_parallel_competitive_asset(plan, bundle, data_source, snapshot_id) -> None:
+    """consumerVoice 完成后，competitive map 与 asset fit 并行计算。
+
+    依赖关系：两者均依赖 opportunityPool + consumerVoice（已在串行段生成）。
+    并行约束：并发 agent 使用只读快照副本（不写 bundle），主线程合并结果；
+    任一 agent 失败只影响对应模块，写入 caveat，不污染其他模块。
+    """
+    cm = bundle.get("competitiveMap") or {}
+    af = bundle.get("assetFit")
+    need_cm = not cm.get("needDimensions")
+    need_af = not af
+    if not need_cm:
+        _run_timed("competitive_map", (lambda: None), data_source=data_source, snapshot_id=snapshot_id, cache_hit=True)
+    if not need_af:
+        _run_timed("asset_fit", (lambda: None), data_source=data_source, snapshot_id=snapshot_id, cache_hit=True)
+    if not need_cm and not need_af:
+        return
+    category = plan["brief"].get("category", "")
+    brief = plan["brief"]
+    # 只读快照副本：并发 agent 不写 bundle，由主线程合并
+    snapshot = copy.deepcopy(bundle) if (need_cm and need_af) else bundle
+    futures: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        if need_cm:
+            from app.planning.competitive_map_agent import (
+                build_competitive_map_analysis,
+            )
+            futures["cm"] = ex.submit(build_competitive_map_analysis, category, snapshot, brief)
+        if need_af:
+            from app.planning.asset_fit_agent import build_asset_fit
+            futures["af"] = ex.submit(build_asset_fit, category, snapshot, brief)
+
+        def _wait_cm():
+            try:
+                return futures["cm"].result()
+            except Exception:  # noqa: BLE001
+                return None
+
+        def _wait_af():
+            try:
+                return futures["af"].result()
+            except Exception:  # noqa: BLE001
+                return None
+
+        if need_cm:
+            cm_result = _run_timed("competitive_map", _wait_cm, data_source=data_source, snapshot_id=snapshot_id, cache_hit=False)
+            _merge_competitive_map(bundle, cm_result)
+        if need_af:
+            af_result = _run_timed("asset_fit", _wait_af, data_source=data_source, snapshot_id=snapshot_id, cache_hit=False)
+            _merge_asset_fit(bundle, af_result)
+
+
+_ENHANCE_KEYS = ("opportunityPool", "consumerVoice", "competitiveMap", "assetFit")
+
+
+def _extract_cache_value(bundle: dict[str, Any]) -> dict:
+    """从 bundle 提取各增强模块结果（供缓存写入）"""
+    return {k: bundle.get(k) for k in _ENHANCE_KEYS if bundle.get(k) is not None}
+
+
+def _apply_cached_enhance(bundle: dict[str, Any], value: dict) -> None:
+    """把缓存中的增强模块结果写回 bundle"""
+    for k in _ENHANCE_KEYS:
+        if k in value and value[k] is not None:
+            bundle[k] = value[k]
+
+
 def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
     """原子业务动作：生成洞察，成功才推进状态并持久化（失败状态与产物不变）
 
     前置状态 brief_locked；成功后 status → insights_ready。
-    取代「advance + GET」两请求组合，消除半完成态。
+    依赖链：飞书读取 → opportunityPool → consumerVoice → {competitiveMap ‖ assetFit} 并行。
+    每个节点记录结构化耗时日志（node/duration_ms/status/data_source/snapshot_id/cache_hit）。
     """
     with plan_write_lock(plan["plan_id"]):
         if plan.get("status") != "brief_locked":
             raise StateTransitionError("brief_locked", plan.get("status"), "generate-insights")
-        bundle = _resolve_insight_bundle(plan["brief"].get("category", ""), plan["brief"])
-        _ensure_opportunity_pool(plan, bundle)
-        _ensure_consumer_voice_chains(plan, bundle)
-        _ensure_competitive_map_analysis(plan, bundle)
-        _ensure_asset_fit(plan, bundle)
-        _ = InsightBundle.model_validate(_snake_keys(bundle))
-        plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
-        _build_plan_data_context(plan, bundle)
-        plan["status"] = "insights_ready"
-        _save_state()
+        category = plan["brief"].get("category", "")
+        data_source = "feishu" if plan["brief"].get("mode") == "live" else None
+        total_t0 = time.monotonic()
+        _ok = True
+        try:
+            bundle = _resolve_insight_bundle(category, plan["brief"])
+            dc = bundle.get("dataContext") or {}
+            snapshot_id = dc.get("snapshot_id") or ""
+            ck = insight_cache.cache_key(
+                category, snapshot_id,
+                dc.get("summary_snapshot_id") or "",
+                dc.get("competitor_snapshot_id") or "",
+            )
+            cached = insight_cache.get(ck) if ck else None
+
+            used_cache = False
+            if cached:
+                # 缓存命中：先做 schema 校验（损坏则安全重算）
+                probe = copy.deepcopy(bundle)
+                _apply_cached_enhance(probe, cached)
+                try:
+                    InsightBundle.model_validate(_snake_keys(probe))
+                    _apply_cached_enhance(bundle, cached)
+                    used_cache = True
+                except ValidationError:
+                    insight_cache.put(ck, {})  # 缓存损坏 → 标记失效，走重算
+                    used_cache = False
+
+            if used_cache:
+                for _node in ("opportunity_pool", "consumer_voice", "competitive_map", "asset_fit"):
+                    _run_timed(_node, (lambda: None), data_source=data_source, snapshot_id=snapshot_id, cache_hit=True)
+            else:
+                def _pool():
+                    _ensure_opportunity_pool(plan, bundle)
+                _run_timed("opportunity_pool", _pool, data_source=data_source, snapshot_id=snapshot_id,
+                           cache_hit=False)
+
+                def _cv():
+                    _ensure_consumer_voice_chains(plan, bundle)
+                _run_timed("consumer_voice", _cv, data_source=data_source, snapshot_id=snapshot_id,
+                           cache_hit=False)
+
+                _ensure_parallel_competitive_asset(plan, bundle, data_source, snapshot_id)
+                if ck:
+                    insight_cache.put(ck, _extract_cache_value(bundle))
+
+            _ = InsightBundle.model_validate(_snake_keys(bundle))
+            plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
+            _build_plan_data_context(plan, bundle)
+            plan["status"] = "insights_ready"
+            _save_state()
+        except Exception:
+            _ok = False
+            raise
+        finally:
+            _TIMING_LOG.info(json.dumps({
+                "event": "insight_node",
+                "node": "generate_insights",
+                "duration_ms": round((time.monotonic() - total_t0) * 1000, 1),
+                "status": "success" if _ok else "error",
+                "data_source": data_source,
+                "snapshot_id": ((bundle.get("dataContext") or {}).get("snapshot_id")) if "bundle" in locals() and bundle else "",
+                "cache_hit": False,
+            }, ensure_ascii=False))
     return bundle
 
 
