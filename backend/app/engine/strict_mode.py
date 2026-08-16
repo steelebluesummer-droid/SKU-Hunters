@@ -64,10 +64,13 @@ def resolve_provider(role: str, env_key: str, allowed: tuple[str, ...] = ("real"
 
 
 def planning_default_mode() -> str:
-    """企划默认任务模式：严格模式强制 live；否则取 PLANNING_DEFAULT_MODE（默认 fixture）。"""
+    """企划默认任务模式：严格模式强制 live；否则取 PLANNING_DEFAULT_MODE（默认 crawled）。
+
+    crawled = 真实采集 + LLM 分析（Stage 1-4 主链路）；fixture = 冻结演示样例；live = 飞书实时。
+    """
     if strict_real():
         return "live"
-    return os.getenv("PLANNING_DEFAULT_MODE", "fixture").strip().lower()
+    return os.getenv("PLANNING_DEFAULT_MODE", "crawled").strip().lower()
 
 
 def allow_fixture_tasks() -> bool:

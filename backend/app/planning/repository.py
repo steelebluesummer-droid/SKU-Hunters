@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import uuid
@@ -112,7 +113,14 @@ def create_plan(brief: dict[str, Any]) -> dict[str, Any]:
     plan_id = f"plan_{datetime.now(timezone.utc):%Y%m%d}_{uuid.uuid4().hex[:4]}"
     configured_mode = planning_default_mode()
     requested_mode = str(brief.get("mode") or configured_mode).strip().lower()
-    mode = requested_mode if requested_mode in {"fixture", "live"} else "live"
+    if requested_mode in {"fixture", "crawled", "live"}:
+        mode = requested_mode
+    else:
+        # 非法 mode（如拼错 crawel）不静默吞错：记 warning 后回退到配置默认
+        logging.getLogger(__name__).warning(
+            "非法 task mode=%r，回退到默认 %s", requested_mode, configured_mode
+        )
+        mode = configured_mode
     if mode == "fixture" and not allow_fixture_tasks():
         raise StrictModeError("严格真实模式禁止创建 fixture（演示）任务，请使用 live")
     stored_brief = validated.model_dump()
@@ -120,7 +128,7 @@ def create_plan(brief: dict[str, Any]) -> dict[str, Any]:
     plan = {
         "plan_id": plan_id,
         "brief": stored_brief,
-        "mode": mode,  # fixture（显式演示）| live（真实数据/Agent 链路）
+        "mode": mode,  # fixture（演示）| crawled（真实采集+LLM 主链路）| live（飞书实时）
         "created_at": _now(),
         "status": "brief_locked",
         "selected_opportunity": None,

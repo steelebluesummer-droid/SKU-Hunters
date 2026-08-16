@@ -69,8 +69,9 @@ def test_create_plan_rejects_missing_theme():
         pipeline.create_plan(brief)
 
 def test_create_plan_defaults_mode_fixture():
+    # 方案1：默认分析路径为 crawled（真实采集+LLM），非 fixture
     plan = _make_plan()
-    assert plan["mode"] == "fixture"
+    assert plan["mode"] == "crawled"
 
 def test_create_plan_camelcase_brief_survives_validation():
     """回归：camelCase 键（前端契约）不得被校验静默丢弃（内部存储为 snake_case）"""
@@ -87,12 +88,12 @@ def test_list_plans_returns_summaries_sorted_desc():
     assert all("theme" in p and "status" in p for p in plans)
 
 def test_list_plans_includes_mode_metadata():
-    """列表摘要必须暴露 mode，供前端 SourceTag 标注数据来源（fixture/live/demo）"""
+    """列表摘要必须暴露 mode，供前端 SourceTag 标注数据来源（crawled/fixture/live）"""
     plan = _make_plan()
     plans = pipeline.list_plans()
     summary = next(p for p in plans if p["plan_id"] == plan["plan_id"])
     assert "mode" in summary
-    assert summary["mode"] == "fixture"
+    assert summary["mode"] == "crawled"
 
 # ── ② 五看洞察 ───────────────────────────────────────────
 
