@@ -407,8 +407,8 @@ async def get_ip_resource():
     }
 
 
-def _load_curated_module(topic: str, key: str, fallback: dict):
-    if os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower() == "feishu":
+def _load_curated_module(topic: str, key: str, fallback: dict, use_feishu: bool = True):
+    if use_feishu and os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower() == "feishu":
         try:
             from app.planning.live_insights import build_live_insight_bundle
 
@@ -438,7 +438,8 @@ async def insight_base(topic: str = "小风扇"):
 
 @router.get("/trend-gallery")
 async def trend_gallery(topic: str = "小风扇"):
-    return _load_curated_module(topic, "trendGallery", fixtures.TREND_GALLERY)
+    # 流行元素板是静态策展数据，不读飞书实时表（飞书无 colors/patterns/shapes 字段）
+    return _load_curated_module(topic, "trendGallery", fixtures.TREND_GALLERY, use_feishu=False)
 
 
 @router.get("/data-board")
