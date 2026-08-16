@@ -37,14 +37,18 @@ from app.planning.insight_resolver import (  # noqa: F401
     _resolve_insight_bundle,
 )
 
-# 机会生成引擎
+# 机会发现引擎（市场机会池）
+from app.planning.opportunity_discovery import (  # noqa: F401
+    build_opportunity_pool,
+)
+
+# 机会生成引擎（机会池 → 商品机会卡）
 from app.planning.opportunity_engine import (  # noqa: F401
     _derive_price_band,
     _fallback_opportunities,
     _opportunities_from_bundle,
     _opportunities_process_log,
-    _resolve_ip_for_opportunity,
-    _short_ip,
+    expand_pool_to_cards,
 )
 
 # 企划卡组装

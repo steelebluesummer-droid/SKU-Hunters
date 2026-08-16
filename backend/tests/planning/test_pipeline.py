@@ -43,11 +43,14 @@ def isolated_state(monkeypatch, tmp_path):
 def _make_plan(brief: dict | None = None) -> dict:
     return pipeline.create_plan(brief or dict(VALID_BRIEF))
 
-def _advance_to_plan_card(plan: dict, opportunity_id: str = "ip-collect") -> dict:
-    """推进完整原子动作链：brief_locked → insights_ready → opportunities_ready → plan_card_ready"""
+def _advance_to_plan_card(plan: dict, opportunity_id: str | None = None) -> dict:
+    """推进完整原子动作链：brief_locked → insights_ready → opportunities_ready → plan_card_ready
+
+    opportunity_id 缺省取机会池展开后的第一张卡（引擎不再产出 fixture 固定 id）。
+    """
     pipeline.generate_insights(plan)
-    pipeline.generate_opportunities(plan)
-    return pipeline.generate_plan_card(plan, opportunity_id)
+    opps = pipeline.generate_opportunities(plan)
+    return pipeline.generate_plan_card(plan, opportunity_id or opps[0]["id"])
 
 # ── ① 企划约束 ───────────────────────────────────────────
 
@@ -102,6 +105,8 @@ def test_get_insights_returns_five_blocks():
         "competitiveMap",
         "insightBase",
         "trendGallery",
+        "opportunityPool",  # 市场机会池：五看洞察 → 产品决策的中间产物（顶层平级字段）
+        "dataSource",       # 数据来源标记：crawled | llm
     }
     assert plan["status"] == "insights_ready"
     # 思考过程呈现：processLog 是导师专项意见要求的字段，必须在
@@ -211,7 +216,9 @@ def test_generate_plan_card_cost_overrun_marks_check_failed():
 def test_revise_plan_fallback_reply_when_llm_unconfigured(monkeypatch):
     monkeypatch.setattr(pipeline.llm, "complete", lambda **kwargs: None)
     plan = _make_plan()
-    _advance_to_plan_card(plan)
+    # 改稿只依赖「已有企划卡」，直接置入，不依赖企划卡 LLM 生成链路
+    plan["plan_card"] = {"name": "测试企划卡", "concept": "测试概念"}
+    plan["status"] = "plan_card_ready"
     turn = pipeline.revise_plan(plan, "把配色改成薄荷绿")
     assert "冻结数据演示环境" in turn["reply"]
     assert len(plan["revise_logs"]) == 1
@@ -220,7 +227,8 @@ def test_revise_plan_fallback_reply_when_llm_unconfigured(monkeypatch):
 def test_revise_plan_uses_llm_answer_when_available(monkeypatch):
     monkeypatch.setattr(pipeline.llm, "complete", lambda **kwargs: "可以，配色方案将调整为薄荷绿。")
     plan = _make_plan()
-    _advance_to_plan_card(plan)
+    plan["plan_card"] = {"name": "测试企划卡", "concept": "测试概念"}
+    plan["status"] = "plan_card_ready"
     turn = pipeline.revise_plan(plan, "把配色改成薄荷绿")
     assert turn["reply"] == "可以，配色方案将调整为薄荷绿。"
 
@@ -250,9 +258,9 @@ def test_state_roundtrip_save_and_load():
     pipeline._save_state()
     payload = json.loads(repository._STATE_FILE.read_text(encoding="utf-8"))
     assert plan["plan_id"] in payload
-    assert payload[plan["plan_id"]]["selected_opportunity"] == "ip-collect"
+    assert payload[plan["plan_id"]]["selected_opportunity"] == plan["selected_opportunity"]
     loaded = pipeline._load_state()
-    assert loaded[plan["plan_id"]]["plan_card"]["name"] == "库洛米表情磁吸小风扇"
+    assert loaded[plan["plan_id"]]["plan_card"]["name"] == plan["plan_card"]["name"]
 
 def test_load_state_tolerates_corrupt_file():
     repository._STATE_FILE.write_text("not json {{{", encoding="utf-8")
@@ -291,6 +299,7 @@ def test_generate_insights_success_advances_status():
     assert plan["status"] == "insights_ready"
     assert set(insights) == {
         "trendRadar", "consumerVoice", "competitiveMap", "insightBase", "trendGallery",
+        "opportunityPool", "dataSource",
     }
 
 def test_generate_insights_failure_does_not_advance_status(monkeypatch):

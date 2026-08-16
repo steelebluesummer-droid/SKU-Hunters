@@ -67,6 +67,7 @@ def _save_state() -> None:
                 "status": p["status"],
                 "selected_opportunity": p.get("selected_opportunity"),
                 "plan_card": p.get("plan_card"),
+                "product_proposal": p.get("product_proposal"),
                 "revise_logs": p.get("revise_logs", []),
                 "archived_at": p.get("archived_at"),
                 # 链路中间产物：重启后企划卡依赖机会卡、机会/企划卡复用洞察缓存
@@ -110,6 +111,7 @@ def create_plan(brief: dict[str, Any]) -> dict[str, Any]:
         "status": "brief_locked",
         "selected_opportunity": None,
         "plan_card": None,
+        "product_proposal": None,
         "revise_logs": [],
     }
     with _lock:

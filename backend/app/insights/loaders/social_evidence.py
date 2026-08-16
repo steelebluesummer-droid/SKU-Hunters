@@ -64,6 +64,19 @@ def _resolve_color_hex(name: str, idx: int) -> str:
     return _FALLBACK_PALETTE[idx % len(_FALLBACK_PALETTE)]
 
 
+# gap_zone 模板污染标记（仅用于 gap_zone 字段的数据质量拦截，不做全局关键词过滤）
+_GAP_POLLUTION_MARKERS = ["案例信号", "案例：", "示例", "待补", "占位", "TODO", "待填"]
+
+
+def _is_polluted_gap(text: str) -> bool:
+    """gap_zone 字段的模板污染检测：命中占位/示例标记则视为无效。
+
+    只拦截 gap_zone 本身，不做全局过滤——「我不吃香菜店铺爆款笔记」这类真实采集
+    内容即使含同名关键词也不能被误删。
+    """
+    return any(m in text for m in _GAP_POLLUTION_MARKERS)
+
+
 class SocialEvidenceLoader:
     """读取 social/ 目录下的采集 JSON，映射为管线五看结构（camelCase）"""
 
@@ -212,18 +225,21 @@ class SocialEvidenceLoader:
                 "sellingPoint": p.get("selling_point", ""),
             })
         gap = d.get("gap_zone", "")
+        if gap and _is_polluted_gap(gap):
+            gap = ""  # 模板污染 → 不当作有效机会空白（不落 UI，也不伪装成其他文案）
         return {
             "processLog": [f"加载 {topic} 竞品样本，构建价格×设计感矩阵"]
             + ([f"跳过 {skipped} 条缺少 name 的不完整竞品"] if skipped else []),
             "products": products,
             # 采集侧未给坐标，x/y 置空；前端展示 label，坐标为 0 不影响文字
-            "gapZone": {"x": [30, 60], "y": [7, 10], "label": gap or "差异化机会空白"} if gap else None,
+            "gapZone": {"x": [30, 60], "y": [7, 10], "label": gap} if gap else None,
             "priceBands": [
-                {"band": b.get("band", ""), "pct": int(_first_number(b.get("pct", 0), 0))}
+                {"band": b.get("band", ""), "pct": int(_first_number(b.get("pct", 0), 0)),
+                 "price": b.get("price", ""), "note": b.get("note", "")}
                 for b in d.get("price_bands", [])
             ],
             "sellingPoints": [
-                {"word": s, "count": 0} for s in d.get("selling_points", [])
+                {"word": s, "count": None} for s in d.get("selling_points", [])
             ],
         }
 

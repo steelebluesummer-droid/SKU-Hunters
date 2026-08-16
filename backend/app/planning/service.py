@@ -14,12 +14,14 @@ from typing import Any
 from app.engine import llm
 from app.planning import fixtures
 from app.planning.insight_resolver import _resolve_insight_bundle
+from app.planning.opportunity_discovery import build_opportunity_pool
 from app.planning.opportunity_engine import (
     _fallback_opportunities,
     _opportunities_from_bundle,
 )
 from app.planning.plan_card_builder import (
     _build_dynamic_plan_card,
+    _build_product_proposal,
     _find_opportunity,
 )
 from app.planning.repository import (
@@ -65,6 +67,91 @@ __all__ = [
 
 # ── ② 五看洞察 ─────────────────────────────────────────
 
+def _ensure_opportunity_pool(plan: dict[str, Any], bundle: dict[str, Any]) -> None:
+    """洞察 → 市场机会池：bundle 无 pool 时生成并回写（单一事实源）
+
+    机会池是「五看洞察 → 产品决策」的中间产物，挂在 bundle 顶层；
+    洞察驾驶舱 Block5 与机会生成消费同一份，禁止二次生成。
+    pool 生成日志追加到 trendRadar.processLog，前端渐进日志可见。
+    """
+    if bundle.get("opportunityPool"):
+        return
+    category = plan["brief"].get("category", "")
+    pool, pool_log = build_opportunity_pool(category, bundle, plan["brief"])
+    if pool:
+        bundle["opportunityPool"] = pool
+    bundle.setdefault("trendRadar", {}).setdefault("processLog", []).extend(pool_log)
+
+
+def _ensure_enrichment(plan: dict[str, Any], bundle: dict[str, Any]) -> None:
+    """洞察增强（五段式驾驶舱）：旧缓存 bundle 无 enrichment 时懒补生成
+
+    新 bundle 由 _resolve_insight_bundle 统一挂 enrichment；此处只补历史缓存。
+    失败（无 Key/不合契约）不挂键，前端回退基础视图。
+    """
+    if bundle.get("enrichment"):
+        return
+    from app.planning.insight_enrichment import build_enrichment
+
+    category = plan["brief"].get("category", "")
+    enrichment = build_enrichment(category, bundle, plan["brief"])
+    if enrichment is not None:
+        bundle["enrichment"] = enrichment
+
+
+def _ensure_consumer_voice_chains(plan: dict[str, Any], bundle: dict[str, Any]) -> None:
+    """Consumer Voice Agent：用户决策画像 + 痛点归因链（引用机会池 id）
+
+    依赖 opportunityPool 已生成（先 _ensure_opportunity_pool 再调本函数），
+    归因链 supportsOpportunityIds 引用真实 pool id。失败不挂键，前端不渲染该块。
+    """
+    cv = bundle.setdefault("consumerVoice", {})
+    if cv.get("painPointChains"):
+        return
+    from app.planning.consumer_voice_agent import build_consumer_voice_chains
+
+    category = plan["brief"].get("category", "")
+    result = build_consumer_voice_chains(category, bundle, plan["brief"])
+    if result:
+        cv["userProfile"] = result.get("userProfile")
+        cv["painPointChains"] = result.get("painPointChains")
+
+
+def _ensure_competitive_map_analysis(plan: dict[str, Any], bundle: dict[str, Any]) -> None:
+    """Competitive Map Agent：需求满足矩阵 + 机会空位（验证机会池，不重新发现机会）
+
+    依赖 decisionFactors（consumer voice 后）+ opportunityPool（机会池后），
+    需求维度代码从 decisionFactors 提取，机会空位 supportsOpportunityIds 强绑机会池 id。
+    """
+    cm = bundle.setdefault("competitiveMap", {})
+    if cm.get("needDimensions"):
+        return
+    from app.planning.competitive_map_agent import build_competitive_map_analysis
+
+    category = plan["brief"].get("category", "")
+    result = build_competitive_map_analysis(category, bundle, plan["brief"])
+    if result:
+        cm["needDimensions"] = result.get("needDimensions")
+        cm["needSatisfaction"] = result.get("needSatisfaction")
+        cm["opportunityGaps"] = result.get("opportunityGaps")
+
+
+def _ensure_asset_fit(plan: dict[str, Any], bundle: dict[str, Any]) -> None:
+    """Asset Fit Agent：机会方向 → 商品化适配（IP/设计语言/颜色/材质/包装）
+
+    依赖 opportunityPool + insightBase.ipPool + consumerVoice 决策画像，
+    不重新发现机会；ip 引用真实名创资产，无则空。失败不挂键。
+    """
+    if bundle.get("assetFit"):
+        return
+    from app.planning.asset_fit_agent import build_asset_fit
+
+    category = plan["brief"].get("category", "")
+    result = build_asset_fit(category, bundle, plan["brief"])
+    if result:
+        bundle["assetFit"] = result
+
+
 def get_insights(plan: dict[str, Any], advance: bool = False) -> dict[str, Any]:
     """五看洞察（只读）：真实社媒证据优先，无采集数据走 LLM 生成
 
@@ -73,11 +160,21 @@ def get_insights(plan: dict[str, Any], advance: bool = False) -> dict[str, Any]:
     if advance and plan.get("status") != "archived":
         plan["status"] = "insights_ready"
     bundle = plan.get("insights")  # 先读缓存：已生成过的任务只读重开不重复烧 LLM
-    if bundle is None:
+    if not bundle:  # None 或历史坏缓存（空 dict）都重新生成
         bundle = _resolve_insight_bundle(plan["brief"].get("category", ""), plan["brief"])
+        _ensure_opportunity_pool(plan, bundle)
+        _ensure_consumer_voice_chains(plan, bundle)
+        _ensure_competitive_map_analysis(plan, bundle)
+        _ensure_asset_fit(plan, bundle)
         _ = InsightBundle.model_validate(_snake_keys(bundle))
         plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
         _save_state()  # 落盘：服务重启后缓存仍在，不重复触发 LLM
+    else:
+        _ensure_opportunity_pool(plan, bundle)  # 旧缓存补 pool（不落盘，生成机会时统一落）
+        _ensure_enrichment(plan, bundle)        # 旧缓存补 enrichment（五段式驾驶舱）
+        _ensure_consumer_voice_chains(plan, bundle)  # 旧缓存补决策画像 + 归因链
+        _ensure_competitive_map_analysis(plan, bundle)  # 旧缓存补需求满足矩阵 + 机会空位
+        _ensure_asset_fit(plan, bundle)  # 旧缓存补资产适配
     return bundle
 
 
@@ -91,6 +188,10 @@ def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
         if plan.get("status") != "brief_locked":
             raise StateTransitionError("brief_locked", plan.get("status"), "generate-insights")
         bundle = _resolve_insight_bundle(plan["brief"].get("category", ""), plan["brief"])
+        _ensure_opportunity_pool(plan, bundle)
+        _ensure_consumer_voice_chains(plan, bundle)
+        _ensure_competitive_map_analysis(plan, bundle)
+        _ensure_asset_fit(plan, bundle)
         _ = InsightBundle.model_validate(_snake_keys(bundle))
         plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
         plan["status"] = "insights_ready"
@@ -110,7 +211,7 @@ def get_opportunities(plan: dict[str, Any], advance: bool = False) -> list[dict[
     category = plan["brief"].get("category", "")
     brief = plan["brief"]
     bundle = plan.get("insights")
-    if bundle is None:
+    if not bundle:  # None 或历史坏缓存（空 dict）都重新生成
         bundle = _resolve_insight_bundle(category, brief)
         plan["insights"] = bundle  # 重建时回写缓存：企划卡可复用洞察摘要
         _save_state()  # 落盘：服务重启后缓存仍在，不重复触发 LLM
@@ -134,7 +235,7 @@ def generate_opportunities(plan: dict[str, Any]) -> list[dict[str, Any]]:
         category = plan["brief"].get("category", "")
         brief = plan["brief"]
         bundle = plan.get("insights")
-        if bundle is None:
+        if not bundle:  # None 或历史坏缓存（空 dict）都重新生成
             bundle = _resolve_insight_bundle(category, brief)
             plan["insights"] = bundle  # 重建时回写缓存：企划卡可复用洞察摘要
         opps = _opportunities_from_bundle(category, bundle, brief)
@@ -165,9 +266,11 @@ def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, A
             return None
 
         card = _build_dynamic_plan_card(plan, opportunity)
+        proposal = _build_product_proposal(plan, opportunity)
 
         plan["selected_opportunity"] = opportunity_id
         plan["plan_card"] = card
+        plan["product_proposal"] = proposal  # 新品企划案（六模块，与旧 plan_card 并存）
         plan["status"] = "plan_card_ready"
         _save_state()
     return card

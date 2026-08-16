@@ -114,6 +114,7 @@ async def get_plan(plan_id: str):
         "status": plan["status"],
         "selected_opportunity": plan["selected_opportunity"],
         "plan_card": plan.get("plan_card"),  # 已有企划卡（归档后回看用）
+        "product_proposal": plan.get("product_proposal"),  # 新品企划案（六模块）
         "created_at": plan["created_at"],
     }
 
@@ -223,7 +224,8 @@ async def action_generate_plan_card(plan_id: str, payload: dict):
         raise _llm_generation_error(e) from e
     if card is None:
         raise HTTPException(404, detail={"error": {"code": "OPPORTUNITY_NOT_FOUND", "message": opportunity_id}})
-    return {"plan_id": plan_id, "status": plan["status"], "plan_card": card}
+    return {"plan_id": plan_id, "status": plan["status"], "plan_card": card,
+            "product_proposal": plan.get("product_proposal")}
 
 
 @router.post("/plans/{plan_id}/actions/archive")
@@ -253,7 +255,8 @@ async def generate_plan_card(plan_id: str, payload: dict):
         raise _llm_generation_error(e) from e
     if card is None:
         raise HTTPException(404, detail={"error": {"code": "OPPORTUNITY_NOT_FOUND", "message": opportunity_id}})
-    return {"plan_id": plan_id, "plan_card": card}
+    return {"plan_id": plan_id, "plan_card": card,
+            "product_proposal": plan.get("product_proposal")}
 
 
 @router.post("/plans/{plan_id}/revise")

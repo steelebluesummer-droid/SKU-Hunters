@@ -37,16 +37,33 @@ def _resolve_insight_bundle(category: str, brief: dict | None = None) -> dict[st
     try:
         from app.insights.loaders.social_evidence import SocialEvidenceLoader
         bundle = SocialEvidenceLoader().get_insight_bundle(category)
-        # heatCurve 只注入真实快照；无快照留 None（HeatCurve | None 契约允许）
-        bundle["trendRadar"]["heatCurve"] = _load_heat_curve()
+        # heatCurve 只注入真实快照且限快照所属品类；不匹配留 None（HeatCurve | None 契约允许）
+        bundle["trendRadar"]["heatCurve"] = _load_heat_curve(category)
         bundle["dataSource"] = "crawled"
-        return bundle
     except FileNotFoundError:
-        return _llm_insight_bundle(category, brief or {})
+        bundle = _llm_insight_bundle(category, brief or {})
+    _attach_enrichment(category, bundle, brief or {})
+    return bundle
 
 
-def _load_heat_curve() -> dict[str, Any] | None:
-    """从 Google Trends 冻结快照注入热度曲线（存在才注入，否则留 None）"""
+def _attach_enrichment(category: str, bundle: dict, brief: dict) -> None:
+    """洞察增强（五段式驾驶舱）：crawled 与 llm 两条路径统一挂 enrichment
+
+    失败返回 None 时不挂键 → 前端回退基础视图（不产假数据）。
+    """
+    from app.planning.insight_enrichment import build_enrichment
+
+    enrichment = build_enrichment(category, bundle, brief)
+    if enrichment is not None:
+        bundle["enrichment"] = enrichment
+
+
+def _load_heat_curve(category: str = "") -> dict[str, Any] | None:
+    """从 Google Trends 冻结快照注入热度曲线（仅快照关键词与品类匹配时注入）
+
+    快照是单品类冻结数据：串品类注入会把快照关键词带进其他品类的趋势图，
+    故关键词与品类互不包含时返回 None（HeatCurve | None 契约允许）。
+    """
     try:
         # 快照分目录：优先 data/snapshot/，旧路径向后兼容
         base = Path(__file__).resolve().parents[2] / "data"
@@ -56,6 +73,9 @@ def _load_heat_curve() -> dict[str, Any] | None:
         if not path.is_file():
             return None
         snap = json.loads(path.read_text(encoding="utf-8"))
+        keywords = [s.get("name", "") for s in snap.get("series", [])]
+        if category and not any(k and (k in category or category in k) for k in keywords):
+            return None
         return {"weeks": snap["weeks"], "series": snap["series"]}
     except (OSError, ValueError, KeyError):
         return None
@@ -93,7 +113,7 @@ _LLM_SYSTEM_PROMPT = """你是 SKU Hunters 新品企划工作室的市场分析 
     "products": [{"name": "代表性竞品", "price": 0.0, "imageUrl": "", "sellingPoint": "卖点", "design": 7.5}],
     "gapZone": {"x": [价格下, 价格上], "y": [设计感下, 设计感上], "label": "机会空白描述"},
     "priceBands": [{"band": "价格带", "pct": 0.0}],
-    "sellingPoints": [{"word": "卖点词", "count": 0}]
+    "sellingPoints": [{"word": "卖点词"}]
   },
   "insightBase": {
     "hitProducts": [{"name": "品类历史爆品", "index": 0, "factors": ["爆品因素"], "note": "备注"}],

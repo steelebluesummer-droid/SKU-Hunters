@@ -16,7 +16,7 @@ export default function OpportunityCards({ opportunities = [], selected, onSelec
       <div style={{ opacity: processLog.length === 0 || logDone ? 1 : 0, transition: 'opacity 0.5s', pointerEvents: processLog.length === 0 || logDone ? 'auto' : 'none' }}>
         <Card size="small" style={{ marginBottom: 16, background: 'var(--color-surface-alt)', border: '1px solid var(--color-border-strong)' }}>
           <b style={{ color: 'var(--color-action-primary)' }}>机会生成：</b>
-          综合趋势信号、用户痛点、竞品空白、名创资产与流行元素，收敛出方向——每个方向的依据可点击回溯。
+          消费洞察阶段的市场机会池（同一数据源），完成「市场机会 → 商品机会」补全：目标用户 / 核心场景 / 产品策略 / 价格带——每个方向的依据可点击回溯。
         </Card>
         <Row gutter={16}>
           {opportunities.map(o => (
@@ -29,23 +29,49 @@ export default function OpportunityCards({ opportunities = [], selected, onSelec
                 onClick={() => onSelect(o.id)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(o.id); } }}
                 title={<span style={{ fontSize: 16 }}>{o.emoji} {o.title}</span>}
-                extra={<Tag color="purple">{o.direction}</Tag>}
+                extra={
+                  <span>
+                    {o.confidence > 0 && <Tag color="red" style={{ marginRight: 4 }}>置信度 {o.confidence}%</Tag>}
+                    <Tag color="purple">{o.direction}</Tag>
+                  </span>
+                }
               >
-                <p style={{ fontSize: 13, minHeight: 42 }}>{o.pitch}</p>
-                <div style={{ marginBottom: 8 }}>
-                  {(o.keywords || []).map(k => <Tag key={k} style={{ whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: '100%', height: 'auto', lineHeight: '1.6' }}>{k}</Tag>)}
+                {/* ── 第一层：3 秒看懂 ── */}
+                <p style={{ fontSize: 13, minHeight: 36 }}>{o.pitch}</p>
+                <div style={{ fontSize: 12, marginBottom: 6 }}>
+                  {(o.targetUser || o.scenario) && <span>👤 {o.targetUser}{o.scenario ? ` · 📍 ${o.scenario}` : ''}</span>}
+                  {o.priceBand && <span style={{ marginLeft: 8, color: 'var(--color-brand-accent)' }}><b>{o.priceBand}</b></span>}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 8 }}>建议价格带：<b>{o.priceBand}</b></div>
-                <div style={{ borderTop: '1px dashed var(--color-border)', paddingTop: 8 }}>
-                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>依据链：</div>
-                  {(o.evidence || []).map((e, i) => (
-                    <Popover key={i} content={e.text} title={e.from}>
-                      <Tag color="default" style={{ fontSize: 11, marginBottom: 4, cursor: 'help' }}>
-                        {e.from} #{i + 1}
-                      </Tag>
-                    </Popover>
-                  ))}
-                </div>
+
+                {/* ── 第二层：为什么值得做 ── */}
+                {(o.painPoint || o.competitorGap || (o.evidence || []).length > 0) && (
+                  <div style={{ borderTop: '1px dashed var(--color-border)', paddingTop: 8, marginBottom: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 4 }}>为什么值得做</div>
+                    {o.painPoint && <div style={{ fontSize: 12, marginBottom: 3 }}>痛点：{o.painPoint}</div>}
+                    {o.competitorGap && <div style={{ fontSize: 12, marginBottom: 3 }}>竞品空白：{o.competitorGap}</div>}
+                    {(o.evidence || []).map((e, i) => (
+                      <Popover key={i} content={e.text} title={e.from}>
+                        <Tag color="default" style={{ fontSize: 11, marginBottom: 4, cursor: 'help' }}>
+                          {e.from} #{i + 1}
+                        </Tag>
+                      </Popover>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── 第三层：怎么做 ── */}
+                {(o.assetFit || o.productStrategy) && (
+                  <div style={{ borderTop: '1px dashed var(--color-border)', paddingTop: 8, marginBottom: 4 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 4 }}>怎么做</div>
+                    {o.assetFit?.ip && <div style={{ fontSize: 12, marginBottom: 3 }}>🤝 IP：<b>{o.assetFit.ip}</b>{(o.assetFit.ipReason ? ` — ${o.assetFit.ipReason}` : '')}</div>}
+                    {o.assetFit?.designLanguage && <div style={{ fontSize: 12, marginBottom: 3 }}>🎨 设计语言：{o.assetFit.designLanguage}</div>}
+                    {o.assetFit?.color && <div style={{ fontSize: 12, marginBottom: 3 }}>🎨 颜色：{o.assetFit.color}</div>}
+                    {o.assetFit?.material && <div style={{ fontSize: 12, marginBottom: 3 }}>🧱 材质：{o.assetFit.material}</div>}
+                    {o.assetFit?.packaging && <div style={{ fontSize: 12, marginBottom: 3 }}>📦 包装：{o.assetFit.packaging}</div>}
+                    {o.productStrategy && <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 3 }}>🎯 产品策略：{o.productStrategy}</div>}
+                  </div>
+                )}
+
                 <Button type={selected === o.id ? 'primary' : 'default'} block style={{ marginTop: 8 }}>
                   {selected === o.id ? '✓ 已选定该方向' : '选定该方向'}
                 </Button>

@@ -214,6 +214,7 @@ def test_action_generate_insights_advances_status(client):
     assert body["status"] == "insights_ready"
     assert set(body["insights"]) == {
         "trendRadar", "consumerVoice", "competitiveMap", "insightBase", "trendGallery",
+        "opportunityPool", "dataSource",
     }
     assert client.get(f"/api/v1/plans/{plan_id}").json()["status"] == "insights_ready"
 

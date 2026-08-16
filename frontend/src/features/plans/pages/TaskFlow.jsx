@@ -220,6 +220,7 @@ export default function TaskFlow() {
         <div>
           <PlanCard
             card={ws.planCard}
+            proposal={ws.productProposal}
             opportunity={ws.opportunities?.find((o) => o.id === selectedOpp)}
             brief={brief}
             status={planCardState}

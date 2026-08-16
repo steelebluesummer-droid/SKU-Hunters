@@ -43,6 +43,7 @@ export default function usePlanWorkspace(planId) {
   const status = plan?.status || 'brief_locked';
   const selectedOpportunity = plan?.selected_opportunity || null;
   const planCard = plan?.plan_card || null;
+  const productProposal = plan?.product_proposal || null;
   const brief = toCamelBrief(plan?.brief || null);
 
   // ── 内部：加载任务详情 + 按落盘状态恢复已生成数据 ──────
@@ -113,7 +114,7 @@ export default function usePlanWorkspace(planId) {
     setError(null);
     try {
       const data = await generatePlanCard(opportunityId, planId);
-      setPlan((p) => (p ? { ...p, status: data.status, plan_card: data.plan_card, selected_opportunity: opportunityId } : p));
+      setPlan((p) => (p ? { ...p, status: data.status, plan_card: data.plan_card, product_proposal: data.product_proposal, selected_opportunity: opportunityId } : p));
       return data.plan_card;
     } catch (e) {
       setError(e);
@@ -193,6 +194,7 @@ export default function usePlanWorkspace(planId) {
     brief,
     selectedOpportunity,
     planCard,
+    productProposal,
     // UI
     loading,
     pendingAction,
