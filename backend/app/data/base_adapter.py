@@ -135,6 +135,40 @@ _FIXTURE_RECORDS: list[dict[str, Any]] = [
 ]
 
 
+# ── 企划品类归一化与父品类匹配 ──────────────────────────
+# 父品类 → 匹配子串：明细 category 含该子串即归入父品类。
+# 例：「风扇」作为唯一企划品类，便携小风扇/手持小风扇/桌面风扇/塔扇/循环扇等归入其中。
+CATEGORY_PARENT_PATTERNS: dict[str, str] = {"风扇": "扇"}
+
+
+def normalize_category(category: str | None) -> str | None:
+    """企划层品类归一化：含「扇」的子品类（小风扇/便携小风扇/塔扇/循环扇…）统一为父品类「风扇」。
+
+    旧任务里的历史名称（如「小风扇」）查询时兼容映射到「风扇」，聚合所有「扇」子品类。
+    不含「扇」的品类（如雨伞、香薰）原样返回。
+    """
+    if not category:
+        return category
+    for parent, pattern in CATEGORY_PARENT_PATTERNS.items():
+        if pattern in category:
+            return parent
+    return category
+
+
+def category_matches(record_category, query_category):
+    """明细 category 是否匹配查询品类：父品类按子串规则，普通品类等值匹配。
+
+    - 查询「风扇」→ 明细 category 含「扇」即匹配（便携小风扇/落地扇/塔扇…）
+    - 查询普通品类（雨伞/香薰）→ 等值匹配
+    """
+    if not query_category:
+        return True
+    pattern = CATEGORY_PARENT_PATTERNS.get(query_category)
+    if pattern:
+        return pattern in (record_category or "")
+    return record_category == query_category
+
+
 def _filter_records(
     records: list[BaseRecord],
     keyword: str | None = None,
@@ -150,7 +184,7 @@ def _filter_records(
     if platform:
         result = [r for r in result if r.platform == platform]
     if category:
-        result = [r for r in result if r.category == category]
+        result = [r for r in result if category_matches(r.category, category)]
     if as_of:
         result = [r for r in result if r.record_date <= as_of]  # 不读未来数据
     if snapshot_id:
@@ -398,6 +432,86 @@ class FeishuBaseProvider:
             return [text]
         return []
 
+    @staticmethod
+    def _unwrap_text_list(raw: Any) -> Any:
+        """飞书富文本列表 [{"text": "...", "type": "text"}] → 拼接为纯文本；否则原样返回
+
+        仅当 list 中每项为 dict 且含 "text" 键、且不含结构化 "count"/"value" 键时判定为
+        飞书文本列表（区别于已 list 的痛点/场景条目），拼接后便于后续 JSON 解析。
+        """
+        if isinstance(raw, list) and raw and all(
+            isinstance(i, dict) and "text" in i and "count" not in i and "value" not in i
+            for i in raw
+        ):
+            return "".join(str(i.get("text", "")) for i in raw)
+        return raw
+
+    @staticmethod
+    def _to_pain_points(raw: Any) -> list[dict[str, Any]]:
+        """飞书 pain_points 字段（JSON 文本 / 已 list / 文本列表）→ [{"text": str, "count": number}]
+
+        仅在 JSON 结果为 list 时接受；每项须 dict，text 非空字符串，count 可转非负数；
+        非法项跳过，不抛异常，不伪造。错误 JSON / dict / 普通字符串 → []。
+        """
+        raw = FeishuBaseProvider._unwrap_text_list(raw)
+        parsed = FeishuBaseProvider._to_json(raw)
+        if not isinstance(parsed, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            raw_text = item.get("text")
+            if not isinstance(raw_text, str) or not raw_text.strip():
+                continue
+            text = raw_text.strip()
+            if not text:
+                continue
+            count = item.get("count")
+            if count is None:
+                continue
+            try:
+                count_f = float(count)
+            except (ValueError, TypeError):
+                continue
+            if count_f < 0:
+                continue
+            out.append({"text": text, "count": count_f})
+        return out
+
+    @staticmethod
+    def _to_scenes(raw: Any) -> list[dict[str, Any]]:
+        """飞书 scenes 字段（JSON 文本 / 已 list / 文本列表）→ [{"name": str, "value": number}]
+
+        仅在 JSON 结果为 list 时接受；每项须 dict，name 非空字符串，value 可转非负数；
+        非法项跳过，不抛异常，不伪造。错误 JSON / dict / 普通字符串 → []。
+        """
+        raw = FeishuBaseProvider._unwrap_text_list(raw)
+        parsed = FeishuBaseProvider._to_json(raw)
+        if not isinstance(parsed, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            raw_name = item.get("name")
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                continue
+            name = raw_name.strip()
+            if not name:
+                continue
+            value = item.get("value")
+            if value is None:
+                continue
+            try:
+                value_f = float(value)
+            except (ValueError, TypeError):
+                continue
+            if value_f < 0:
+                continue
+            out.append({"name": name, "value": value_f})
+        return out
+
     def _to_base_record(self, fields: dict[str, Any], record_id: str) -> tuple[BaseRecord | None, dict[str, Any] | None]:
         """飞书字段 → BaseRecord；非法 platform/字段校验失败 → (None, caveat)（跳过但不静默吞掉）"""
         platform_raw = self._to_text(fields.get("platform"))
@@ -528,6 +642,8 @@ class FeishuBaseProvider:
             "record_count": int(self._to_float(row.get("record_count")) or 0),
             "avg_heat_index": self._normalize_heat(self._to_float(row.get("avg_heat_index"))) or 0.0,
             "brands": brands,
+            "pain_points": self._to_pain_points(row.get("pain_points")),
+            "scenes": self._to_scenes(row.get("scenes")),
         }
 
     def get_date_distribution(self, keyword, as_of=None, snapshot_id=None) -> list[dict[str, Any]]:

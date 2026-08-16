@@ -178,10 +178,10 @@ def test_live_insight_has_data_context():
         ),
     ]
     adapter = BaseDataAdapter(provider=MockBaseProvider(records=records))
-    bundle = build_live_insight_bundle("便携小风扇", {"mode": "live"}, adapter)
+    bundle = build_live_insight_bundle("风扇", {"mode": "live"}, adapter)
     dc = bundle["dataContext"]
     assert dc["data_source"] == "feishu"
-    assert dc["record_count"] == 1  # 精确匹配「便携小风扇」
-    assert dc["evidence_count"] == 1  # 来自真实 source_url 的 evidence refs
+    assert dc["record_count"] == 2  # 父品类「风扇」聚合便携小风扇 + 手持小风扇
+    assert dc["evidence_count"] == 2  # 来自真实 source_url 的 evidence refs
     assert dc["snapshot_id"] == "snap-a"
-    assert bundle["evidenceCount"] == 1  # 证据数量来自真实 evidence refs，非手填
+    assert bundle["evidenceCount"] == 2  # 证据数量来自真实 evidence refs，非手填
