@@ -21,6 +21,10 @@ def isolated_state(monkeypatch, tmp_path):
     monkeypatch.setattr(repository, "_STATE_DIR", tmp_path)
     monkeypatch.setattr(repository, "_STATE_FILE", tmp_path / "plans_state.json")
     monkeypatch.setattr(repository, "_LEGACY_STATE_FILE", tmp_path / "legacy_plans_state.json")
+    # 洞察缓存同样隔离到 tmp_path：避免全量跑时命中其他用例写入的共享缓存
+    from app.planning import insight_cache
+    monkeypatch.setattr(insight_cache, "_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(insight_cache, "_CACHE_FILE", tmp_path / "cache" / "insight_analysis_cache.json")
     yield
     repository._PLANS.clear()
     repository._PLANS.update(snapshot)
@@ -53,10 +57,12 @@ def _patch_agents(monkeypatch, cm_ret, af_ret, pool_ret=([], []), cv_ret=None, e
             return fn(*a, **k)
         return wrapper
 
+    _pool_fn = _wrapped(lambda *a, **k: pool_ret, "pool")
     monkeypatch.setattr(
-        "app.planning.opportunity_discovery.build_opportunity_pool",
-        _wrapped(lambda *a, **k: pool_ret, "pool"),
+        "app.planning.opportunity_discovery.build_opportunity_pool", _pool_fn
     )
+    # service 通过 from-import 绑定函数，需同时 patch service 侧引用才真正生效
+    monkeypatch.setattr("app.planning.service.build_opportunity_pool", _pool_fn)
     monkeypatch.setattr(
         "app.planning.consumer_voice_agent.build_consumer_voice_chains",
         _wrapped(lambda *a, **k: cv_ret, "cv"),

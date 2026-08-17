@@ -45,6 +45,7 @@ def _record(record_id: str, *, category: str, platform: str, heat: float, price:
 class _Adapter:
     def __init__(self, records, summary=None, summary_error=None, summary_calls=None, competitors=None):
         self.records = records
+        self.last_snapshot_meta = []
         self.summary = summary
         self.summary_error = summary_error
         self.summary_calls = summary_calls if summary_calls is not None else []
