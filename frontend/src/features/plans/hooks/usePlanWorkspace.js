@@ -88,11 +88,20 @@ export default function usePlanWorkspace(planId) {
       const data = await generateInsights(planId);
       setInsights(data.insights);
       setPlan((p) => (p ? { ...p, status: data.status } : p));
-      return data.insights;
+      // 返回 status 供页面判断是否真的进入下一阶段（仅 insights_ready 才跳步）
+      return { insights: data.insights, status: data.status };
     } catch (e) {
-      setError(e);
+      // 失败保留后端结构化错误（code/message/request_id），供第 0 步错误卡片展示与重试
+      setError({
+        code: e?.code || 'HTTP_ERROR',
+        message: e?.message || '洞察生成失败',
+        status: e?.status,
+        requestId: e?.request_id,
+        action: 'insights',
+      });
       throw e;
     } finally {
+      // 只清 pendingAction，不清除 error（失败信息需保留到重试成功）
       setPendingAction(null);
     }
   }, [planId]);

@@ -69,6 +69,8 @@ design.rar
 # 运行时任务状态（本地持久化，不入库）
 backend/data/plans_state.json
 backend/data/state/
+backend/data/cache/
+backend/data/snapshot_cache/
 
 # 前端验收截图与临时脚本（本地证据，不入库；文档代表性截图见 docs/refactor/v2/preview/）
 /preview/

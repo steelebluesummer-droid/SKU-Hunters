@@ -83,6 +83,8 @@ def _save_state() -> None:
                 "opportunities": p.get("opportunities", []),
                 "insights": p.get("insights"),
                 "data_context": p.get("data_context"),
+                # 旧任务懒补增强状态：持久化后重启不再重复触发 LLM 补缺失节点
+                "enhance_state": p.get("enhance_state"),
             }
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)

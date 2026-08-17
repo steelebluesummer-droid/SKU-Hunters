@@ -239,7 +239,8 @@ class CompetitorDataView(_ReadView):
             return {
                 "products": [], "record_count": 0, "product_count": 0, "skipped_count": 0,
                 "price_bands": [], "selling_points": [], "brands": [], "evidence_refs": [],
-                "gap_zone": None, "caveats": [{"source": "competitors", "reason": f"竞品表不可用：{e!s}"}],
+                "gap_zone": None, "snapshot_id": None,
+                "caveats": [{"source": "competitors", "reason": f"竞品表不可用：{e!s}"}],
             }
         products, skipped_count = self._build_products(records)
         if skipped_count:
@@ -252,6 +253,7 @@ class CompetitorDataView(_ReadView):
             "record_count": len(records),
             "product_count": len(products),
             "skipped_count": skipped_count,
+            "snapshot_id": (records[0].snapshot_id if records else None),
             "price_bands": self._build_price_bands(records),
             "selling_points": self._build_selling_points(records),
             "brands": self._build_brands(records),

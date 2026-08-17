@@ -18,7 +18,13 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
+import time
+
+_LOG = logging.getLogger("llm")
+
 
 # 各供应商的 base_url 与推荐模型（全部为 OpenAI 兼容格式）
 PROVIDERS: dict[str, dict[str, str]] = {    "zhipu": {
@@ -77,19 +83,48 @@ def cap_user_prompt(text: str, max_chars: int | None = None) -> str:
             f"{text[-tail:]}")
 
 
+def _env_float(name: str, default: float, label: str) -> float:
+    """读取浮点环境变量；非法时用安全默认并记录配置错误（不崩溃）"""
+    raw = os.getenv(name, str(default))
+    try:
+        v = float(raw)
+        return v if v > 0 else default
+    except (ValueError, TypeError):
+        _LOG.warning("%s 非法（%r），使用安全默认 %s", label, raw, default)
+        return default
+
+
+def _env_int(name: str, default: int, label: str) -> int:
+    """读取整数环境变量；非法时用安全默认并记录配置错误（不崩溃）"""
+    raw = os.getenv(name, str(default))
+    try:
+        v = int(raw)
+        return v if v >= 0 else default
+    except (ValueError, TypeError):
+        _LOG.warning("%s 非法（%r），使用安全默认 %s", label, raw, default)
+        return default
+
+
 def complete(
     system_prompt: str,
     user_prompt: str,
     temperature: float = 0.3,
     max_tokens: int = 1024,
+    node: str = "llm",
 ) -> str | None:
     """统一调用入口。任何失败返回 None——调用方负责降级。
+
+    重试纪律（第三阶段统一）：
+    - 网络/超时/空响应重试由本函数负责（最多 LLM_MAX_RETRIES+1 次，默认 2 次）；
+    - JSON/契约失败由调用方负责（见各 Agent 的 range(MAX_LLM_CALLS)）；
+    - 两者互不叠加：本函数重试完网络失败返回 None 后，调用方**不再**为网络失败重试。
 
     Args:
         system_prompt: Agent 角色 prompt（prompts/ 目录下的模板）
         user_prompt: 本次任务的具体输入
         temperature: 默认 0.3（决策场景求稳，不求发散）
         max_tokens: 输出上限
+        node: 调用节点名（用于结构化日志，不含密钥/完整 prompt）
 
     Returns:
         模型输出文本；未配置 Key 或调用失败返回 None
@@ -102,27 +137,54 @@ def complete(
     if config is None:
         return None
 
+    timeout = _env_float("LLM_TIMEOUT", 45.0, "LLM_TIMEOUT")
+    max_retries = _env_int("LLM_MAX_RETRIES", 1, "LLM_MAX_RETRIES")
     try:
         import openai
-
-        client = openai.OpenAI(
-            api_key=config["api_key"],
-            base_url=config["base_url"],
-            timeout=int(os.getenv("LLM_TIMEOUT", "120")),
-        )
-        resp = client.chat.completions.create(
-            model=config["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": cap_user_prompt(user_prompt)},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return resp.choices[0].message.content
-    except Exception:  # noqa: BLE001 — LLM 故障刻意降级，不阻塞会议
-        # 降级纪律：LLM 故障不阻塞会议，规则引擎兜底
+    except ImportError:  # pragma: no cover
         return None
+
+    for attempt in range(max_retries + 1):
+        t0 = time.monotonic()
+        try:
+            client = openai.OpenAI(
+                api_key=config["api_key"],
+                base_url=config["base_url"],
+                timeout=timeout,
+            )
+            resp = client.chat.completions.create(
+                model=config["model"],
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": cap_user_prompt(user_prompt)},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            content = resp.choices[0].message.content
+            elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+            _LOG.info(json.dumps({
+                "event": "llm_call", "node": node,
+                "attempt": attempt + 1,
+                "status": "success" if content else "error",
+                "reason": "" if content else "empty",
+                "elapsed_ms": elapsed_ms,
+            }, ensure_ascii=False))
+            if content:
+                return content
+        except Exception as exc:  # noqa: BLE001 — LLM 故障刻意降级，不阻塞会议
+            elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+            _LOG.info(json.dumps({
+                "event": "llm_call", "node": node,
+                "attempt": attempt + 1,
+                "status": "error",
+                "reason": type(exc).__name__,
+                "elapsed_ms": elapsed_ms,
+            }, ensure_ascii=False))
+            # 降级纪律：单次失败未达重试上限则重试，否则返回 None（调用方降级）
+            if attempt >= max_retries:
+                return None
+    return None
 
 
 def load_prompt(agent_name: str) -> str:

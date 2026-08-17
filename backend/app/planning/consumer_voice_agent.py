@@ -200,12 +200,13 @@ def build_consumer_voice_chains(category: str, bundle: dict, brief: dict) -> dic
 
     prompt = _serialize(bundle, category, brief)
     data: dict | None = None
-    for _ in range(2):  # 瞬时限流/输出不合契约重试一次（与 opportunity_discovery 一致）
-        raw = llm.complete(_LLM_SYSTEM_PROMPT, prompt, temperature=0.4, max_tokens=4000)
-        if raw:
-            data = _parse_llm_json(raw)
-            if data:
-                break
+    for _ in range(2):  # 仅 JSON/契约失败重试一次；网络/超时已由 llm.complete 内部重试
+        raw = llm.complete(_LLM_SYSTEM_PROMPT, prompt, temperature=0.4, max_tokens=4000, node="consumer_voice")
+        if not raw:
+            break  # 网络/超时失败（llm.complete 已重试）→ 不在此叠加
+        data = _parse_llm_json(raw)
+        if data:
+            break
     if not data:
         return None
 

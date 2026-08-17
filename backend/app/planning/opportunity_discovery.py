@@ -311,10 +311,11 @@ def _llm_pool(category: str, bundle: dict, brief: dict) -> tuple[list[dict[str, 
             user_prompt=prompt,
             temperature=0.4,
             max_tokens=4000,
+            node="opportunity_pool",
         )
         if not raw:
             last_error = "LLM 未配置或调用失败"
-            continue
+            break  # 网络/超时已由 llm.complete 内部重试，不在此叠加
         data = _parse_llm_json(raw)
         if data is None:
             last_error = "输出不是合法 JSON"
