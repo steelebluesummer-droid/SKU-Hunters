@@ -144,7 +144,7 @@ INSIGHT_BASE = {
     "designLanguage": ["圆润形态", "低饱和配色", "IP 脸部特征保留", "功能性萌化"],
 }
 
-# ── 流行元素 Trend Gallery ───────────────────────────────
+# ── 流行元素 Trend Gallery（小风扇品类 Moodboard，配图来自 frontend/public/trend/）──
 TREND_GALLERY = {
     "colors": [
         {"name": "奶油黄", "hex": "#F5E6B8", "source": "食品 · 烘焙包装"},
@@ -153,23 +153,29 @@ TREND_GALLERY = {
         {"name": "玻璃蓝", "hex": "#CDE7F0", "source": "美妆 · 水光概念"},
         {"name": "薰衣草紫", "hex": "#D9CCF0", "source": "服装 · 春夏秀场"},
         {"name": "蜜瓜橙", "hex": "#F8D5B0", "source": "食品 · 果冻甜品"},
+        {"name": "Cloud Dancer", "hex": "#F0EDE9", "source": "潘通 2026 年度色", "year": "2026 年度色"},
+        {"name": "Transformative Teal", "hex": "#2E6E6E", "source": "潘通 2026 年度色", "year": "2026 年度色"},
     ],
     "patterns": [
-        {"name": "蝴蝶", "source": "服装 · 印花", "note": "Y2K 回潮带动，女性向品类适配度高"},
-        {"name": "豹纹", "source": "服装 · 配饰", "note": "阶段性流行，适合小面积点缀"},
-        {"name": "水波纹", "source": "饮品 · 包装", "note": "传递清凉感，夏季品类天然适配"},
-        {"name": "植物插画", "source": "食品 · 包装", "note": "自然治愈风的视觉载体"},
+        {"name": "不规则圆点", "source": "治愈系印花趋势", "note": "低饱和圆点带来松弛感，适合居家桌面", "image": "/trend/pattern_01.jpg"},
+        {"name": "水彩晕染云朵", "source": "低饱和莫兰迪方向", "note": "柔和晕染，治愈系视觉载体", "image": "/trend/pattern_02.jpg"},
+        {"name": "抽象有机形态", "source": "潘通 Ivory 配色", "note": "不规则有机轮廓，去工业化", "image": "/trend/pattern_03.jpg"},
+        {"name": "Y2K 辣妹贴钻", "source": "手持款配饰化", "note": "千禧年闪钻，配饰化表达", "image": "/trend/pattern_04.jpg"},
+        {"name": "IP 卡通印花", "source": "凯蒂猫 / 库洛米 / Chiikawa", "note": "IP 联名印花，情绪价值拉满", "image": "/trend/pattern_05.jpg"},
     ],
     "shapes": [
-        {"name": "圆润鹅卵石", "source": "家居 · 摆件", "note": "无攻击性的亲和形态"},
-        {"name": "透明 / 果冻质感", "source": "美妆 · 3C", "note": "轻盈、夏日感的材质语言"},
-        {"name": "模块化组件", "source": "潮玩 · 盲盒", "note": "可替换结构带来收集玩法"},
-        {"name": "磁吸连接", "source": "3C · 配件", "note": "兼具功能与把玩的交互方式"},
+        {"name": "立式挂脖", "source": "挂脖款主流形态", "note": "解放双手，通勤 / 户外通用", "image": "/trend/shape_01.jpg"},
+        {"name": "折叠手持桌面两用", "source": "倍思路线 · 2026 趋势", "note": "手持 / 桌面一键切换", "image": "/trend/shape_02.jpg"},
+        {"name": "复古桌面摇头", "source": "情绪价值款", "note": "复古造型 + 摇头送风", "image": "/trend/shape_03.jpg"},
+        {"name": "无叶涡轮", "source": "戴森 / 徕芬高端线", "note": "无叶设计，高端科技感", "image": "/trend/shape_04.jpg"},
+        {"name": "挂件 mini", "source": "25-50 元 IP 联名款", "note": "小巧挂件化，随身穿搭", "image": "/trend/shape_05.jpg"},
     ],
     "expressions": [
-        {"name": "豆豆眼", "emoji": "◕‿◕", "note": "呆萌系通用表情语言"},
-        {"name": "腮红脸", "emoji": "◠‿◠", "note": "害羞感，情绪价值强化"},
-        {"name": "无语脸", "emoji": "¬_¬", "note": "反萌差，社媒传播点"},
+        {"name": "打工人体面", "emoji": "💼", "note": "白色桌面小风扇 + 精致工位场景", "image": "/trend/expr_01.jpg"},
+        {"name": "苦夏搭子", "emoji": "🫂", "note": "随身手持风扇的陪伴感", "image": "/trend/expr_02.jpg"},
+        {"name": "抽象降温", "emoji": "🧊", "note": "冰感蓝色系视觉，降温情绪氛围", "image": "/trend/expr_03.jpg"},
+        {"name": "走秀配件", "emoji": "👜", "note": "手持款配饰化，时尚人像", "image": "/trend/expr_04.jpg"},
+        {"name": "白噪音助眠", "emoji": "😴", "note": "静音款叙事，极简卧室场景", "image": "/trend/expr_05.jpg"},
     ],
 }
 

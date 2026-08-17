@@ -593,6 +593,10 @@ def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, A
 
         card = _build_dynamic_plan_card(plan, opportunity)
         proposal = _build_product_proposal(plan, opportunity)
+        # 概念图统一：以企划案图（product_proposal.design.imageUrl）为准回填企划卡
+        proposal_img = (proposal.get("design") or {}).get("imageUrl", "")
+        if proposal_img:
+            card["conceptImage"] = proposal_img
 
         plan["selected_opportunity"] = opportunity_id
         plan["plan_card"] = card

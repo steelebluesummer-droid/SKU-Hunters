@@ -141,14 +141,30 @@ async def list_plans():
 @router.get("/plans/{plan_id}")
 async def get_plan(plan_id: str):
     plan = _get_plan_or_404(plan_id)
+    from app.planning.repository import localize_concept_image
+
+    # 概念图统一：以企划案图（product_proposal.design.imageUrl）为唯一源，本地化后两边一致
+    plan_card = plan.get("plan_card")
+    product_proposal = plan.get("product_proposal")
+    source_img = ((product_proposal or {}).get("design") or {}).get("imageUrl", "") or (plan_card or {}).get("conceptImage", "")
+    local_img = localize_concept_image(plan_id, source_img)
+    if plan_card:
+        plan_card = dict(plan_card)
+        plan_card["conceptImage"] = local_img
+    if product_proposal:
+        product_proposal = dict(product_proposal)
+        design = dict(product_proposal.get("design") or {})
+        design["imageUrl"] = local_img
+        product_proposal["design"] = design
+
     return {
         "plan_id": plan["plan_id"],
         "brief": plan["brief"],
         "mode": plan["mode"],
         "status": plan["status"],
         "selected_opportunity": plan["selected_opportunity"],
-        "plan_card": plan.get("plan_card"),  # 已有企划卡（归档后回看用）
-        "product_proposal": plan.get("product_proposal"),  # 新品企划案（六模块）
+        "plan_card": plan_card,  # 已有企划卡（归档后回看用）
+        "product_proposal": product_proposal,  # 新品企划案（六模块）
         "created_at": plan["created_at"],
     }
 
@@ -424,8 +440,8 @@ async def get_ip_resource():
     }
 
 
-def _load_curated_module(topic: str, key: str, fallback: dict):
-    if os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower() == "feishu":
+def _load_curated_module(topic: str, key: str, fallback: dict, use_feishu: bool = True):
+    if use_feishu and os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower() == "feishu":
         try:
             from app.planning.live_insights import build_live_insight_bundle
 
@@ -455,7 +471,8 @@ async def insight_base(topic: str = "小风扇"):
 
 @router.get("/trend-gallery")
 async def trend_gallery(topic: str = "小风扇"):
-    return _load_curated_module(topic, "trendGallery", fixtures.TREND_GALLERY)
+    # 流行元素板是静态策展数据，不读飞书实时表（飞书无 colors/patterns/shapes 字段）
+    return _load_curated_module(topic, "trendGallery", fixtures.TREND_GALLERY, use_feishu=False)
 
 
 @router.get("/data-board")

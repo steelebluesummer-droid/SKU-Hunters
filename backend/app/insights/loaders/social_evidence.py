@@ -45,6 +45,8 @@ _COLOR_HEX_MAP = {
     "莫兰迪": "#C8C0B8", "多巴胺": "#F5A0B0", "大地色": "#C8B090",
     "牛油果绿": "#B8C8A0", "雾霾蓝": "#A8B8C8", "燕麦色": "#E0D8C8",
     "焦糖": "#C8A070", "奶咖": "#D8C0A8", "橄榄绿": "#A8B080",
+    "Cloud Dancer": "#F0EDE9", "Transformative Teal": "#2E6E6E",
+    "Sage Green": "#9CAF88", "Dusty Rose": "#D4A5A5",
 }
 
 # 确定性兜底调色板（颜色名未命中时按顺序取，保证同一名字永远同一色）
@@ -269,15 +271,57 @@ class SocialEvidenceLoader:
     # ── ⑤ 流行元素板 ──────────────────────────────────────
     def to_trend_gallery(self, topic: str) -> dict[str, Any]:
         d = self.load(topic).get("trend_gallery", {})
+
+        # 配图映射：小风扇品类 15 张本地图（按类型 + 序号，图片在前端 /trend/ 目录）
+        image_map = {
+            "patterns": [f"/trend/pattern_0{i}.jpg" for i in range(1, 6)],
+            "shapes": [f"/trend/shape_0{i}.jpg" for i in range(1, 6)],
+            "expressions": [f"/trend/expr_0{i}.jpg" for i in range(1, 6)],
+        }
+        emojis = ["💼", "🫂", "🧊", "👜", "😴"]
+
+        def split_name_note(s: str) -> tuple[str, str]:
+            """「不规则圆点 (治愈系印花趋势)」→ (name, note)"""
+            s = (s or "").strip()
+            if "(" in s and ")" in s:
+                name, rest = s.split("(", 1)
+                return name.strip(), rest.rsplit(")", 1)[0].strip()
+            return s, ""
+
+        def items(raw, key, with_emoji=False):
+            out = []
+            for i, s in enumerate(raw):
+                name, note = split_name_note(s)
+                item = {
+                    "name": name,
+                    "note": note,
+                    "image": image_map[key][i] if i < len(image_map[key]) else "",
+                }
+                if with_emoji:
+                    item["emoji"] = emojis[i] if i < len(emojis) else "✨"
+                out.append(item)
+            return out
+
+        def colors(raw):
+            out = []
+            for i, c in enumerate(raw):
+                name = c
+                if "(" in c:
+                    name = c.split("(", 1)[0].strip()
+                out.append({
+                    "name": name,
+                    "hex": _resolve_color_hex(c, i),
+                    "source": "",
+                    "year": "2026 年度色" if "年度色" in c else "",
+                })
+            return out
+
         return {
             "processLog": [f"加载 {topic} 当季流行设计元素"],
-            "colors": [
-                {"name": c, "hex": _resolve_color_hex(c, i), "source": ""}
-                for i, c in enumerate(d.get("colors", []))
-            ],
-            "patterns": [{"name": p, "source": "", "note": ""} for p in d.get("patterns", [])],
-            "shapes": [{"name": s, "source": "", "note": ""} for s in d.get("shapes", [])],
-            "expressions": [{"name": e, "emoji": "", "note": ""} for e in d.get("expressions", [])],
+            "colors": colors(d.get("colors", [])),
+            "patterns": items(d.get("patterns", []), "patterns"),
+            "shapes": items(d.get("shapes", []), "shapes"),
+            "expressions": items(d.get("expressions", []), "expressions", with_emoji=True),
         }
 
     # ── 五看全量 ───────────────────────────────────────────

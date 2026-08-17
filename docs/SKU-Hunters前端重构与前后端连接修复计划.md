@@ -94,7 +94,6 @@
 - `DataBoard.jsx`/`InsightBase.jsx`/`TrendGallery.jsx`：统一卡片语言；TrendGallery 色板改 WGSN 式大色块（高 120px+色名叙事）。
 
 ### 不做的事
-- 不动评审委员会旧链路（`routes.py`、`agents/`）。
 - 不引入新依赖（保持 React 18 + antd 5 + echarts）。
 - 不改飞书/Aily 集成。
 

@@ -14,8 +14,7 @@
 
 **范围（本阶段）**：
 - 只读 provider：查询记录 + 分页 + 字段转换。
-- 不写入、不删除、不迁移现有数据（`committee.db`/`xhs.db`/`plans_state.json` 不动）。
-- 不实现七位 Agent 完整业务逻辑，不接 `RetroLedgerWriter` 持久化。
+- 不写入、不删除、不迁移现有数据（`xhs.db`/`plans_state.json` 不动）。
 
 **范围（明确不做）**：真实数据导入（第 4 步之后）、RetroLedger 持久化、Agent 业务逻辑改造。
 
@@ -144,7 +143,7 @@ Stage 9A 的 `FeishuBaseProvider` 用了三枚环境变量，其中两枚的语�
 | `snapshot_id` | 快照标识（数据版本） | Text | 原样 | 非空；查询时精确匹配锁定 |
 
 **关键约束**：
-- `as_of`（查询上界）只与 `record_date` 比较，防学习官读未来数据。
+- `as_of`（查询上界）只与 `record_date` 比较，防读未来数据。
 - `snapshot_id` 与 `record_date`/`ingested_at` 三者语义分离，不可混用：`record_date` 是「事件何时发生」，
   `ingested_at` 是「何时入库」，`snapshot_id` 是「哪一版快照」。
 

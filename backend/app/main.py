@@ -14,12 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # 启动即加载 backend/.env（LLM Key、即梦 AK/SK、飞书配置）——必须在 app.* 导入前
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-# 飞书机器人模块（backend/feishu/，需从 backend/ 目录启动以保证可导入）
-from feishu import FeishuConfig  # noqa: E402
-from feishu.webhook import create_feishu_router  # noqa: E402
-
 from app.api.planning import router as planning_router  # noqa: E402
-from app.api.routes import router as committee_router  # noqa: E402
 from app.xhs.api import router as xhs_router  # noqa: E402
 
 app = FastAPI(
@@ -62,20 +57,8 @@ app.add_middleware(
 # 企划工作室 API：POST/GET /api/v1/plans...（v2.0 主链路）
 app.include_router(planning_router)
 
-# 评审 API（旧评审委员会链路，复盘归档阶段复用）：POST/GET /api/v1/reviews...
-app.include_router(committee_router)
-
 # 小红书公开数据接入（第一阶段：本地导入 + 统计）：/api/v1/xhs...
 app.include_router(xhs_router)
-
-# 飞书回调路由：POST /api/v1/feishu/events
-feishu_config = FeishuConfig.from_env()
-app.include_router(
-    create_feishu_router(feishu_config),
-    prefix="/api/v1/feishu",
-    tags=["feishu"],
-)
-
 
 @app.get("/health")
 async def health():
@@ -103,6 +86,13 @@ class SPAStaticFiles(StaticFiles):
                 return await super().get_response("index.html", scope)
             raise
 
+
+
+# 竞品图片本地托管：/evidence/competitors/xxx.jpg → backend/data/evidence/images/competitors/
+# 外链图床（品牌官网/电商CDN）404/防盗链不可控，演示用图片统一落本地由后端服务。
+_EVIDENCE_IMAGES = Path(__file__).resolve().parents[1] / "data" / "evidence" / "images"
+if _EVIDENCE_IMAGES.is_dir():
+    app.mount("/evidence", StaticFiles(directory=_EVIDENCE_IMAGES), name="evidence")
 
 if _DIST.is_dir():
     app.mount("/", SPAStaticFiles(directory=_DIST, html=True), name="frontend")

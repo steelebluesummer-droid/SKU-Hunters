@@ -116,6 +116,14 @@ body {
 .task-card-strip.active { background: var(--task-card-strip-active); }
 .task-card-strip.archived { background: var(--task-card-strip-archived); }
 
+/* ── 任务卡 hover 浮起（左图右文卡片）────────────────────── */
+.task-card { transition: transform 0.2s, box-shadow 0.2s; }
+.task-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+
+/* ── 流行元素板（Moodboard）hover 浮起 ─────────────────── */
+.trend-swatch:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14); }
+.trend-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); }
+
 /* ── 证据角标（灰色圆形上标）────────────────────────────── */
 .evidence-ref {
   display: inline-flex;
