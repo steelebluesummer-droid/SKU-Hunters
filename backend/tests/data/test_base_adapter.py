@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
+
 from app.data.base_adapter import (
     BaseDataAdapter,
     BaseUnavailable,
@@ -10,7 +12,6 @@ from app.data.base_adapter import (
     MockBaseProvider,
 )
 from app.schemas.base_data import BaseRecordPage
-from pydantic import ValidationError
 
 
 def _clear_base_env(monkeypatch):

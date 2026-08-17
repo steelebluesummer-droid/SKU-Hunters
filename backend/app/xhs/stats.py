@@ -20,7 +20,7 @@ import json
 import re
 import sqlite3
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.xhs.ingestor import STOPWORDS
 
@@ -33,8 +33,7 @@ def _iter_rows(conn: sqlite3.Connection, keyword: str | None = None):
     if keyword:
         q += " WHERE query_keyword=?"
         args.append(keyword)
-    for row in conn.execute(q, args).fetchall():
-        yield row
+    yield from conn.execute(q, args).fetchall()
 
 
 def keyword_counts(conn: sqlite3.Connection) -> list[dict]:
@@ -117,7 +116,7 @@ def _bucket_key(t: str, granularity: str) -> str | None:
     # 时间戳
     try:
         ts = int(s)
-        dt = datetime.fromtimestamp(ts)
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
     except (ValueError, TypeError, OSError):
         return None
     if granularity == "month":

@@ -12,10 +12,11 @@ Stage 5 原子动作端点：
 """
 
 import pytest
-from app.api.planning import router
-from app.planning import repository
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from app.api.planning import router
+from app.planning import repository
 
 VALID_BRIEF = {
     "theme": "2027夏季户外生活系列",
@@ -46,12 +47,14 @@ def _create(client, brief=None) -> str:
     assert resp.status_code == 201
     return resp.json()["plan_id"]
 
-def _advance_to_plan_card(client, plan_id: str, opportunity_id: str = "ip-collect"):
-    """推进完整原子动作链到 plan_card_ready"""
+def _advance_to_plan_card(client, plan_id: str, opportunity_id: str | None = None):
+    """推进完整原子动作链到 plan_card_ready；缺省取第一张机会卡（不绑定固定 id）"""
     r1 = client.post(f"/api/v1/plans/{plan_id}/actions/generate-insights")
     assert r1.status_code == 200, r1.text
     r2 = client.post(f"/api/v1/plans/{plan_id}/actions/generate-opportunities")
     assert r2.status_code == 200, r2.text
+    if opportunity_id is None:
+        opportunity_id = r2.json()["opportunities"][0]["id"]
     r3 = client.post(
         f"/api/v1/plans/{plan_id}/actions/generate-plan-card",
         json={"opportunity_id": opportunity_id},
@@ -127,7 +130,7 @@ def test_plan_card_404_on_unknown_opportunity(client):
 
 def test_plan_card_ok_with_cost_check_and_process_log(client):
     plan_id = _create(client)
-    resp = _advance_to_plan_card(client, plan_id, "ip-collect")
+    resp = _advance_to_plan_card(client, plan_id)
     card = resp.json()["plan_card"]
     assert card["costCheck"]["passed"] is True
     assert card["processLog"][-1].startswith("成本校验：")
@@ -156,7 +159,7 @@ def test_archive_409_before_plan_card(client):
 
 def test_full_chain_create_to_archive(client):
     plan_id = _create(client)
-    _advance_to_plan_card(client, plan_id, "healing-nature")
+    _advance_to_plan_card(client, plan_id)
     revise = client.post(f"/api/v1/plans/{plan_id}/revise", json={"message": "加一个挂绳"})
     assert revise.status_code == 200
     assert revise.json()["reply"]
@@ -243,7 +246,7 @@ def test_action_generate_plan_card_requires_opportunity_id(client):
 
 def test_action_archive_full_chain(client):
     plan_id = _create(client)
-    _advance_to_plan_card(client, plan_id, "ip-collect")
+    _advance_to_plan_card(client, plan_id)
     r = client.post(f"/api/v1/plans/{plan_id}/actions/archive")
     assert r.status_code == 200
     assert r.json()["status"] == "archived"
@@ -265,7 +268,7 @@ def test_review_requires_question(client):
 def test_review_readonly_on_archived(client):
     """复盘追问只读：不修改 plan 状态"""
     plan_id = _create(client)
-    _advance_to_plan_card(client, plan_id, "ip-collect")
+    _advance_to_plan_card(client, plan_id)
     client.post(f"/api/v1/plans/{plan_id}/actions/archive")
     r = client.post(f"/api/v1/plans/{plan_id}/review", json={"question": "定价依据是什么？"})
     assert r.status_code == 200

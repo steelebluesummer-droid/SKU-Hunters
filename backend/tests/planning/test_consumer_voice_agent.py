@@ -60,7 +60,7 @@ def test_build_evidence_count_is_real_voice_count():
 
 
 def test_decision_profile_no_demographics():
-    p = DecisionUserProfile(
+    DecisionUserProfile(
         user_segment="城市通勤人群",
         usage_scenario=["地铁", "办公室"],
         user_task=["随身降温"],

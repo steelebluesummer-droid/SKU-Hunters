@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 import pytest
+
 from app.planning import repository, service
 from app.planning.service import StateTransitionError
 
@@ -26,6 +27,31 @@ def isolated_state(monkeypatch, tmp_path):
     yield
     repository._PLANS.clear()
     repository._PLANS.update(snapshot)
+
+
+@pytest.fixture(autouse=True)
+def frozen_insights(monkeypatch):
+    """并发测试只验证写锁串行化，洞察注入冻结 bundle（不打真实 LLM/飞书）"""
+    from app.planning.fixtures import (
+        COMPETITIVE_MAP,
+        CONSUMER_VOICE,
+        INSIGHT_BASE,
+        TREND_GALLERY,
+        TREND_RADAR,
+    )
+
+    def _frozen_bundle(category, brief=None):
+        return {
+            "trendRadar": {**TREND_RADAR, "processLog": ["并发测试：冻结 fixtures 洞察"]},
+            "consumerVoice": CONSUMER_VOICE,
+            "competitiveMap": COMPETITIVE_MAP,
+            "insightBase": INSIGHT_BASE,
+            "trendGallery": TREND_GALLERY,
+            "dataSource": "fixture",
+        }
+
+    monkeypatch.setattr("app.planning.service._resolve_insight_bundle", _frozen_bundle)
+    monkeypatch.setattr("app.engine.llm.complete", lambda *a, **k: None)
 
 
 def test_concurrent_generate_insights_single_advance():

@@ -18,8 +18,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException, Query
 
 from app.xhs import ingestor, stats, store
@@ -37,7 +35,7 @@ def ingest(payload: IngestRequest):
 
 
 @router.get("/notes")
-def list_notes(keyword: Optional[str] = None,
+def list_notes(keyword: str | None = None,
                limit: int = Query(50, ge=1, le=500),
                offset: int = Query(0, ge=0)):
     conn = store.connect()
@@ -64,7 +62,7 @@ def get_note(note_id: str):
 
 
 @router.get("/stats")
-def full_stats(keyword: Optional[str] = None):
+def full_stats(keyword: str | None = None):
     conn = store.connect()
     try:
         return stats.full_stats(conn, keyword)
@@ -82,7 +80,7 @@ def keyword_counts():
 
 
 @router.get("/stats/engagement")
-def engagement(keyword: Optional[str] = None):
+def engagement(keyword: str | None = None):
     conn = store.connect()
     try:
         return stats.engagement(conn, keyword)
@@ -91,7 +89,7 @@ def engagement(keyword: Optional[str] = None):
 
 
 @router.get("/stats/tags")
-def top_tags(n: int = Query(20, ge=1, le=100), keyword: Optional[str] = None):
+def top_tags(n: int = Query(20, ge=1, le=100), keyword: str | None = None):
     conn = store.connect()
     try:
         return {"items": stats.top_tags(conn, n, keyword)}
@@ -101,7 +99,7 @@ def top_tags(n: int = Query(20, ge=1, le=100), keyword: Optional[str] = None):
 
 @router.get("/stats/trend")
 def publish_trend(granularity: str = Query("day", pattern="^(day|month)$"),
-                  keyword: Optional[str] = None):
+                  keyword: str | None = None):
     conn = store.connect()
     try:
         return stats.publish_trend(conn, granularity, keyword)
@@ -111,7 +109,7 @@ def publish_trend(granularity: str = Query("day", pattern="^(day|month)$"),
 
 @router.get("/stats/top")
 def top_notes(metric: str = Query("likes", pattern="^(likes|collects|comments|interactions)$"),
-              n: int = Query(5, ge=1, le=50), keyword: Optional[str] = None):
+              n: int = Query(5, ge=1, le=50), keyword: str | None = None):
     conn = store.connect()
     try:
         return {"metric": metric, "items": stats.top_notes(conn, metric, n, keyword)}
@@ -120,7 +118,7 @@ def top_notes(metric: str = Query("likes", pattern="^(likes|collects|comments|in
 
 
 @router.get("/stats/wordfreq")
-def word_freq(n: int = Query(30, ge=1, le=200), keyword: Optional[str] = None):
+def word_freq(n: int = Query(30, ge=1, le=200), keyword: str | None = None):
     conn = store.connect()
     try:
         return {"items": stats.word_freq(conn, n, keyword)}

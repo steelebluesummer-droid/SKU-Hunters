@@ -194,7 +194,6 @@ def build_consumer_voice_chains(category: str, bundle: dict, brief: dict) -> dic
     quote_sources = [q.get("source", "") for q in cv.get("quotes", [])]
     pool = bundle.get("opportunityPool", [])
     pool_ids = [o.get("id", "") for o in pool]
-    pool_by_id = {o.get("id", ""): o for o in pool}
 
     if not pains:
         return None

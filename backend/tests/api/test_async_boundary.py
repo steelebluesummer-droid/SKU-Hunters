@@ -8,6 +8,7 @@ import time
 
 import httpx
 import pytest
+
 from app.main import app
 from app.planning import repository
 

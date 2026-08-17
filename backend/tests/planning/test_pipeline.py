@@ -41,6 +41,78 @@ def isolated_state(monkeypatch, tmp_path):
     repository._PLANS.clear()
     repository._PLANS.update(snapshot)
 
+CARD_FIELDS = {
+    "name": "测试企划卡",
+    "concept": "测试概念",
+    "designLanguage": "圆润极简",
+    "keywords": ["轻量"],
+    "features": ["挂绳", "磨砂质感"],
+    "fusion": "摆件 × 风扇",
+    "pricingReason": "落在机会价格带",
+    "schedule": [{"time": "第 1-4 周", "action": "开模打样"}],
+    "validation": ["首月售罄率达标"],
+}
+
+PROPOSAL_FIELDS = {
+    "name": "测试企划案",
+    "slogan": "测试定位",
+    "concept": "测试概念",
+    "pattern": "极简纹理",
+    "moodboardPrompt": "minimal style",
+    "specification": [{"module": "结构", "solution": "折叠收纳"}],
+    "skuStrategy": "基础款",
+    "launchPlan": "夏季前上市",
+    "growthPath": [{"stage": "上市期", "action": "门店陈列"}],
+}
+
+@pytest.fixture(autouse=True)
+def fake_card_llm(monkeypatch):
+    """企划卡/企划案 LLM 依赖注入：只替换组装器的两个字段函数。
+
+    洞察链路（_resolve_insight_bundle）不注入，仍走真实冻数据管线；
+    断言只看结构与规则（形状、重算成本、状态机），不绑定具体内容。
+    """
+    monkeypatch.setattr(
+        "app.planning.plan_card_builder._llm_plan_card_fields",
+        lambda plan, opportunity: dict(CARD_FIELDS),
+    )
+    monkeypatch.setattr(
+        "app.planning.plan_card_builder._llm_proposal_fields",
+        lambda plan, opportunity, asset: dict(PROPOSAL_FIELDS),
+    )
+
+
+@pytest.fixture(autouse=True)
+def fast_llm(monkeypatch):
+    """LLM fail-soft + 冻结洞察：管线测试不烧真实 LLM；
+    断言只看结构与规则（形状、重算成本、状态机），不绑定具体内容"""
+    from app.planning.fixtures import (
+        COMPETITIVE_MAP,
+        CONSUMER_VOICE,
+        INSIGHT_BASE,
+        TREND_GALLERY,
+        TREND_RADAR,
+    )
+
+    def _frozen_bundle(category, brief=None):
+        return {
+            "trendRadar": {**TREND_RADAR, "processLog": ["管线测试：冻结 fixtures 洞察"]},
+            "consumerVoice": CONSUMER_VOICE,
+            "competitiveMap": COMPETITIVE_MAP,
+            "insightBase": INSIGHT_BASE,
+            "trendGallery": TREND_GALLERY,
+            "dataSource": "fixture",
+        }
+
+    monkeypatch.setattr("app.planning.service._resolve_insight_bundle", _frozen_bundle)
+    monkeypatch.setattr("app.engine.llm.complete", lambda *a, **k: None)
+    # 即梦出图 fail-soft：不碰真实出图 API（出图链路由专测试锁定）
+    monkeypatch.setattr(
+        "app.planning.plan_card_builder.jimeng.generate_concept_image",
+        lambda prompt, fallback: fallback,
+    )
+
+
 def _make_plan(brief: dict | None = None) -> dict:
     return pipeline.create_plan(brief or dict(VALID_BRIEF))
 
@@ -153,25 +225,40 @@ def test_cost_check_missing_price_fails():
 
 # ── ④⑤⑥ 企划卡生成 ─────────────────────────────────────
 
+def _recompute_margin(card: dict) -> float | None:
+    """从卡片自身定价重算毛利率（不依赖任何固定数字）"""
+    import re as _re
+    nums = _re.findall(r"\d+(?:\.\d+)?", card["pricing"]["price"])
+    if not nums:
+        return None
+    price = float(nums[0])
+    cost = card["costCheck"]["cost_limit"]
+    return (price - cost) / price
+
 def test_generate_plan_card_assembles_full_card():
     plan = _make_plan()
-    card = _advance_to_plan_card(plan)
+    opps = pipeline.generate_insights(plan) and pipeline.generate_opportunities(plan)
+    opp_id = opps[0]["id"]
+    card = pipeline.generate_plan_card(plan, opp_id)
     assert card is not None
-    assert card["name"] == "库洛米表情磁吸小风扇"
-    assert card["source"] == "fixture"
-    assert card["opportunityId"] == "ip-collect"
-    # 企划案必备要素（导师口径：创意 + 视觉 + 节奏 + 价格策略）
-    assert card["conceptImage"]
-    assert card["schedule"]
+    # 结构契约：动态 LLM 生成，键齐全、类型正确（不断言具体内容）
+    assert isinstance(card["name"], str) and card["name"]
+    assert card["source"] == "llm"
+    assert card["opportunityId"] == opp_id
+    assert isinstance(card["concept"], str) and card["concept"]
+    assert isinstance(card["conceptImage"], str)
+    assert isinstance(card["features"], list) and card["features"]
+    assert isinstance(card["schedule"], list) and card["schedule"]
+    assert isinstance(card["validation"], list)
     assert card["pricing"]["price"]
-    # 成本校验挂在卡上：59 元定价、成本上限 25 → 毛利 57.6% 过红线
-    assert card["costCheck"]["passed"] is True
     assert plan["status"] == "plan_card_ready"
-    assert plan["selected_opportunity"] == "ip-collect"
-    # 思考过程呈现（导师专项）：冻结推理 + 末行实时成本校验
-    assert card["processLog"]
-    assert card["processLog"][-1].startswith("成本校验：定价 59 元")
-    assert "校验通过" in card["processLog"][-1]
+    assert plan["selected_opportunity"] == opp_id
+    # 规则契约：成本校验结果与「卡片自身定价重算」一致（测校验器而非具体数字）
+    margin = _recompute_margin(card)
+    assert margin == pytest.approx(card["costCheck"]["margin"], abs=1e-3)
+    assert card["costCheck"]["passed"] == (margin >= pipeline.MIN_GROSS_MARGIN)
+    # 思考过程呈现（导师专项）：末行必须是实时成本校验
+    assert card["processLog"][-1].startswith("成本校验")
 
 def test_generate_plan_card_unknown_opportunity_returns_none():
     plan = _make_plan()
@@ -180,38 +267,38 @@ def test_generate_plan_card_unknown_opportunity_returns_none():
     assert pipeline.generate_plan_card(plan, "opp_1") is None
     assert plan["plan_card"] is None
 
-def test_generate_plan_card_live_mode_uses_jimeng_with_fallback(monkeypatch):
-    calls = {}
-
+def test_generate_plan_card_uses_jimeng_image_when_available(monkeypatch):
     def fake_generate(prompt, fallback):
-        calls["prompt"] = prompt
-        calls["fallback"] = fallback
         return "https://example.com/generated.png"
 
-    monkeypatch.setattr(pipeline.jimeng, "generate_concept_image", fake_generate)
-    plan = _make_plan({**VALID_BRIEF, "mode": "live"})
-    card = _advance_to_plan_card(plan, "healing-nature")
-    assert card["conceptImage"] == "https://example.com/generated.png"
-    assert card["source"] == "live"
-    # prompt 组装自设计语言 + 关键词
-    assert "植物疗愈桌面风扇" in calls["prompt"]
-
-def test_generate_plan_card_live_mode_falls_back_to_frozen_image(monkeypatch):
     monkeypatch.setattr(
-        pipeline.jimeng, "generate_concept_image", lambda prompt, fallback: fallback
+        "app.planning.plan_card_builder.jimeng.generate_concept_image", fake_generate
     )
-    plan = _make_plan({**VALID_BRIEF, "mode": "live"})
-    card = _advance_to_plan_card(plan, "outdoor-clip")
-    assert card["conceptImage"] == fixtures.PLAN_TEMPLATES["outdoor-clip"]["conceptImage"]
+    plan = _make_plan()
+    card = _advance_to_plan_card(plan)
+    assert card["conceptImage"] == "https://example.com/generated.png"
+
+def test_generate_plan_card_degrades_to_empty_image_when_jimeng_fails(monkeypatch):
+    """即梦未配置/失败 fail-soft：概念图降级为空串，链路不中断"""
+    monkeypatch.setattr(
+        "app.planning.plan_card_builder.jimeng.generate_concept_image",
+        lambda prompt, fallback: None,
+    )
+    plan = _make_plan()
+    card = _advance_to_plan_card(plan)
+    assert card["conceptImage"] == ""
+    assert plan["status"] == "plan_card_ready"
 
 def test_generate_plan_card_cost_overrun_marks_check_failed():
-    # 成本上限高于定价 → 毛利率为负，校验必须不通过（打回创意环节）
-    plan = _make_plan({**VALID_BRIEF, "costLimit": 80})
-    card = _advance_to_plan_card(plan, "ip-collect")  # 定价 59 元
+    # 成本上限远高于价格带 → 毛利率必为负，校验必须不通过（打回创意环节）
+    plan = _make_plan({**VALID_BRIEF, "costLimit": 999})
+    card = _advance_to_plan_card(plan)
     assert card["costCheck"]["passed"] is False
     assert card["costCheck"]["margin"] < pipeline.MIN_GROSS_MARGIN
+    # 规则一致性：重算结果与卡上校验一致
+    assert _recompute_margin(card) == pytest.approx(card["costCheck"]["margin"], abs=1e-3)
     # 思考过程末行如实呈现校验失败（真管线：随约束输入变化）
-    assert "低于红线" in card["processLog"][-1]
+    assert "成本校验" in card["processLog"][-1]
 
 # ── 改稿沟通 ─────────────────────────────────────────────
 
@@ -440,7 +527,7 @@ def test_generate_insights_failure_does_not_advance_status(monkeypatch):
     """失败回滚：洞察生成抛异常时状态与旧产物不变"""
     plan = _make_plan()
 
-    def boom(category):
+    def boom(category, brief):
         raise RuntimeError("洞察解析失败")
 
     monkeypatch.setattr("app.planning.service._resolve_insight_bundle", boom)
@@ -476,12 +563,14 @@ def test_generate_plan_card_failure_does_not_advance_status(monkeypatch):
     pipeline.generate_insights(plan)
     pipeline.generate_opportunities(plan)
 
-    def boom(plan_arg, template, opportunity, opportunity_id):
+    opp_id = plan["opportunities"][0]["id"]
+
+    def boom(plan_arg, opportunity):
         raise RuntimeError("企划卡组装失败")
 
-    monkeypatch.setattr("app.planning.service._assemble_fixture_plan_card", boom)
+    monkeypatch.setattr("app.planning.service._build_dynamic_plan_card", boom)
     with pytest.raises(RuntimeError):
-        pipeline.generate_plan_card(plan, "ip-collect")  # fixture 模板路径
+        pipeline.generate_plan_card(plan, opp_id)  # 动态生成路径
     assert plan["status"] == "opportunities_ready"
     assert plan["plan_card"] is None
     assert plan["selected_opportunity"] is None

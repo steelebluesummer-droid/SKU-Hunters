@@ -196,7 +196,7 @@ def localize_concept_image(plan_id: str, concept_image: str) -> str:
             return concept_image
         local_file.write_bytes(data)
         return f"/evidence/concepts/concept_{plan_id}.png"
-    except Exception:
+    except Exception:  # noqa: BLE001 概念图下载失败时回退到原始链接
         return concept_image
 
 

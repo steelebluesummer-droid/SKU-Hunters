@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from app.main import _load_cors_origins, app
 from fastapi.testclient import TestClient
+
+from app.main import _load_cors_origins, app
 
 
 def test_cors_allows_localhost_5173():

@@ -108,7 +108,7 @@ def _strip_privacy_text(text: str | None) -> str | None:
 
 def _has_privacy_field(record: dict) -> bool:
     """检查记录是否含隐私字段名。"""
-    return any(_PRIVACY_FIELD_RE.search(str(k)) for k in record.keys())
+    return any(_PRIVACY_FIELD_RE.search(str(k)) for k in record)
 
 
 def sanitize_record(record: dict) -> dict:

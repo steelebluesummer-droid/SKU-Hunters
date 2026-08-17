@@ -2,32 +2,32 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class XhsNote(BaseModel):
     id: str
-    note_url: Optional[str] = None
-    title: Optional[str] = None
-    content: Optional[str] = None
-    publish_time: Optional[str] = None
-    likes: Optional[int] = None
-    collects: Optional[int] = None
-    comments: Optional[int] = None
-    views: Optional[int] = None
+    note_url: str | None = None
+    title: str | None = None
+    content: str | None = None
+    publish_time: str | None = None
+    likes: int | None = None
+    collects: int | None = None
+    comments: int | None = None
+    views: int | None = None
     tags: list[str] = Field(default_factory=list)
-    query_keyword: Optional[str] = None
-    captured_at: Optional[str] = None
+    query_keyword: str | None = None
+    captured_at: str | None = None
     source_type: str = "xhs"
-    source_url: Optional[str] = None
+    source_url: str | None = None
 
 
 class IngestRequest(BaseModel):
     """批量导入请求：paths 为本地文件绝对/相对路径列表。"""
     paths: list[str]
-    keyword: Optional[str] = None
+    keyword: str | None = None
 
 
 class IngestSummary(BaseModel):
@@ -49,6 +49,6 @@ class Engagement(BaseModel):
     collects: int = 0
     comments: int = 0
     interactions: int = 0
-    engagement_rate: Optional[float] = None
+    engagement_rate: float | None = None
     basis: str
-    views: Optional[int] = None
+    views: int | None = None

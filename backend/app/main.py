@@ -14,8 +14,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 # 启动即加载 backend/.env（LLM Key、即梦 AK/SK、飞书配置）——必须在 app.* 导入前
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-from app.api.planning import router as planning_router  # noqa: E402
-from app.xhs.api import router as xhs_router  # noqa: E402
+from app.api.planning import router as planning_router
+from app.xhs.api import router as xhs_router
 
 app = FastAPI(
     title="SKU Hunters — AI 新品企划工作室",

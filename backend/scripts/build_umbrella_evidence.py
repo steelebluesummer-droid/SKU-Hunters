@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """一次性转换：data/raw/雨伞_原始数据.csv → data/evidence/social/雨伞_2026-08-15.json
 
 把 976 行雨伞采集表映射为保温杯同款社媒证据 schema（SocialEvidenceLoader 消费）。
@@ -140,9 +139,9 @@ def product_price(r: dict) -> str:
 def design_score(r: dict) -> int:
     text = r["话题/标题"] + r["关键数据/热度"] + r["核心摘要"]
     score = 5
-    if re.search(r"联名|三丽鸥|SANRIO|迪士尼|Snoopy|姆明|泡泡玛特|Kitty", text, re.I):
+    if re.search(r"联名|三丽鸥|SANRIO|迪士尼|Snoopy|姆明|泡泡玛特|Kitty", text, re.IGNORECASE):
         score += 2
-    if re.search(r"颜值|马卡龙|透明|复古|油纸伞|渐变|ins", text, re.I):
+    if re.search(r"颜值|马卡龙|透明|复古|油纸伞|渐变|ins", text, re.IGNORECASE):
         score += 1
     if re.search(r"碳纤维|超轻|迷你", text):
         score += 1
@@ -214,7 +213,7 @@ def build(products: list[dict], topics: list[dict], rows: list[dict]) -> dict:
     summary = (
         f"雨伞品类社媒声量集中在防晒（{all_text.count('防晒')} 次提及）与黑胶（{all_text.count('黑胶')} 次），"
         f"功能诉求从'能挡雨'升级为'防晒+颜值+便携'三合一；"
-        f"IP 联名相关样本 {len([r for r in rows if re.search(r'联名|SANRIO|Snoopy|姆明|泡泡玛特|迪士尼', r['话题/标题'] + r['核心摘要'], re.I)])} 条，"
+        f"IP 联名相关样本 {len([r for r in rows if re.search(r'联名|SANRIO|Snoopy|姆明|泡泡玛特|迪士尼', r['话题/标题'] + r['核心摘要'], re.IGNORECASE)])} 条，"
         f"联名可行性已被市场验证；低价段商品密集但高颜值/IP 款集中在高价位，中间存在结构性空白。"
     )
 
@@ -249,7 +248,7 @@ def build(products: list[dict], topics: list[dict], rows: list[dict]) -> dict:
     ]
 
     # ── 空白区：联名款在全量样本中的价格段分布（联名行多数无价格段标签，单独统计）
-    ip_re = re.compile(r"联名|SANRIO|Snoopy|姆明|泡泡玛特|Kitty|迪士尼", re.I)
+    ip_re = re.compile(r"联名|SANRIO|Snoopy|姆明|泡泡玛特|Kitty|迪士尼", re.IGNORECASE)
     ip_rows = [r for r in rows if ip_re.search(r["话题/标题"] + r["核心摘要"])]
     ip_band_count = Counter(band_of(r["话题/标题"]) for r in ip_rows if band_of(r["话题/标题"]))
     low_ip = ip_band_count.get("<30", 0) + ip_band_count.get("30-54", 0)

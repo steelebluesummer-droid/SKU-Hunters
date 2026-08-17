@@ -299,7 +299,6 @@ def _build_product_proposal(plan: dict, opportunity: dict) -> dict:
     image_url = jimeng.generate_concept_image(prompt=image_prompt, fallback=None)
     image_url = localize_concept_image(plan["plan_id"], image_url)
 
-    check = cost_check({"pricing": {"price": f"{price:g} 元"}}, cost_limit)
 
     proposal = {
         "name": str(fields.get("name", "")) or opportunity.get("title", ""),

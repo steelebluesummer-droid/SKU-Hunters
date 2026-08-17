@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from app.api.planning import router
-from app.planning import pipeline
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from app.api.planning import router
+from app.planning import pipeline
 
 app = FastAPI()
 app.include_router(router)

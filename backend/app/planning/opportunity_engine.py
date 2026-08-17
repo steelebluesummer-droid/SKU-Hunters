@@ -15,8 +15,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.planning.opportunity_discovery import build_opportunity_pool
 
 # 机会来源类型 → 展示标签 / 策略方向（语义映射，品类无关）
@@ -234,7 +232,6 @@ def _opportunities_process_log(category: str, bundle: dict | None, opportunities
 def _fallback_opportunities(category: str, brief: dict) -> list[dict]:
     """无洞察 bundle 的极端降级：仅由 brief 推导低置信方向（如实标注，无品类硬编码）"""
     audience = brief.get("audience") or "大众消费人群"
-    price_band = _derive_price_band(brief)
     pool = [
         {
             "id": "opp-1", "title": f"{audience[:8]}优选{category}", "rank": 1, "confidence": 40,

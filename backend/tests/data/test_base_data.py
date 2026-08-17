@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from app.schemas.base_data import BaseRecord, BaseRecordPage
 from pydantic import ValidationError
+
+from app.schemas.base_data import BaseRecord, BaseRecordPage
 
 
 def _valid_record(**overrides) -> dict:

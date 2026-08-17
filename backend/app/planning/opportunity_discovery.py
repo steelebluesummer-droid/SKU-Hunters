@@ -384,8 +384,10 @@ def build_opportunity_pool(category: str, bundle: dict, brief: dict) -> tuple[li
     log = [
         f"AI Discovery：LLM 生成失败（{error}）",
         "Fallback：基于 趋势强度 × 用户需求 × 竞品空位 的信号排序，自动生成候选机会池",
-        f"信号提取：趋势信号 ×{len(tr.get('signals', []))} / 用户痛点 ×{len(cv.get('painPoints', []))}"
-        f" / 使用场景 ×{len(cv.get('scenes', []))}，竞品空白{'已定位' if gap_label else '未定位'}",
+        (
+            f"信号提取：趋势信号 ×{len(tr.get('signals', []))} / 用户痛点 ×{len(cv.get('painPoints', []))}"
+            f" / 使用场景 ×{len(cv.get('scenes', []))}，竞品空白{'已定位' if gap_label else '未定位'}"
+        ),
         f"输出候选机会 {len(pool)} 个（按综合信号强度排序，无品类硬编码）",
     ]
     return pool, log
