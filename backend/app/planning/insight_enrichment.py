@@ -167,13 +167,14 @@ def build_enrichment(category: str, bundle: dict, brief: dict) -> dict[str, Any]
     user_prompt = _serialize_signals(bundle, category, brief) + "\n\n请输出该品类的洞察增强 JSON。"
 
     llm_data: dict = {}
-    for _ in range(2):  # 瞬时限流/输出不合契约重试一次
-        raw = llm.complete(_LLM_SYSTEM_PROMPT, user_prompt, temperature=0.4, max_tokens=4000)
-        if raw:
-            data = _parse_llm_json(raw)
-            if isinstance(data, dict):
-                llm_data = data
-                break
+    for _ in range(2):  # 仅 JSON/契约失败重试一次；网络/超时已由 llm.complete 内部重试
+        raw = llm.complete(_LLM_SYSTEM_PROMPT, user_prompt, temperature=0.4, max_tokens=4000, node="insight_enrichment")
+        if not raw:
+            break  # 网络/超时失败（llm.complete 已重试）→ 不在此叠加
+        data = _parse_llm_json(raw)
+        if isinstance(data, dict):
+            llm_data = data
+            break
 
     # 代码构建数字字段（无论 LLM 是否成功，数字都以真实计数为准）
     metrics = _build_metrics(bundle)

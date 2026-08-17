@@ -21,6 +21,9 @@ _LOG = logging.getLogger("insights.cache")
 # prompt 版本：改动各 Agent prompt 时递增，强制旧缓存失效
 PROMPT_VERSION = "1.0"
 
+# 缓存 payload 结构版本：改动缓存结构（元数据/字段）时递增，旧结构视为 miss
+CACHE_SCHEMA_VERSION = "2"
+
 
 def _model() -> str:
     """当前 LLM 模型名（模型变化 → 缓存键变化，不误复用旧模型结果）"""
@@ -47,6 +50,11 @@ def cache_key(category, detail_snap, summary_snap, competitor_snap):
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _load() -> dict:
     try:
         with open(_CACHE_FILE, encoding="utf-8") as f:
@@ -57,19 +65,43 @@ def _load() -> dict:
 
 
 def get(key):
-    """命中返回缓存值；键为 None 或缓存损坏 → 返回 None（重算）"""
+    """命中返回缓存增强数据；未命中 / 损坏 / 版本过期 / complete=False → None（重算）"""
     if not key:
         return None
-    return _load().get(key)
+    entry = _load().get(key)
+    if not entry:
+        return None
+    if entry.get("cache_schema_version") != CACHE_SCHEMA_VERSION:
+        return None  # 缓存结构版本过期 → miss
+    if not entry.get("complete"):
+        return None  # 未完整增强结果 → miss
+    return entry.get("data")
 
 
-def put(key, value) -> None:
-    """写缓存；键为 None 不写"""
+def put(
+    key,
+    value,
+    complete: bool = True,
+    node_status: dict | None = None,
+    caveats: list | None = None,
+) -> None:
+    """写缓存；键为 None 不写。
+
+    仅当 complete=True 时才可被 get() 命中（未完整增强结果写 complete=False，视为 miss）。
+    """
     if not key:
         return
+    entry = {
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+        "created_at": _now_iso(),
+        "complete": bool(complete),
+        "node_status": dict(node_status or {}),
+        "caveats": list(caveats or []),
+        "data": value,
+    }
     with _lock:
         data = _load()
-        data[key] = value
+        data[key] = entry
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
         tmp = _CACHE_FILE.with_name(f".{_CACHE_FILE.name}.{threading.get_ident()}.tmp")
         try:

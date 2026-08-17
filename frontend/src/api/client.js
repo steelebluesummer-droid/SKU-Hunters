@@ -37,6 +37,7 @@ export async function request(url, opts = {}) {
     const err = new Error(data?.detail?.error?.message || `请求失败（${res.status}）`);
     err.status = res.status;
     err.code = data?.detail?.error?.code || 'HTTP_ERROR';
+    err.request_id = data?.detail?.error?.request_id;
     err.detail = data?.detail;
     throw err;
   }

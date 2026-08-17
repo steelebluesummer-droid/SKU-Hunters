@@ -8,6 +8,7 @@
 - 重启后缓存仍可恢复；
 - 不产生跨品类污染。
 """
+import json
 import pathlib
 
 import pytest
@@ -80,3 +81,44 @@ def test_cache_persists_across_reload():
     # 重新实例化/加载（同一文件）
     loaded = insight_cache.get(k)
     assert loaded["competitiveMap"]["needDimensions"] == [{"name": "d"}]
+
+
+# ── 四阶段 · 只缓存完整可用增强结果 ─────────────────
+
+def test_incomplete_cache_is_miss():
+    """complete=False 的半成品缓存 → get 返回 None（不命中，安全重算）"""
+    k = insight_cache.cache_key("风扇", "d1", "s1", "c1")
+    insight_cache.put(k, {"competitiveMap": {"needDimensions": []}}, complete=False)
+    assert insight_cache.get(k) is None
+
+
+def test_old_schema_version_is_miss():
+    """缓存结构版本过期 → miss"""
+    k = insight_cache.cache_key("风扇", "d1", "s1", "c1")
+    insight_cache.put(k, {"x": 1}, complete=True)
+    f = pathlib.Path(insight_cache._CACHE_FILE)
+    data = json.loads(f.read_text(encoding="utf-8"))
+    data[k]["cache_schema_version"] = "1"  # 篡改为旧版本
+    f.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert insight_cache.get(k) is None
+
+
+def test_put_metadata_written():
+    """写入时记录元数据：schema_version / created_at / complete / node_status / caveats"""
+    k = insight_cache.cache_key("风扇", "d1", "s1", "c1")
+    insight_cache.put(
+        k,
+        {"opportunityPool": [{"id": "p1"}]},
+        complete=True,
+        node_status={"opportunityPool": "ok"},
+        caveats=["竞品表不可用"],
+    )
+    f = pathlib.Path(insight_cache._CACHE_FILE)
+    data = json.loads(f.read_text(encoding="utf-8"))
+    entry = data[k]
+    assert entry["complete"] is True
+    assert entry["cache_schema_version"] == insight_cache.CACHE_SCHEMA_VERSION
+    assert entry["created_at"]
+    assert entry["node_status"]["opportunityPool"] == "ok"
+    assert entry["caveats"] == ["竞品表不可用"]
+    assert entry["data"]["opportunityPool"] == [{"id": "p1"}]

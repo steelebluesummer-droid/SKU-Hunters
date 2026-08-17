@@ -194,6 +194,61 @@ def _ensure_asset_fit(plan: dict[str, Any], bundle: dict[str, Any]) -> None:
         bundle["assetFit"] = result
 
 
+# 旧任务懒补增强节点表：(节点名, 完整性判定, 补全函数)
+_LAZY_ENHANCE_NODES = [
+    ("opportunityPool", lambda b: b.get("opportunityPool"), _ensure_opportunity_pool),
+    ("consumerVoice", lambda b: b.get("consumerVoice", {}).get("painPointChains"), _ensure_consumer_voice_chains),
+    ("competitiveMap", lambda b: b.get("competitiveMap", {}).get("needDimensions"), _ensure_competitive_map_analysis),
+    ("assetFit", lambda b: b.get("assetFit"), _ensure_asset_fit),
+    ("enrichment", lambda b: b.get("enrichment"), _ensure_enrichment),
+]
+
+
+# 旧任务增强失败后的重试冷却时间（秒）：一次性临时故障不会导致永久放弃该节点
+_ENHANCE_RETRY_AFTER_S = 300
+
+def _ensure_missing_enhancements(plan, bundle, enhance_state) -> bool:
+    """旧任务懒补缺失增强节点，并记录确定性状态（ok/error）供跨重启去重。
+
+    - ok 节点跳过（不重复触发 LLM）；
+    - error 节点按时间退避：距上次失败超过冷却期才允许重试，避免一次临时故障永久放弃；
+    - 成功补齐记 ok；LLM 失败/结果为空记 error（不写入伪造结果，只记失败态）；
+    - 返回本轮是否有节点状态被写入（用于决定是否落盘）。
+    """
+    from datetime import datetime, timezone
+
+    changed = False
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    for node, key, fn in _LAZY_ENHANCE_NODES:
+        st = enhance_state.get(node, {})
+        status = st.get("status")
+        if status == "ok":
+            continue
+        if status == "error":
+            last = st.get("ts")
+            if last:
+                try:
+                    last_dt = datetime.fromisoformat(last)
+                except (ValueError, TypeError):
+                    last_dt = None
+                if last_dt is not None and (now - last_dt).total_seconds() < _ENHANCE_RETRY_AFTER_S:
+                    continue  # 冷却期内不重试，避免一次临时故障反复烧 LLM
+            # 无时间戳（旧数据）或已过冷却期 → 允许重试，重试后补写 ts 进入冷却，避免永久放弃
+        try:
+            fn(plan, bundle)
+        except Exception as exc:  # noqa: BLE001 — 增强失败由 key 判定，不向 GET 抛出 500
+            _TIMING_LOG.warning("旧任务懒补增强 %s 异常（记录 error，不回退）exc_type=%s", node, type(exc).__name__)
+        ok = bool(key(bundle))
+        enhance_state[node] = {
+            "status": "ok" if ok else "error",
+            "ts": now_iso,
+            "caveat": "" if ok else "LLM 不可用或增强结果为空/不完整",
+        }
+        changed = True
+    return changed
+
+
 def get_insights(plan: dict[str, Any], advance: bool = False) -> dict[str, Any]:
     """五看洞察（只读）：真实社媒证据优先，无采集数据走 LLM 生成
 
@@ -212,11 +267,13 @@ def get_insights(plan: dict[str, Any], advance: bool = False) -> dict[str, Any]:
         plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
         _save_state()  # 落盘：服务重启后缓存仍在，不重复触发 LLM
     else:
-        _ensure_opportunity_pool(plan, bundle)  # 旧缓存补 pool（不落盘，生成机会时统一落）
-        _ensure_enrichment(plan, bundle)        # 旧缓存补 enrichment（五段式驾驶舱）
-        _ensure_consumer_voice_chains(plan, bundle)  # 旧缓存补决策画像 + 归因链
-        _ensure_competitive_map_analysis(plan, bundle)  # 旧缓存补需求满足矩阵 + 机会空位
-        _ensure_asset_fit(plan, bundle)  # 旧缓存补资产适配
+        # 旧任务懒补缺失增强：写锁保护读改写；成功且过 schema 才落盘；无变化不重复写盘
+        with plan_write_lock(plan["plan_id"]):
+            enhance_state = plan.setdefault("enhance_state", {})
+            changed = _ensure_missing_enhancements(plan, bundle, enhance_state)
+            if changed:
+                _ = InsightBundle.model_validate(_snake_keys(bundle))  # 失败抛异常则不入库
+                _save_state()
     return bundle
 
 
@@ -286,18 +343,19 @@ def _ensure_parallel_competitive_asset(plan, bundle, data_source, snapshot_id) -
         return
     category = plan["brief"].get("category", "")
     brief = plan["brief"]
-    # 只读快照副本：并发 agent 不写 bundle，由主线程合并
-    snapshot = copy.deepcopy(bundle) if (need_cm and need_af) else bundle
     futures: dict[str, Any] = {}
     with ThreadPoolExecutor(max_workers=2) as ex:
         if need_cm:
             from app.planning.competitive_map_agent import (
                 build_competitive_map_analysis,
             )
-            futures["cm"] = ex.submit(build_competitive_map_analysis, category, snapshot, brief)
+            # 独立只读副本：并发 agent 不共享同一可变 snapshot，主线程合并结果
+            cm_snapshot = copy.deepcopy(bundle)
+            futures["cm"] = ex.submit(build_competitive_map_analysis, category, cm_snapshot, brief)
         if need_af:
             from app.planning.asset_fit_agent import build_asset_fit
-            futures["af"] = ex.submit(build_asset_fit, category, snapshot, brief)
+            af_snapshot = copy.deepcopy(bundle)
+            futures["af"] = ex.submit(build_asset_fit, category, af_snapshot, brief)
 
         def _wait_cm():
             try:
@@ -320,6 +378,38 @@ def _ensure_parallel_competitive_asset(plan, bundle, data_source, snapshot_id) -
 
 
 _ENHANCE_KEYS = ("opportunityPool", "consumerVoice", "competitiveMap", "assetFit")
+
+
+def _is_complete_enhancement(bundle: dict[str, Any]) -> bool:
+    """增强结果是否完整（四节点均有数据）；任一节点失败/为空 → 不写可命中缓存"""
+    return bool(
+        bundle.get("opportunityPool")
+        and bundle.get("consumerVoice", {}).get("painPointChains")
+        and bundle.get("competitiveMap", {}).get("needDimensions")
+        and bool(bundle.get("assetFit"))
+    )
+
+
+def _enhance_node_status(bundle: dict[str, Any]) -> dict[str, str]:
+    """各增强节点状态：有数据→ok；缺失→unavailable（如实，不伪造）"""
+    return {
+        "opportunityPool": "ok" if bundle.get("opportunityPool") else "unavailable",
+        "consumerVoice": "ok" if bundle.get("consumerVoice", {}).get("painPointChains") else "unavailable",
+        "competitiveMap": "ok" if bundle.get("competitiveMap", {}).get("needDimensions") else "unavailable",
+        "assetFit": "ok" if bundle.get("assetFit") else "unavailable",
+    }
+
+
+def _write_cache_if_complete(ck: str, bundle: dict[str, Any]) -> None:
+    """仅完整增强结果写可命中缓存；半成品写 complete=False（get 视为 miss）"""
+    caveats = [str(x) for x in bundle.get("trendRadar", {}).get("processLog", []) if "失败" in str(x) or "不可用" in str(x)]
+    insight_cache.put(
+        ck,
+        _extract_cache_value(bundle),
+        complete=_is_complete_enhancement(bundle),
+        node_status=_enhance_node_status(bundle),
+        caveats=caveats,
+    )
 
 
 def _extract_cache_value(bundle: dict[str, Any]) -> dict:
@@ -369,7 +459,7 @@ def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
                     _apply_cached_enhance(bundle, cached)
                     used_cache = True
                 except ValidationError:
-                    insight_cache.put(ck, {})  # 缓存损坏 → 标记失效，走重算
+                    insight_cache.put(ck, {}, complete=False)  # 缓存损坏 → 标记失效（不可命中），走重算
                     used_cache = False
 
             if used_cache:
@@ -387,14 +477,38 @@ def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
                            cache_hit=False)
 
                 _ensure_parallel_competitive_asset(plan, bundle, data_source, snapshot_id)
-                if ck:
-                    insight_cache.put(ck, _extract_cache_value(bundle))
 
+            # 最终 schema 校验通过后才可写缓存
             _ = InsightBundle.model_validate(_snake_keys(bundle))
-            plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
-            _build_plan_data_context(plan, bundle)
-            plan["status"] = "insights_ready"
-            _save_state()
+
+            # 事务式写入：insights / data_context / status / 保存 任一步失败都整体回滚
+            _prev_insights = plan.get("insights")
+            _prev_status = plan.get("status")
+            _prev_dc = plan.get("data_context")
+            try:
+                plan["insights"] = bundle  # 缓存洞察：机会/企划卡复用，非采集品类不重复烧 LLM
+                _build_plan_data_context(plan, bundle)
+                plan["status"] = "insights_ready"
+                _save_state()
+            except Exception:
+                # 任一步失败（落盘 / 构造 data_context / 状态推进）→ 回滚内存状态，保持原子性
+                if _prev_insights is None:
+                    plan.pop("insights", None)
+                else:
+                    plan["insights"] = _prev_insights
+                if _prev_dc is None:
+                    plan.pop("data_context", None)
+                else:
+                    plan["data_context"] = _prev_dc
+                plan["status"] = _prev_status
+                raise
+
+            # 落盘成功后再写共享缓存（best-effort：失败仅影响复用，不影响已保存任务）
+            if ck and not used_cache:
+                try:
+                    _write_cache_if_complete(ck, bundle)
+                except Exception as _ce:  # noqa: BLE001 — 写缓存失败不影响主流程
+                    _TIMING_LOG.warning("洞察缓存写入失败（忽略，不影响已保存任务）exc_type=%s", type(_ce).__name__)
         except Exception:
             _ok = False
             raise

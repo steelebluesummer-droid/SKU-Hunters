@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
 import requests
 from pydantic import ValidationError
 
+from app.data import feishu_snapshot_cache as fsc
 from app.schemas.base_data import BasePlatform, BaseQuery, BaseRecord, BaseRecordPage
 from app.schemas.competitor_data import CompetitorRecord, VerificationStatus
 
@@ -835,6 +837,17 @@ class BaseDataAdapter:
     def __init__(self, provider: BaseProvider | None = None):
         self._provider = provider
         self._cache: dict[str, Any] = {}
+        # 飞书真实数据本地快照缓存：仅在真实 feishu provider 且查询为「按品类全量」时启用
+        self._snapshot_enabled = True
+        # 快照元数据改为线程局部：并发生成时各请求读自己的列表，避免串写混入上/下一个任务
+        self._meta_tls = threading.local()
+
+    @property
+    def last_snapshot_meta(self) -> list[dict[str, Any]]:
+        """本次请求（当前线程）读取到的快照元数据；线程隔离，防并发串写"""
+        if not hasattr(self._meta_tls, "items"):
+            self._meta_tls.items = []
+        return self._meta_tls.items
 
     @property
     def provider(self) -> BaseProvider:
@@ -863,7 +876,12 @@ class BaseDataAdapter:
         """翻页收集全部记录（供聚合统计使用，避免只统计默认 page_size=20 的第一页）
 
         含最大页数与无进展保护，防止 provider 异常持续返回 has_more=True 导致死循环。
+        按品类全量查询启用飞书真实数据本地快照缓存（TTL 内不重复分页 HTTP）。
         """
+        if self._snapshot_eligible(keyword, platform, as_of, snapshot_id, category):
+            entry, _used, _stale = self._snapshot_read(fsc.TYPE_RECORDS, category)
+            if entry:
+                return [BaseRecord.model_validate(r) for r in entry["records"]]
         records: list[BaseRecord] = []
         page = 1
         max_pages = 100  # 防御上限：正常数据远不会达到，异常时兜底
@@ -876,6 +894,8 @@ class BaseDataAdapter:
                 # 无进展保护：has_more=True 但本页无记录 → provider 异常，终止翻页
                 break
             page += 1
+        if self._snapshot_eligible(keyword, platform, as_of, snapshot_id, category) and records:
+            self._snapshot_write(fsc.TYPE_RECORDS, category, self._latest_snapshot(records), self._snapshot_records_dict(records))
         return records
 
     def get_summary(self, category=None, as_of=None, snapshot_id=None) -> dict[str, Any]:
@@ -883,7 +903,14 @@ class BaseDataAdapter:
         key = self._cache_key("get_summary", category=query.category, as_of=query.as_of, snapshot_id=query.snapshot_id)
         if key in self._cache:
             return self._cache[key]
+        if self._snapshot_eligible("", None, query.as_of, query.snapshot_id, query.category):
+            entry, _used, _stale = self._snapshot_read(fsc.TYPE_SUMMARY, query.category)
+            if entry:
+                self._cache[key] = entry["records"]
+                return entry["records"]
         result = self.provider.get_summary(query.category, query.as_of, query.snapshot_id)
+        if self._snapshot_eligible("", None, query.as_of, query.snapshot_id, query.category) and result:
+            self._snapshot_write(fsc.TYPE_SUMMARY, query.category, result.get("snapshot_id"), result)
         self._cache[key] = result
         return result
 
@@ -918,13 +945,90 @@ class BaseDataAdapter:
         return refs
 
     def get_competitor_records(self, category=None, snapshot_id=None, as_of=None) -> list[CompetitorRecord]:
-        """竞品表只读查询（带缓存）：category / snapshot_id / as_of 隔离"""
+        """竞品表只读查询（带缓存）：category / snapshot_id / as_of 隔离；按品类全量启用飞书快照缓存"""
         key = self._cache_key("get_competitor_records", category=category, snapshot_id=snapshot_id, as_of=as_of)
         if key in self._cache:
             return self._cache[key]
+        if self._snapshot_eligible("", None, as_of, snapshot_id, category):
+            entry, _used, _stale = self._snapshot_read(fsc.TYPE_COMPETITORS, category)
+            if entry:
+                result = [CompetitorRecord.model_validate(r) for r in entry["records"]]
+                self._cache[key] = result
+                return result
         result = self.provider.get_competitor_records(category, snapshot_id, as_of)
+        if self._snapshot_eligible("", None, as_of, snapshot_id, category) and result:
+            self._snapshot_write(fsc.TYPE_COMPETITORS, category, self._latest_snapshot(result), [r.model_dump(mode="json") for r in result])
         self._cache[key] = result
         return result
+
+    # ── 飞书真实数据本地快照缓存（二阶段）──────────────────
+    def _is_feishu_provider(self) -> bool:
+        return isinstance(self.provider, FeishuBaseProvider)
+
+    def _table_id_for(self, table_type: str) -> str:
+        if not self._is_feishu_provider():
+            return ""
+        p = self.provider
+        return {
+            fsc.TYPE_RECORDS: p._data_table_id,
+            fsc.TYPE_SUMMARY: p._summary_table_id,
+            fsc.TYPE_COMPETITORS: p._competitor_table_id,
+        }.get(table_type, "") or ""
+
+    def _snapshot_eligible(self, keyword, platform, as_of, snapshot_id, category) -> bool:
+        """仅「按品类全量」的查询启用快照缓存（洞察读取场景）"""
+        return bool(
+            self._snapshot_enabled
+            and category
+            and not keyword
+            and platform is None
+            and as_of is None
+            and snapshot_id is None
+            and self._is_feishu_provider()
+        )
+
+    def _snapshot_read(self, table_type: str, category: str):
+        """尝试读有效快照；返回 (entry, used_cache, stale)；未命中 → (None, False, False)"""
+        table_id = self._table_id_for(table_type)
+        if not table_id:
+            return None, False, False
+        entry = fsc.get(fsc.base_id(), table_id, category, table_type)
+        if not entry:
+            return None, False, False
+        self.last_snapshot_meta.append({
+            "table_type": table_type,
+            "category": category,
+            "used_local_snapshot": True,
+            "snapshot_id": entry.get("snapshot_id", ""),
+            "fetched_at": entry.get("fetched_at", ""),
+            "source": "feishu",
+            "stale": bool(entry.get("stale", False)),
+            "note": "数据来自本地飞书快照缓存（可能非实时）",
+        })
+        return entry, True, bool(entry.get("stale", False))
+
+    def _snapshot_write(self, table_type: str, category: str, snapshot_id, records, caveats=None) -> None:
+        table_id = self._table_id_for(table_type)
+        if not table_id or not records:
+            return
+        fsc.put(fsc.base_id(), table_id, category, table_type, snapshot_id or "", records, len(records), caveats)
+        self.last_snapshot_meta.append({
+            "table_type": table_type,
+            "category": category,
+            "used_local_snapshot": False,
+            "snapshot_id": snapshot_id or "",
+            "fetched_at": fsc._now_iso(),
+            "source": "feishu",
+            "stale": False,
+            "note": "已写入本地飞书快照缓存",
+        })
+
+    def _latest_snapshot(self, records) -> str:
+        snaps = [r.snapshot_id for r in records if getattr(r, "snapshot_id", None)]
+        return max(snaps) if snaps else ""
+
+    def _snapshot_records_dict(self, records) -> list[dict[str, Any]]:
+        return [r.model_dump(mode="json") for r in records]
 
     def clear_cache(self) -> None:
         self._cache.clear()

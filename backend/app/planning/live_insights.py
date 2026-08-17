@@ -145,6 +145,8 @@ def build_live_insight_bundle(
 ) -> dict[str, Any]:
     """从 Feishu Base 生成五看洞察；未接入的字段保持空值。"""
     source = adapter or BaseDataAdapter()
+    # 每次构建开始时清空本次读取的快照元数据，避免跨任务累积（网关为单例时尤为关键）
+    source.last_snapshot_meta.clear()
     # 企划层品类归一化：旧任务「小风扇」等含「扇」子品类统一为父品类「风扇」
     category = normalize_category(category) or ""
     _t0 = time.monotonic()
@@ -341,8 +343,28 @@ def build_live_insight_bundle(
             "record_count": len(records),
             "evidence_count": len(evidence),
             "generated_at": generated_at,
+            # 飞书真实数据本地快照缓存元数据（来源仍 feishu，可能非实时）
+            "snapshot_cache": _snapshot_cache_meta(source),
         },
     }
+
+
+def _snapshot_cache_meta(adapter) -> list[dict]:
+    """汇总本次读取是否使用本地飞书快照缓存（明确来源仍 feishu / 快照时间 / 可能非最新）"""
+    metas = getattr(adapter, "last_snapshot_meta", None) or []
+    return [
+        {
+            "table_type": m.get("table_type"),
+            "category": m.get("category"),
+            "used_local_snapshot": m.get("used_local_snapshot", False),
+            "snapshot_id": m.get("snapshot_id", ""),
+            "fetched_at": m.get("fetched_at", ""),
+            "source": m.get("source", "feishu"),
+            "stale": m.get("stale", False),
+            "note": m.get("note", ""),
+        }
+        for m in metas
+    ]
 
 
 def _consumer_process_log(

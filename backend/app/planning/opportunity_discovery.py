@@ -311,10 +311,11 @@ def _llm_pool(category: str, bundle: dict, brief: dict) -> tuple[list[dict[str, 
             user_prompt=prompt,
             temperature=0.4,
             max_tokens=4000,
+            node="opportunity_pool",
         )
         if not raw:
             last_error = "LLM 未配置或调用失败"
-            continue
+            break  # 网络/超时已由 llm.complete 内部重试，不在此叠加
         data = _parse_llm_json(raw)
         if data is None:
             last_error = "输出不是合法 JSON"
@@ -384,8 +385,10 @@ def build_opportunity_pool(category: str, bundle: dict, brief: dict) -> tuple[li
     log = [
         f"AI Discovery：LLM 生成失败（{error}）",
         "Fallback：基于 趋势强度 × 用户需求 × 竞品空位 的信号排序，自动生成候选机会池",
-        f"信号提取：趋势信号 ×{len(tr.get('signals', []))} / 用户痛点 ×{len(cv.get('painPoints', []))}"
-        f" / 使用场景 ×{len(cv.get('scenes', []))}，竞品空白{'已定位' if gap_label else '未定位'}",
+        (
+            f"信号提取：趋势信号 ×{len(tr.get('signals', []))} / 用户痛点 ×{len(cv.get('painPoints', []))}"
+            f" / 使用场景 ×{len(cv.get('scenes', []))}，竞品空白{'已定位' if gap_label else '未定位'}"
+        ),
         f"输出候选机会 {len(pool)} 个（按综合信号强度排序，无品类硬编码）",
     ]
     return pool, log

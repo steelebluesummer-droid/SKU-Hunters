@@ -142,12 +142,13 @@ def build_competitive_map_analysis(category: str, bundle: dict, brief: dict) -> 
 
     prompt = _serialize(bundle, category, need_dims)
     data: dict | None = None
-    for _ in range(2):
-        raw = llm.complete(_LLM_SYSTEM_PROMPT, prompt, temperature=0.4, max_tokens=4000)
-        if raw:
-            data = _parse_llm_json(raw)
-            if data:
-                break
+    for _ in range(2):  # 仅 JSON/契约失败重试一次；网络/超时已由 llm.complete 内部重试
+        raw = llm.complete(_LLM_SYSTEM_PROMPT, prompt, temperature=0.4, max_tokens=4000, node="competitive_map")
+        if not raw:
+            break  # 网络/超时失败（llm.complete 已重试）→ 不在此叠加
+        data = _parse_llm_json(raw)
+        if data:
+            break
     if not data:
         return None
 

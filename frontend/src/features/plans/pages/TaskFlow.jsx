@@ -11,7 +11,7 @@
 
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Steps, Card, Descriptions, Tag, Button, message, Spin } from 'antd';
+import { Alert, Steps, Card, Descriptions, Tag, Button, message, Spin } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 
 // 洞察驾驶舱含 ECharts，属实测重模块，按已批准方案做流程内二级懒加载
@@ -56,10 +56,15 @@ export default function TaskFlow() {
   // ── 原子动作：确认约束 → 生成洞察 ──────────────────────
   const onGenerateInsights = async () => {
     try {
-      await ws.actions.generateInsights();
-      setStep(1);
+      const result = await ws.actions.generateInsights();
+      // 只有接口成功且返回 status=insights_ready 才进入洞察驾驶舱；否则留在第 0 步
+      if (result?.status === 'insights_ready') {
+        setStep(1);
+      } else {
+        message.warning('洞察已生成但状态未就绪，未进入下一步');
+      }
     } catch (e) {
-      message.error(`洞察生成失败：${e?.message || '请检查后端服务'}`);
+      // 失败：错误已保存在 ws.error，由第 0 步错误卡片展示 code/message + 重试，不再跳步
     }
   };
 
@@ -179,6 +184,35 @@ export default function TaskFlow() {
             <Suspense fallback={null}>
               <InsightGeneratingSteps />
             </Suspense>
+          )}
+          {step === 0 && ws.error && ws.error.action === 'insights' && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginTop: 16 }}
+              message={`洞察生成失败（${ws.error.code || 'ERROR'}）`}
+              description={
+                <>
+                  {ws.error.message || '请检查后端服务后重试'}
+                  {ws.error.requestId ? (
+                    <div style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', marginTop: 4 }}>
+                      错误编号：{ws.error.requestId}
+                    </div>
+                  ) : null}
+                </>
+              }
+              action={
+                <Button
+                  size="small"
+                  danger
+                  data-testid="insight-retry"
+                  loading={ws.pendingAction === 'insights'}
+                  onClick={onGenerateInsights}
+                >
+                  重试
+                </Button>
+              }
+            />
           )}
         </Card>
       )}

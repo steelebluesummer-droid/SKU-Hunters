@@ -22,6 +22,8 @@ import asyncio
 import json
 import logging
 import os
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +31,11 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
-from app.engine.strict_mode import StrictModeError
+from app.engine.strict_mode import StrictModeError, is_demo_hidden
 from app.planning import fixtures, ip_resource, pipeline
 from app.planning.insight_resolver import LLMGenerationError
 from app.planning.live_data import build_live_data_board
-from app.planning.repository import plan_write_lock
+from app.planning.repository import _snake_keys, plan_write_lock
 from app.planning.service import StateTransitionError
 from app.schemas.planning import PlanBrief
 from app.schemas.planning_api_v2 import PlanListResponseV2
@@ -41,7 +43,6 @@ from app.schemas.planning_api_v2 import PlanListResponseV2
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["planning"])
-from app.engine.strict_mode import is_demo_hidden
 
 
 def _get_plan_or_404(plan_id: str) -> dict[str, Any]:
@@ -55,12 +56,34 @@ def _get_plan_or_404(plan_id: str) -> dict[str, Any]:
 
 def _state_transition_error(e: StateTransitionError) -> HTTPException:
     """状态机非法转移 → 409（原子动作前置状态校验失败）"""
-    return HTTPException(409, detail={"error": {"code": "INVALID_TRANSITION", "message": str(e)}})
+    return HTTPException(409, detail={"error": {"code": "INVALID_TRANSITION", "message": "当前任务状态不允许执行该操作"}})
 
+def _structured_error(status: int, code: str, message: str, plan_id: str, request_id: str) -> HTTPException:
+    """结构化错误响应：code / message / plan_id / request_id 一并返回前端可见"""
+    return HTTPException(status, detail={"error": {"code": code, "message": message, "plan_id": plan_id, "request_id": request_id}})
+
+
+def _log_insight_error(request_id: str, plan_id: str, code: str, e: Exception, t0: float) -> None:
+    """记录洞察生成失败日志：仅 request_id / 异常类型 / 耗时，不记录异常文本，防止泄露 URL/Token/请求内容"""
+    elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+    logger.error(
+        "generate-insights 失败 request_id=%s plan_id=%s code=%s exc_type=%s elapsed_ms=%s",
+        request_id, plan_id, code, type(e).__name__, elapsed_ms,
+    )
 
 def _llm_generation_error(e: LLMGenerationError) -> HTTPException:
     """LLM 生成失败 → 503（无采集数据且 LLM 不可用/输出不合契约；不产假数据，诚实报错）"""
-    return HTTPException(503, detail={"error": {"code": "LLM_UNAVAILABLE", "message": str(e)}})
+    return HTTPException(503, detail={"error": {"code": "LLM_UNAVAILABLE", "message": "AI 洞察生成暂时不可用，请稍后重试"}})
+
+def _brief_invalid_error(e: ValidationError) -> HTTPException:
+    """BRIEF 校验失败 → 422；仅返回字段名级固定错误，不回显用户输入值"""
+    fields = []
+    for err in e.errors():
+        loc = [str(x) for x in err.get("loc", []) if str(x) != "brief"]
+        if loc:
+            fields.append(".".join(loc))
+    detail = "、".join(fields) if fields else "企划约束"
+    return HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": f"企划约束不合法：字段 {detail} 校验失败"}})
 
 
 @router.post("/plans", status_code=201)
@@ -68,14 +91,14 @@ async def create_plan(payload: dict):
     brief = payload.get("brief") or payload  # 兼容直接传 brief
     # PlanBrief schema 校验（pydantic 保证必填字段 + 类型检查）
     try:
-        PlanBrief.model_validate(brief)
+        PlanBrief.model_validate(_snake_keys(brief))
     except ValidationError as e:
-        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}}) from e
+        raise _brief_invalid_error(e) from e
     try:
         plan = pipeline.create_plan(brief)
     except StrictModeError as e:
         # 严格模式禁止 fixture/演示任务 → 409 业务冲突
-        raise HTTPException(409, detail={"error": {"code": "STRICT_REAL_MODE", "message": str(e)}}) from e
+        raise HTTPException(409, detail={"error": {"code": "STRICT_REAL_MODE", "message": "当前为严格真实模式，该演示/仿真任务不可用"}}) from e
     return {"plan_id": plan["plan_id"], "status": plan["status"]}
 
 
@@ -103,9 +126,9 @@ async def aily_create_plan(payload: dict, background_tasks: BackgroundTasks):
     """
     brief = payload.get("brief") or payload  # 兼容直接传 brief
     try:
-        PlanBrief.model_validate(brief)
+        PlanBrief.model_validate(_snake_keys(brief))
     except ValidationError as e:
-        raise HTTPException(422, detail={"error": {"code": "BRIEF_INVALID", "message": str(e)}}) from e
+        raise _brief_invalid_error(e) from e
     plan = pipeline.create_plan(brief)
     background_tasks.add_task(_run_aily_flow, plan)
     return {"plan_id": plan["plan_id"], "status": "running"}
@@ -194,16 +217,26 @@ async def advance_plan(plan_id: str, payload: dict):
 @router.post("/plans/{plan_id}/actions/generate-insights")
 async def action_generate_insights(plan_id: str):
     plan = _get_plan_or_404(plan_id)
+    request_id = uuid.uuid4().hex[:12]
+    t0 = time.monotonic()
     try:
         insights = await asyncio.to_thread(pipeline.generate_insights, plan)
     except StateTransitionError as e:
-        raise _state_transition_error(e) from e
+        _log_insight_error(request_id, plan_id, "INVALID_TRANSITION", e, t0)
+        raise _structured_error(409, "INVALID_TRANSITION", "当前任务状态不允许执行该操作", plan_id, request_id) from e
     except LLMGenerationError as e:
-        raise _llm_generation_error(e) from e
+        _log_insight_error(request_id, plan_id, "LLM_UNAVAILABLE", e, t0)
+        raise _structured_error(503, "LLM_UNAVAILABLE", "AI 洞察生成暂时不可用，请稍后重试", plan_id, request_id) from e
     except (BaseUnavailable, BaseProviderError) as e:
-        raise HTTPException(503, detail={"error": {"code": "BASE_UNAVAILABLE", "message": str(e)}}) from e
+        _log_insight_error(request_id, plan_id, "BASE_UNAVAILABLE", e, t0)
+        raise _structured_error(503, "BASE_UNAVAILABLE", "数据源暂时不可用，请稍后重试", plan_id, request_id) from e
+    except Exception as e:
+        _log_insight_error(request_id, plan_id, "INTERNAL_ERROR", e, t0)
+        raise _structured_error(500, "INTERNAL_ERROR", "洞察生成内部错误，请联系管理员", plan_id, request_id) from e
+    elapsed_ms = round((time.monotonic() - t0) * 1000, 1)
+    logger.info("generate-insights 成功 request_id=%s plan_id=%s status=%s elapsed_ms=%s",
+                request_id, plan_id, plan["status"], elapsed_ms)
     return {"plan_id": plan_id, "status": plan["status"], "insights": insights}
-
 
 @router.post("/plans/{plan_id}/actions/generate-opportunities")
 async def action_generate_opportunities(plan_id: str):
@@ -215,7 +248,7 @@ async def action_generate_opportunities(plan_id: str):
     except LLMGenerationError as e:
         raise _llm_generation_error(e) from e
     except (BaseUnavailable, BaseProviderError) as e:
-        raise HTTPException(503, detail={"error": {"code": "BASE_UNAVAILABLE", "message": str(e)}}) from e
+        raise HTTPException(503, detail={"error": {"code": "BASE_UNAVAILABLE", "message": "数据源暂时不可用，请稍后重试"}}) from e
     return {
         "plan_id": plan_id,
         "status": plan["status"],
@@ -261,8 +294,8 @@ async def action_archive(plan_id: str, background_tasks: BackgroundTasks):
         await asyncio.to_thread(pipeline.archive_plan, plan)
     except StateTransitionError as e:
         raise _state_transition_error(e)
-    except ValueError as e:
-        raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": str(e)}})
+    except ValueError:
+        raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": "企划卡尚未就绪，无法执行此操作"}})
     background_tasks.add_task(_run_archive_hooks, plan)
     return {"plan_id": plan_id, "status": plan["status"], "archived_at": plan["archived_at"]}
 
@@ -326,7 +359,7 @@ async def revise_apply(plan_id: str):
     except StateTransitionError as e:
         raise _state_transition_error(e) from e
     except ValueError as e:
-        raise HTTPException(409, detail={"error": {"code": "NO_REVISE_DRAFT", "message": str(e)}}) from e
+        raise HTTPException(409, detail={"error": {"code": "NO_REVISE_DRAFT", "message": "当前没有可用的修订草稿"}}) from e
 
 
 @router.post("/plans/{plan_id}/revise/cancel")
@@ -360,8 +393,8 @@ async def archive_plan(plan_id: str, background_tasks: BackgroundTasks):
         await asyncio.to_thread(pipeline.archive_plan, plan)
     except StateTransitionError as e:
         raise _state_transition_error(e)
-    except ValueError as e:
-        raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": str(e)}})
+    except ValueError:
+        raise HTTPException(409, detail={"error": {"code": "PLAN_CARD_NOT_READY", "message": "企划卡尚未就绪，无法执行此操作"}})
     # 事件驱动同步挪后台：归档立即返回，多维表格写入 + 卡片推送随后执行
     background_tasks.add_task(_run_archive_hooks, plan)
     return {"plan_id": plan_id, "status": plan["status"], "archived_at": plan["archived_at"]}
