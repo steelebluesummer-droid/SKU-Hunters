@@ -95,9 +95,10 @@ export default function TaskFlow() {
   // ── 原子动作：选定方向 → 生成企划卡 ────────────────────
   const onGeneratePlanCard = async () => {
     if (!selectedOpp) return;
+    // 立即切到第 3 步：由企划卡等待组件（六步管线点亮）接管生成过程展示
+    setStep(3);
     try {
       await ws.actions.generatePlanCard(selectedOpp);
-      setStep(3);
     } catch (e) {
       message.error(`企划卡生成失败：${e?.message || '请检查后端服务'}`);
     }
