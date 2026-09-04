@@ -6,14 +6,19 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-export default function ProcessLog({ lines, log, title, speed = 450, onDone }) {
+export default function ProcessLog({ lines, log, title, speed = 450, onDone, active = true }) {
   const entries = lines || log || [];
   const [shown, setShown] = useState(0);
   const doneRef = useRef(false);
 
   useEffect(() => {
+    if (!active) return undefined;
     let i = 0;
-    if (entries.length === 0) return undefined;
+    if (entries.length === 0) {
+      // 空日志：视为已完成，立即回调（供串行模块链推进）
+      if (!doneRef.current) { doneRef.current = true; onDone?.(); }
+      return undefined;
+    }
     const timer = setInterval(() => {
       i += 1;
       setShown(i);
@@ -24,7 +29,7 @@ export default function ProcessLog({ lines, log, title, speed = 450, onDone }) {
     }, speed);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [active]);
 
   return (
     <div className="process-log" aria-live="polite">

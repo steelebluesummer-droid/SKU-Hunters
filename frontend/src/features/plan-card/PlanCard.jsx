@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card, Row, Col, Tag, Timeline, Input, Button, List, Spin, Space, Alert } from 'antd';
-import { SendOutlined, LoadingOutlined } from '@ant-design/icons';
+import { SendOutlined, LoadingOutlined, CheckCircleFilled } from '@ant-design/icons';
 import ProcessLog from '../../shared/components/ProcessLog';
 
 const GRADIENTS = {
@@ -195,6 +195,56 @@ function ProductProposalView({ proposal = {}, opportunity }) {
   );
 }
 
+// 企划卡生成等待态：六步管线逐个点亮（每步约 4s，与真实管线节奏呼应）
+function PlanCardGenerating({ opportunity }) {
+  const STEPS = [
+    { key: 'decompose', label: '竞品拆解', desc: '解析同价位带竞品结构与卖点' },
+    { key: 'sellpoint', label: '卖点提炼', desc: '结合机会方向提炼差异化卖点' },
+    { key: 'pricing', label: '定价校验', desc: '价格带与消费者心理价位比对' },
+    { key: 'cost', label: '成本核算', desc: '物料成本与毛利率测算' },
+    { key: 'proposal', label: '产品方案', desc: '生成 SKU 设计与渠道建议' },
+    { key: 'card', label: '企划成稿', desc: '汇总为新品企划卡' },
+  ];
+  const [active, setActive] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setActive((a) => (a < STEPS.length - 1 ? a + 1 : a)), 4000);
+    return () => clearInterval(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <Card style={{ maxWidth: 560, margin: '24px auto' }} data-testid="plan-card-generating">
+      <div style={{ textAlign: 'center', marginBottom: 20 }}>
+        <div style={{ fontSize: 15, fontWeight: 600 }}>正在生成新品企划卡</div>
+        <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
+          {opportunity?.direction ? `方向：${opportunity.direction}` : 'AI 企划工作室管线执行中，通常需要 1~3 分钟'}
+        </div>
+      </div>
+      {STEPS.map((st, i) => {
+        const done = i < active;
+        const running = i === active;
+        return (
+          <div key={st.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 4px', opacity: done || running ? 1 : 0.45 }}>
+            {done ? (
+              <CheckCircleFilled style={{ color: 'var(--color-success, #52c41a)', fontSize: 18 }} />
+            ) : running ? (
+              <Spin indicator={<LoadingOutlined style={{ fontSize: 18 }} />} />
+            ) : (
+              <span style={{ width: 18, height: 18, borderRadius: '50%', border: '1.5px solid var(--color-border-strong, #d9d9d9)', display: 'inline-block' }} />
+            )}
+            <div>
+              <div style={{ fontSize: 13, fontWeight: running ? 600 : 400 }}>
+                {st.label}{running ? '…' : ''}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{st.desc}</div>
+            </div>
+            {done && <Tag style={{ marginLeft: 'auto' }} color="success">完成</Tag>}
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+
 export default function PlanCard({ card, proposal, opportunity, brief, status, isArchived, reviseDraft, planCardHistory, onGenerate, onRevise, onRevisePreview, onReviseApply, onReviseCancel, onReview }) {
   const [chats, setChats] = useState([]);
   const [reviewChats, setReviewChats] = useState([]);
@@ -272,7 +322,8 @@ export default function PlanCard({ card, proposal, opportunity, brief, status, i
   };
 
   if (status === 'loading') {
-    return <div style={{ textAlign: 'center', padding: 60 }} role="status" aria-busy="true"><Spin size="large" /></div>;
+    // 生成等待：六步管线逐个点亮（转圈→打勾），替代孤零零的大 Spin
+    return <PlanCardGenerating opportunity={opportunity} />;
   }
 
   if (status === 'error' && !card) {

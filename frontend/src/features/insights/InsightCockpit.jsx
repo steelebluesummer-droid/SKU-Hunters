@@ -22,11 +22,15 @@ const OPPORTUNITY_TYPE_LABEL = {
 const RANK_MEDAL = { 1: '🥇', 2: '🥈', 3: '🥉' };
 
 // 洞察模块外壳：标题 + 过程日志 + 日志跑完后显现内容
-function InsightModule({ title, tag = 'AI 分析 · 样本可溯', log, children }) {
+function InsightModule({ title, tag = 'AI 分析 · 样本可溯', log, active = true, onModuleDone, children }) {
   const [done, setDone] = useState(false);
   return (
     <Card title={<span>{title}<span style={MODULE_TAG}>{tag}</span></span>} style={{ marginBottom: 16 }}>
-      <ProcessLog lines={log || []} onDone={() => setDone(true)} />
+      <ProcessLog
+        lines={log || []}
+        active={active}
+        onDone={() => { setDone(true); onModuleDone?.(); }}
+      />
       <div style={{ opacity: done ? 1 : 0, transition: 'opacity 0.5s', pointerEvents: done ? 'auto' : 'none' }}>
         {children}
       </div>
@@ -86,11 +90,26 @@ function OpportunityPoolBlock({ opportunityPool = [], chainsByPoolId = {} }) {
             <div style={{ fontSize: 12, fontWeight: 600, margin: '10px 0 4px' }}>推理链：信号 → 解读 → 机会</div>
           )}
           {(item.reasoning || []).map(r => (
-            <Row key={r.signal} gutter={[8, 4]} style={{ marginBottom: 8, fontSize: 12 }} align="middle">
-              <Col xs={24} md={7}><Tag color="purple">{r.signal}</Tag></Col>
-              <Col xs={24} md={9}><ArrowRightOutlined style={{ marginRight: 6, color: 'var(--color-text-muted)' }} />{r.interpretation}</Col>
-              <Col xs={24} md={8}><b style={{ color: 'var(--color-action-primary)' }}>{r.opportunity}</b></Col>
-            </Row>
+            <div
+              key={r.signal}
+              style={{
+                marginBottom: 8,
+                fontSize: 12,
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '4px 8px',
+                alignItems: 'stretch',
+                wordBreak: 'break-word',
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>
+                <Tag color="purple" style={{ whiteSpace: 'normal', height: 'auto' }}>{r.signal}</Tag>
+              </span>
+              <ArrowRightOutlined style={{ flexShrink: 0, alignSelf: 'center', color: 'var(--color-text-muted)' }} />
+              <span style={{ flexShrink: 0, color: 'var(--color-text-secondary)' }}>{r.interpretation}</span>
+              <ArrowRightOutlined style={{ flexShrink: 0, alignSelf: 'center', color: 'var(--color-text-muted)' }} />
+              <b style={{ flexShrink: 0, color: 'var(--color-action-primary)' }}>{r.opportunity}</b>
+            </div>
           ))}
         </Card>
         );
@@ -405,20 +424,20 @@ function CompetitiveMap({ competitiveMap = {}, opportunityPool = [] }) {
   const gapY = gapZone?.y?.length >= 2 ? gapZone.y : [7, 10];
   const scatterOption = {
     tooltip: { formatter: p => `${p.data[2]}<br/>价格：${p.data[0]} 元 · 设计感：${p.data[1]}` },
-    grid: { left: 44, right: 24, top: 30, bottom: 36 },
+    grid: { left: 44, right: 48, top: 30, bottom: 42 },
     xAxis: { name: '价格（元）', type: 'value', max: 150 },
     yAxis: { name: '设计感', type: 'value', max: 10 },
     series: [{
       type: 'scatter', symbolSize: 18,
       itemStyle: { color: readCssVar('--color-action-primary'), opacity: 0.8 },
-      label: { show: true, position: 'top', formatter: p => p.data[2], fontSize: 11 },
+      label: { show: false },
       data: (competitiveMap.products || [])
         .filter(p => p.price != null && p.designScore != null)
         .map(p => [p.price, p.designScore, p.name]),
       markArea: gapZone ? {
         itemStyle: { color: readCssVar('--chart-accent-fill') },
-        label: { show: true, position: 'insideTop', color: readCssVar('--color-brand-accent'), fontSize: 11 },
-        data: [[{ name: gapZone.label, xAxis: gapX[0], yAxis: gapY[0] }, { xAxis: gapX[1], yAxis: gapY[1] }]],
+        label: { show: false },
+        data: [[{ xAxis: gapX[0], yAxis: gapY[0] }, { xAxis: gapX[1], yAxis: gapY[1] }]],
       } : undefined,
     }],
   };
@@ -514,6 +533,12 @@ function CompetitiveMap({ competitiveMap = {}, opportunityPool = [] }) {
       <Row gutter={16}>
         <Col xs={24} md={14}>
           <ReactECharts option={scatterOption} style={{ height: 300 }} />
+          {gapZone?.label && (
+            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4, display: 'flex', gap: 6 }}>
+              <span aria-hidden>▉</span>
+              <span><b style={{ color: 'var(--color-brand-accent)' }}>浅红区域：</b>{gapZone.label}</span>
+            </div>
+          )}
         </Col>
         <Col xs={24} md={10}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>价格带分布</div>
@@ -583,6 +608,9 @@ function CompetitorGallery({ products = [] }) {
 // 洞察驾驶舱：props 驱动（数据由 TaskFlow 拉取后传入，不再 import 全局 mock）
 // category 可选：用于匹配 AI Insight Enrichment（无匹配品类回退基础渲染）
 export default function InsightCockpit({ insights, category }) {
+  // 模块串行揭示：moduleIdx 表示当前已解锁到第几个模块（0 趋势 → 1 用户 → 2 竞品）
+  // 前一个模块的过程日志跑完，后一个才开始转圈，内容逐个出现而非全部同时挂出
+  const [moduleIdx, setModuleIdx] = useState(0);
   const {
     trendRadar = {},
     consumerVoice = {},
@@ -609,9 +637,9 @@ export default function InsightCockpit({ insights, category }) {
 
   return (
     <div>
-      <InsightModule title="趋势机会雷达" log={trendLog}><TrendRadar trendRadar={trendRadar} enrichment={enrichment} opportunityPool={opportunityPool} chainsByPoolId={chainsByPoolId} /></InsightModule>
-      <InsightModule title="用户需求 · 实时摘要" tag="实时摘要 · 样本可溯" log={consumerVoice.processLog}><ConsumerVoice consumerVoice={consumerVoice} opportunityPool={opportunityPool} /></InsightModule>
-      <InsightModule title="Competitive Map · 竞品分析" log={competitiveMap.processLog}><CompetitiveMap competitiveMap={competitiveMap} opportunityPool={opportunityPool} /></InsightModule>
+      <InsightModule title="趋势机会雷达" log={trendLog} active={moduleIdx >= 0} onModuleDone={() => setModuleIdx(1)}><TrendRadar trendRadar={trendRadar} enrichment={enrichment} opportunityPool={opportunityPool} chainsByPoolId={chainsByPoolId} /></InsightModule>
+      <InsightModule title="用户需求 · 实时摘要" tag="实时摘要 · 样本可溯" log={consumerVoice.processLog} active={moduleIdx >= 1} onModuleDone={() => setModuleIdx(2)}><ConsumerVoice consumerVoice={consumerVoice} opportunityPool={opportunityPool} /></InsightModule>
+      <InsightModule title="Competitive Map · 竞品分析" log={competitiveMap.processLog} active={moduleIdx >= 2} onModuleDone={() => setModuleIdx(3)}><CompetitiveMap competitiveMap={competitiveMap} opportunityPool={opportunityPool} /></InsightModule>
 
       <Row gutter={16}>
         <Col xs={24} md={12}>
