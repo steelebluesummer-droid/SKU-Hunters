@@ -63,7 +63,7 @@ def _parse_llm_json(raw: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _serialize(bundle: dict, category: str) -> str:
+def _serialize(bundle: dict, category: str, merged_pool: list[dict] | None = None) -> str:
     pool = bundle.get("opportunityPool", [])
     ib = bundle.get("insightBase", {})
     cv = bundle.get("consumerVoice", {})
@@ -71,9 +71,23 @@ def _serialize(bundle: dict, category: str) -> str:
     lines.append("【机会池（id｜title｜summary）】")
     for o in pool[:6]:
         lines.append(f"- {o.get('id', '')}｜{o.get('title', '')}｜{o.get('summary', '')[:40]}")
-    lines.append("【名创 IP 资产（name｜已有证据）】")
-    for ip in ib.get("ipPool", [])[:6]:
-        lines.append(f"- {ip.get('name', '')}｜{(ip.get('fit') or [''])[0][:50]}")
+    # IP官候选池：原 insightBase.ipPool ∪ 策展 12 IP ∪ 扩充库 33 IP（同名/别名去重，字段并集）
+    from app.planning.ip_library import merged_candidate_pool
+
+    ip_merged = merged_pool if merged_pool is not None else merged_candidate_pool(ib.get("ipPool", []))
+    lines.append("【名创 IP 资产（name｜授权方｜合作状态｜价格带｜热度）】")
+    for ip in ip_merged[:45]:
+        ev = "｜".join(
+            str(x)
+            for x in [
+                ip.get("licensor"),
+                ip.get("cooperationStatus") or ip.get("status"),
+                ip.get("priceBand"),
+                f"热度{ip.get('ipHeat') if ip.get('ipHeat') is not None else ip.get('heat') or ''}",
+            ]
+            if x
+        )
+        lines.append(f"- {ip.get('name', '')}｜{ev[:90]}")
     lines.append("【名创设计语言】")
     lines.append("、".join(ib.get("designLanguage", [])) or "（空，可自行建议）")
     lines.append("【用户决策因素】")
@@ -87,14 +101,19 @@ def build_asset_fit(category: str, bundle: dict, brief: dict) -> list[dict[str, 
 
     pool = bundle.get("opportunityPool", [])
     ib = bundle.get("insightBase", {})
-    ip_pool = ib.get("ipPool", [])
     if not pool:
         return None
 
+    # 候选池扩充后同时作为 LLM 输入与引用校验池（IP 必须命中真实名创资产，不 LLM 自造）
+    from app.planning.ip_library import merged_candidate_pool, normalize_ip_name
+
+    ip_pool = merged_candidate_pool(ib.get("ipPool", []))
+
     pool_ids = [o.get("id", "") for o in pool]
     ip_names = [ip.get("name", "") for ip in ip_pool]
+    ip_name_keys = [normalize_ip_name(n) for n in ip_names]
 
-    prompt = _serialize(bundle, category)
+    prompt = _serialize(bundle, category, merged_pool=ip_pool)
     data: dict | None = None
     for _ in range(2):  # 仅 JSON/契约失败重试一次；网络/超时已由 llm.complete 内部重试
         raw = llm.complete(_LLM_SYSTEM_PROMPT, prompt, temperature=0.4, max_tokens=4000, node="asset_fit")
@@ -112,8 +131,12 @@ def build_asset_fit(category: str, bundle: dict, brief: dict) -> list[dict[str, 
         if oid not in pool_ids:
             continue  # 机会池外的新方向，丢弃
         ip = str(f.get("ip", ""))
-        # ip 必须命中真实 ipPool，否则留空（不 LLM 自造名创资产）
+        # ip 必须命中真实候选池（含扩充库），否则留空（不 LLM 自造名创资产）
         ip_idx = _fuzzy_index(ip_names, ip) if ip else -1
+        if ip and ip_idx < 0:
+            # 别名归一兜底：LLM 可能写「吉伊卡哇」「Pokémon」「Sanrio」等别名
+            key = normalize_ip_name(ip)
+            ip_idx = ip_name_keys.index(key) if key in ip_name_keys else -1
         if ip and ip_idx < 0:
             ip = ""
         fits.append({

@@ -24,3 +24,8 @@ export async function getDataBoard() {
 export async function getIpResource() {
   return request('/ip-resource');
 }
+
+/** IP 资源库（扩充）：飞书 base_ip_partnerships 33 条合作情报 */
+export async function getIpLibrary() {
+  return request('/ip-library');
+}

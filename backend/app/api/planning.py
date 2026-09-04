@@ -27,15 +27,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from pydantic import ValidationError
 
 from app.data.base_adapter import BaseProviderError, BaseUnavailable
 from app.engine.strict_mode import StrictModeError, is_demo_hidden
-from app.planning import fixtures, ip_resource, pipeline
+from app.planning import fixtures, ip_library, ip_resource, pipeline
 from app.planning.insight_resolver import LLMGenerationError
 from app.planning.live_data import build_live_data_board
-from app.planning.repository import _snake_keys, plan_write_lock
+from app.planning.repository import _save_state, _snake_keys, plan_write_lock
 from app.planning.service import StateTransitionError
 from app.schemas.planning import PlanBrief
 from app.schemas.planning_api_v2 import PlanListResponseV2
@@ -133,6 +133,59 @@ async def aily_create_plan(payload: dict, background_tasks: BackgroundTasks):
     background_tasks.add_task(_run_aily_flow, plan)
     return {"plan_id": plan["plan_id"], "status": "running"}
 
+def _run_plan_flow(plan: dict[str, Any]) -> None:
+    """后台企划流程：五看洞察 → 机会卡；阶段写入 plan.stage，异常落 failed（fail-soft）
+
+    与 _run_aily_flow 同范式（BackgroundTasks），但带阶段进度与失败状态落盘，
+    供前端轮询展示；企划卡生成依赖用户选定方向，不在后台自动跑。
+    """
+    plan_id = plan.get("plan_id")
+    try:
+        with plan_write_lock(plan_id):
+            plan["stage"] = "insights"
+            plan.pop("error_summary", None)
+            _save_state()
+        pipeline.generate_insights(plan)
+        with plan_write_lock(plan_id):
+            plan["stage"] = "opportunities"
+            _save_state()
+        pipeline.generate_opportunities(plan)
+        with plan_write_lock(plan_id):
+            plan["stage"] = "done"
+            _save_state()
+    except Exception as e:
+        logger.exception("后台企划流程异常，plan_id=%s", plan_id)
+        try:
+            with plan_write_lock(plan_id):
+                plan["status"] = "failed"
+                plan["stage"] = "failed"
+                plan["error_summary"] = f"管线阶段执行失败（{type(e).__name__}）：请检查数据源/LLM 服务后重试"
+                _save_state()
+        except Exception:
+            logger.exception("写入失败状态异常，plan_id=%s", plan_id)
+
+
+@router.post("/plans/async", status_code=202)
+async def create_plan_async(payload: dict, background_tasks: BackgroundTasks):
+    """异步新建企划：校验 brief → 建档 → 立即 202 返回，洞察/机会在后台跑
+
+    入参与 POST /plans 一致；出参 { plan_id, status: "running" }。
+    前端轮询 GET /plans/{plan_id}（stage: insights → opportunities → done / failed）。
+    既有同步端点 POST /plans 保持不动（契约与测试不破坏）。
+    """
+    brief = payload.get("brief") or payload  # 兼容直接传 brief
+    try:
+        PlanBrief.model_validate(_snake_keys(brief))
+    except ValidationError as e:
+        raise _brief_invalid_error(e) from e
+    try:
+        plan = pipeline.create_plan(brief)
+    except StrictModeError as e:
+        raise HTTPException(409, detail={"error": {"code": "STRICT_REAL_MODE", "message": "当前为严格真实模式，该演示/仿真任务不可用"}}) from e
+    background_tasks.add_task(_run_plan_flow, plan)
+    return {"plan_id": plan["plan_id"], "status": "running"}
+
+
 @router.get("/plans", response_model=PlanListResponseV2)
 async def list_plans():
     return {"plans": pipeline.list_plans()}
@@ -163,6 +216,8 @@ async def get_plan(plan_id: str):
         "mode": plan["mode"],
         "status": plan["status"],
         "selected_opportunity": plan["selected_opportunity"],
+        "stage": plan.get("stage") or "",
+        "error_summary": plan.get("error_summary") or "",
         "plan_card": plan_card,  # 已有企划卡（归档后回看用）
         "product_proposal": product_proposal,  # 新品企划案（六模块）
         "created_at": plan["created_at"],
@@ -428,6 +483,49 @@ async def review_plan(plan_id: str, payload: dict):
 
 
 # ── 策展数据独立页（非 Agent 现搜，提前策展）────────────────────
+
+@router.get("/ip-library")
+async def get_ip_library():
+    """IP 资源库（扩充）：飞书 base_ip_partnerships 33 条合作情报，无凭证时 seed 降级"""
+    return {
+        "ips": ip_library.get_ip_library(),
+        "typeFilters": ip_library.TYPE_FILTERS,
+        "statusFilters": ip_library.STATUS_FILTERS,
+    }
+
+
+@router.get("/ip-library/image")
+async def get_ip_library_image(file_token: str):
+    """飞书附件图片代理：前端无法直连飞书 drive media（需 tenant token），由后端流式转发。
+
+    只允许访问 IP 合作表记录里真实存在的 file_token（白名单校验，防 SSRF）。
+    """
+    if not file_token:
+        raise HTTPException(422, detail={"error": {"code": "FILE_TOKEN_REQUIRED", "message": "file_token 必填"}})
+    allowed = {t for ip in ip_library.get_ip_library() for t in (ip.get("ipImage") or [])}
+    if file_token not in allowed:
+        raise HTTPException(404, detail={"error": {"code": "IMAGE_NOT_FOUND", "message": "file_token 不在 IP 资源库附件内"}})
+    url = f"https://open.feishu.cn/open-apis/drive/v1/medias/{file_token}/download"
+    headers = ip_library._feishu_headers()
+    if headers is None:
+        raise HTTPException(503, detail={"error": {"code": "FEISHU_UNAVAILABLE", "message": "飞书凭证未配置"}})
+    import requests as _requests
+
+    def _fetch():
+        return _requests.get(url, headers=headers, timeout=15, stream=True)
+
+    try:
+        upstream = await asyncio.to_thread(_fetch)
+    except _requests.RequestException as e:
+        raise HTTPException(502, detail={"error": {"code": "FEISHU_MEDIA_ERROR", "message": f"飞书图片拉取失败: {e}"}}) from e
+    if upstream.status_code != 200:
+        raise HTTPException(502, detail={"error": {"code": "FEISHU_MEDIA_ERROR", "message": f"飞书图片拉取失败：status={upstream.status_code}"}})
+    return Response(
+        content=upstream.content,
+        media_type=upstream.headers.get("Content-Type", "image/jpeg"),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
 
 @router.get("/ip-resource")
 async def get_ip_resource():
