@@ -1,0 +1,88 @@
+{
+  "topic": "保温杯",
+  "collect_date": "2026-09-04",
+  "trend_signals": [],
+  "hot_words": [],
+  "consumer_voice": {},
+  "competitive_map": {
+    "products": [
+      {
+        "name": "膳魔师 THERMOS膳魔师 JNL-606 不锈钢真空保温杯 600ml",
+        "price": "147",
+        "selling_point": "THERMOS膳魔师 JNL-606 不锈钢真空保温杯 600ml；100-200元",
+        "image_url": "/evidence/competitors/膳魔师_THERMOS膳魔师_JNL_606_不锈钢真空保温杯_600ml_WRmr.jpg",
+        "design": "9"
+      },
+      {
+        "name": "象印 ZOJIRUSHI象印 SM-SF60 不锈钢直饮保温杯 600ml",
+        "price": "219",
+        "selling_point": "ZOJIRUSHI象印 SM-SF60 不锈钢直饮保温杯 600ml；200-300元",
+        "image_url": "/evidence/competitors/象印_ZOJIRUSHI象印_SM_SF60_不锈钢直饮保温杯_600ml_tPsu.jpg",
+        "design": "9"
+      },
+      {
+        "name": "虎牌 Tiger虎牌 MMJ-S060KJ 不锈钢真空保温杯 600ml",
+        "price": "198",
+        "selling_point": "Tiger虎牌 MMJ-S060KJ 不锈钢真空保温杯 600ml；100-200元",
+        "image_url": "/evidence/competitors/虎牌_Tiger虎牌_MMJ_S060KJ_不锈钢真空保温杯_600ml_YJvJ.jpg",
+        "design": "8"
+      },
+      {
+        "name": "STANLEY STANLEY史丹利 经典系列 不锈钢真空保温杯 591ml",
+        "price": "269",
+        "selling_point": "STANLEY史丹利 经典系列 不锈钢真空保温杯 591ml；200-300元",
+        "image_url": "/evidence/competitors/STANLEY_STANLEY史丹利_经典系列_不锈钢真空保温杯_591ml_E7jd.jpg",
+        "design": "9"
+      },
+      {
+        "name": "乐扣乐扣 LOCK&LOCK乐扣乐扣 不锈钢保温杯 500ml",
+        "price": "79",
+        "selling_point": "LOCK&LOCK乐扣乐扣 不锈钢保温杯 500ml；50-100元",
+        "image_url": "/evidence/competitors/乐扣乐扣_LOCK_LOCK乐扣乐扣_不锈钢保温杯_500ml_o7cD.jpg",
+        "design": "7"
+      },
+      {
+        "name": "希诺 希诺HEENOOR 纯钛保温杯 XN-T361 520ml",
+        "price": "989",
+        "selling_point": "希诺HEENOOR 纯钛保温杯 XN-T361 520ml；500元以上",
+        "image_url": "/evidence/competitors/希诺_希诺HEENOOR_纯钛保温杯_XN_T361_520ml_Wf4q.jpg",
+        "design": "10"
+      },
+      {
+        "name": "特美刻 TOMIC特美刻 不锈钢真空保温杯 500ml",
+        "price": "129",
+        "selling_point": "TOMIC特美刻 不锈钢真空保温杯 500ml；100-200元",
+        "image_url": "/evidence/competitors/特美刻_TOMIC特美刻_不锈钢真空保温杯_500ml_DYmK.jpg",
+        "design": "8"
+      },
+      {
+        "name": "富光 富光FUGUANG 316不锈钢保温杯 600ml",
+        "price": "49",
+        "selling_point": "富光FUGUANG 316不锈钢保温杯 600ml；50元以下",
+        "image_url": "/evidence/competitors/富光_富光FUGUANG_316不锈钢保温杯_600ml_RjdK.jpg",
+        "design": "6"
+      },
+      {
+        "name": "哈尔斯 HAERS哈尔斯 不锈钢真空保温杯 650ml",
+        "price": "69",
+        "selling_point": "HAERS哈尔斯 不锈钢真空保温杯 650ml；50-100元",
+        "image_url": "/evidence/competitors/哈尔斯_HAERS哈尔斯_不锈钢真空保温杯_650ml_E1MX.jpg",
+        "design": "7"
+      },
+      {
+        "name": "希乐 Cille希乐 316不锈钢保温杯 500ml",
+        "price": "39",
+        "selling_point": "Cille希乐 316不锈钢保温杯 500ml；50元以下",
+        "image_url": "/evidence/competitors/希乐_Cille希乐_316不锈钢保温杯_500ml_k95p.jpg",
+        "design": "6"
+      }
+    ],
+    "gap_zone": "",
+    "price_bands": [],
+    "selling_points": []
+  },
+  "insight_base": {},
+  "trend_gallery": {},
+  "evidence_refs": [],
+  "source_note": "导出自飞书竞品表 base_competitors（2026-09-04，12 条记录，展示前10）"
+}
