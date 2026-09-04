@@ -85,6 +85,9 @@ def _save_state() -> None:
                 "data_context": p.get("data_context"),
                 # 旧任务懒补增强状态：持久化后重启不再重复触发 LLM 补缺失节点
                 "enhance_state": p.get("enhance_state"),
+                # 异步后台执行：阶段进度与失败摘要（同步创建的旧任务无此字段）
+                "stage": p.get("stage"),
+                "error_summary": p.get("error_summary"),
             }
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -224,6 +227,8 @@ def list_plans() -> list[dict[str, Any]]:
                 concept_image=localize_concept_image(p["plan_id"], concept_img),
                 price=(card.get("pricing") or {}).get("price", ""),
                 margin=(card.get("costCheck") or {}).get("margin"),
+                stage=p.get("stage") or "",
+                error_summary=p.get("error_summary") or "",
             )
         )
     return [s.model_dump() for s in summaries]

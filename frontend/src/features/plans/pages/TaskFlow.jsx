@@ -27,6 +27,12 @@ const STEPS = ['企划约束', '洞察驾驶舱', '机会生成', '新品企划�
 
 const STATUS_STEP = { brief_locked: 0, insights_ready: 1, opportunities_ready: 2, plan_card_ready: 3, archived: 3 };
 
+// 异步后台执行阶段 → 中文标签（供进行中提示展示）
+const STAGE_LABEL = { insights: '五看洞察生成', opportunities: '机会卡生成' };
+
+// 洞察驾驶舱等待态占位模块（与 InsightCockpit 实际模块对应）
+const INSIGHT_WAIT_MODULES = ['趋势机会雷达', '用户需求 · 实时摘要', 'Competitive Map · 竞品分析', '名创内部资产', '流行元素'];
+
 export default function TaskFlow() {
   const nav = useNavigate();
   const { id } = useParams();
@@ -44,11 +50,19 @@ export default function TaskFlow() {
       setStep(3);
       return;
     }
+    // 异步后台执行：等待与查看都停在洞察驾驶舱（step 1）；
+    // 机会卡在后台就绪后不自动跳步，由用户手动进入下一步
+    if (ws.plan.stage && ws.plan.status !== 'failed') {
+      setStep(1);
+      return;
+    }
     const s = STATUS_STEP[ws.plan.status];
     if (s !== undefined) setStep(s);
-  }, [ws.plan?.plan_id, ws.plan?.status, ws.plan?.selected_opportunity]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws.plan?.plan_id, ws.plan?.status, ws.plan?.selected_opportunity, ws.plan?.stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isArchived = ws.status === 'archived';
+  // 异步后台执行中（stage 存在且未到终态）：展示进行中提示，隐藏手动触发按钮
+  const stageRunning = !!ws.stage && !['done', 'failed'].includes(ws.stage) && ws.status !== 'failed';
   // 最大可访问 step：未解锁步骤不可跳转（archived 只读，仍可回看 0-3）
   const maxAccessibleStep = STATUS_STEP[ws.status] ?? 0;
   const handleStepChange = (next) => { if (next <= maxAccessibleStep) setStep(next); };
@@ -171,15 +185,47 @@ export default function TaskFlow() {
             <Descriptions.Item label="上新窗口">{brief.launchWindow || '—'}</Descriptions.Item>
             <Descriptions.Item label="商业目标" span={2}>{(brief.goals || []).map((g) => <Tag key={g}>{g}</Tag>)}</Descriptions.Item>
           </Descriptions>
-          <Button
-            type="primary"
-            style={{ marginTop: 16 }}
-            disabled={isArchived}
-            loading={ws.pendingAction === 'insights'}
-            onClick={onGenerateInsights}
-          >
-            确认约束，开始洞察分析
-          </Button>
+          {stageRunning ? (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginTop: 16 }}
+              message="后台执行中，可切换到其他页面"
+              description={
+                <div data-testid="async-stage">
+                  当前阶段：{STAGE_LABEL[ws.stage] || ws.stage} · 完成后自动进入下一步
+                  <div style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', marginTop: 4 }}>
+                    洞察分析通常需要 1~3 分钟，进度在后端持续保存，离开页面不丢。
+                  </div>
+                </div>
+              }
+            />
+          ) : ws.status === 'failed' ? (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginTop: 16 }}
+              message="企划生成失败"
+              description={
+                <>
+                  <div data-testid="async-error-summary">{ws.errorSummary || '管线执行异常，请检查数据源/LLM 服务'}</div>
+                  <div style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', marginTop: 4 }}>
+                    可返回新建页重新提交企划约束，或检查后端数据源配置后重试。
+                  </div>
+                </>
+              }
+            />
+          ) : (
+            <Button
+              type="primary"
+              style={{ marginTop: 16 }}
+              disabled={isArchived}
+              loading={ws.pendingAction === 'insights'}
+              onClick={onGenerateInsights}
+            >
+              确认约束，开始洞察分析
+            </Button>
+          )}
           {ws.pendingAction === 'insights' && (
             <Suspense fallback={null}>
               <InsightGeneratingSteps />
@@ -219,27 +265,58 @@ export default function TaskFlow() {
 
       {step === 1 && (
         <div>
-          <StateCard status={insightState} onRetry={onGenerateInsights} emptyText="暂无洞察数据">
-            <Suspense
-              fallback={
-                <div style={{ textAlign: 'center', padding: 48 }} role="status" aria-busy="true">
-                  <Spin />
-                  <div style={{ marginTop: 8, color: 'var(--color-text-muted)' }}>正在加载洞察模块…</div>
-                </div>
-              }
+          {ws.status === 'failed' ? (
+            <Alert
+              type="error"
+              showIcon
+              message="企划生成失败"
+              description={ws.errorSummary || '管线执行异常，请检查数据源/LLM 服务后重试'}
+            />
+          ) : stageRunning && !ws.insights ? (
+            <div data-testid="insight-generating" role="status" aria-busy="true">
+              {INSIGHT_WAIT_MODULES.map((m) => (
+                <Card key={m} size="small" style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <Spin />
+                    <span style={{ fontSize: 13 }}>{m}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--color-text-muted)' }}>分析中…</span>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <StateCard status={insightState} onRetry={onGenerateInsights} emptyText="暂无洞察数据">
+              <Suspense
+                fallback={
+                  <div style={{ textAlign: 'center', padding: 48 }} role="status" aria-busy="true">
+                    <Spin />
+                    <div style={{ marginTop: 8, color: 'var(--color-text-muted)' }}>正在加载洞察模块…</div>
+                  </div>
+                }
+              >
+                {ws.insights && <InsightCockpit insights={ws.insights} category={brief?.category} />}
+              </Suspense>
+            </StateCard>
+          )}
+          {stageRunning ? (
+            <Button style={{ marginTop: 16 }} loading disabled>
+              机会卡生成中（后台执行）…
+            </Button>
+          ) : ws.opportunities?.length ? (
+            <Button type="primary" style={{ marginTop: 16 }} onClick={() => setStep(2)}>
+              洞察完成，查看机会方向
+            </Button>
+          ) : (
+            <Button
+              type="primary"
+              style={{ marginTop: 16 }}
+              disabled={!ws.insights || isArchived}
+              loading={ws.pendingAction === 'opportunities'}
+              onClick={onGenerateOpportunities}
             >
-              {ws.insights && <InsightCockpit insights={ws.insights} category={brief?.category} />}
-            </Suspense>
-          </StateCard>
-          <Button
-            type="primary"
-            style={{ marginTop: 16 }}
-            disabled={!ws.insights || isArchived}
-            loading={ws.pendingAction === 'opportunities'}
-            onClick={onGenerateOpportunities}
-          >
-            洞察完成，生成机会方向
-          </Button>
+              洞察完成，生成机会方向
+            </Button>
+          )}
         </div>
       )}
 

@@ -10,13 +10,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useBlocker } from 'react-router-dom';
 import { Form, Select, Input, InputNumber, Button, Card, Checkbox, Row, Col, Alert, Modal } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
-import { createPlan } from '../../../api/plans';
+import { createPlanAsync } from '../../../api/plans';
+import { invalidateGetCache } from '../../../api/client';
+import { getIpResource, getIpLibrary } from '../../../api/dashboard';
 import { fromForm } from '../../../shared/utils/normalizeBrief';
+import { IP_OPTIONS_FALLBACK, NO_IP_OPTION, mergeIpOptions } from '../../../shared/utils/ipOptions';
 
 // 品类 / 市场 / IP / 目标 的可选项（UI 选项，非 fixture 数据）
 const CATEGORIES = ['小风扇', '保温杯', '香薰', '桌面摆件', '雨伞', '冰袖'];
 const MARKETS = ['中国大陆', '东南亚', '日本', '欧美'];
-const IP_OPTIONS = ['三丽鸥', '迪士尼', 'Chiikawa', '线条小狗', '不带 IP'];
 const GOAL_OPTIONS = ['夏季销售提升', '打造IP爆款', '拓展新人群', '提升连带率'];
 
 // 后端 snake_case 字段 → 表单字段（用于 422 映射）
@@ -56,6 +58,23 @@ export default function NewPlan() {
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const [pageError, setPageError] = useState(null);
+  // IP 选项：fallback 5 项 ∪ 策展 12 ∪ 扩充 33（并行拉取，全失败降级 fallback，不阻塞表单）
+  const [ipOptions, setIpOptions] = useState(IP_OPTIONS_FALLBACK);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      getIpResource().catch(() => null),
+      getIpLibrary().catch(() => null),
+    ]).then(([resource, library]) => {
+      if (!alive) return;
+      const curated = (resource?.ips || []).map((ip) => ip.nameCn || ip.name).filter(Boolean);
+      const expanded = (library?.ips || []).map((ip) => ip.name).filter(Boolean);
+      const merged = mergeIpOptions(IP_OPTIONS_FALLBACK, curated, expanded);
+      if (merged.length) setIpOptions(merged);
+    });
+    return () => { alive = false; };
+  }, []);
 
   // 应用内导航守卫：dirty 时任何导航（侧栏/后退/取消）都需确认
   const blocker = useBlocker(() => dirtyRef.current);
@@ -94,7 +113,9 @@ export default function NewPlan() {
     setPageError(null);
     try {
       const brief = fromForm(values);
-      const res = await createPlan(brief);
+      // 异步创建：后端立即 202 返回 plan_id，洞察/机会在后台跑，页面随时可切走
+      invalidateGetCache('/plans'); // 新建后使列表缓存失效，任务中心立即可见
+      const res = await createPlanAsync(brief);
       if (res?.plan_id) {
         dirtyRef.current = false;
         setDirty(false); // 已提交，离开无需再确认
@@ -250,8 +271,16 @@ export default function NewPlan() {
             <InputNumber min={0} style={{ width: '100%' }} placeholder="如 25" />
           </Form.Item>
 
-          <Form.Item label="IP 策略" name="ipStrategy">
-            <Checkbox.Group options={IP_OPTIONS} />
+          <Form.Item label="IP 策略" name="ipStrategy" extra="可选多个 IP；两档资源库请求失败时回退基础选项">
+            <Select
+              mode="multiple"
+              showSearch
+              allowClear
+              placeholder="搜索并选择 IP（可多选）"
+              optionFilterProp="label"
+              options={[...ipOptions, NO_IP_OPTION].map((name) => ({ value: name, label: name }))}
+              aria-label="IP 策略多选"
+            />
           </Form.Item>
 
           <Form.Item label="上新窗口" name="launchWindow">

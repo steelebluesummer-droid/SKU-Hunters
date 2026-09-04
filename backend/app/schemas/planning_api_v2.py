@@ -28,6 +28,8 @@ class PlanSummaryV2(BaseModel):
     concept_image: str = ""       # 企划卡概念图（即梦/冻结图）；未出企划卡为空
     price: str = ""               # 定价（如 "59 元"）；未出企划卡为空
     margin: float | None = None   # 毛利率（0-1）；未出企划卡或无成本校验为 None
+    stage: str = ""              # 异步后台执行阶段：insights / opportunities / done / failed / ""（同步创建无）
+    error_summary: str = ""      # 后台执行失败摘要；成功/未失败为空串
 
 
 class PlanListResponseV2(BaseModel):

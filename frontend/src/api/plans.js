@@ -10,9 +10,15 @@
 
 import { request } from './client';
 
-/** 新建企划 → 返回 { plan_id, status } */
+/** 新建企划（同步建档）→ 返回 { plan_id, status } */
 export async function createPlan(brief) {
   return request('/plans', { method: 'POST', body: { brief } });
+}
+
+/** 新建企划（异步后台执行）→ 立即返回 { plan_id, status: 'running' }
+ *  洞察/机会在后台跑，前端轮询 GET /plans/{id} 的 stage（insights→opportunities→done/failed） */
+export async function createPlanAsync(brief) {
+  return request('/plans/async', { method: 'POST', body: { brief } });
 }
 
 /** 任务列表 → 返回 { plans: [...] } */

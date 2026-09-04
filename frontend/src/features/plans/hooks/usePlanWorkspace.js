@@ -47,6 +47,7 @@ export default function usePlanWorkspace(planId) {
   // 数据来源标识：取自后端洞察的 dataSource（crawled 真实采集 / llm LLM 生成），洞察未生成前不展示
   const source = insights?.dataSource || null;
   const status = plan?.status || 'brief_locked';
+  const errorSummary = plan?.error_summary || '';
   const selectedOpportunity = plan?.selected_opportunity || null;
   const planCard = plan?.plan_card || null;
   const productProposal = plan?.product_proposal || null;
@@ -79,6 +80,29 @@ export default function usePlanWorkspace(planId) {
   }, [planId]);
 
   useEffect(() => { loadPlan(); }, [loadPlan]);
+
+  // ── 异步后台执行：轮询 stage 直至 done/failed ──────────
+  // 提交后后台跑洞察→机会，前端每 4s 拉一次状态；离开页面再回来
+  // 重新 loadPlan 后 stage 仍在后端，继续轮询，进度不丢。
+  const stage = plan?.stage || '';
+  const stageRunning = !!stage && !['done', 'failed'].includes(stage) && status !== 'failed';
+  useEffect(() => {
+    if (!stageRunning) return undefined;
+    const timer = setInterval(async () => {
+      try {
+        const p = await getPlan(planId);
+        setPlan(p);
+        if (p?.stage === 'done' || p?.stage === 'failed' || p?.status === 'failed') {
+          // 后台完成/失败：完整 reload 拉取洞察/机会产物与错误信息
+          loadPlan();
+        }
+      } catch {
+        /* 轮询失败静默，下一轮重试 */
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageRunning, planId, loadPlan]);
 
   // ── 原子动作：生成洞察 ────────────────────────────────
   const runGenerateInsights = useCallback(async () => {
@@ -273,6 +297,8 @@ export default function usePlanWorkspace(planId) {
 
   return {
     plan,
+    stage,
+    errorSummary,
     insights,
     opportunities,
     opportunitiesLog,
