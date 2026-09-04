@@ -223,6 +223,7 @@ class SocialEvidenceLoader:
                 "name": name,
                 "price": _first_number(p.get("price", 0)),
                 "design": _first_number(p.get("design", 5)),
+                "designScore": _first_number(p.get("design", 5)),  # 前端散点图读 designScore（与 live 路径对齐）
                 "imageUrl": p.get("image_url", ""),
                 "sellingPoint": p.get("selling_point", ""),
             })

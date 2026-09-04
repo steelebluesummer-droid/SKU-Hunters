@@ -13,11 +13,31 @@ adapter 管理方法；但 Python 反射可绕过，非进程级安全边界。
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from app.data.base_adapter import BaseProviderError, BaseQueryPort, BaseUnavailable
+
+# ── 竞品图片本地化：外链图床（淘宝/京东 CDN）有防盗链，前端 <img> 加载不可靠 ──
+# data/evidence/images/competitors_url_map.json 维护「外链 URL → 本地文件名」映射；
+# 命中映射则改写为 /evidence/competitors/<file>（由后端静态目录服务）；未命中保留原链。
+_URL_MAP_PATH = Path(__file__).resolve().parents[2] / "data" / "evidence" / "images" / "competitors_url_map.json"
+
+
+def _localize_image_url(url: str | None) -> str | None:
+    """外链竞品图 → 本地路径；未命中映射返回原值（不伪造、不丢数据）"""
+    if not url:
+        return url
+    try:
+        with open(_URL_MAP_PATH, encoding="utf-8") as _f:
+            mapping = json.load(_f)
+        fname = mapping.get(url)
+        return f"/evidence/competitors/{fname}" if fname else url
+    except (OSError, ValueError):
+        return url
 
 
 class _ReadView:
@@ -285,7 +305,7 @@ class CompetitorDataView(_ReadView):
                 "priceMin": r.price_min,
                 "priceMax": r.price_max,
                 "priceBand": r.price_band,
-                "imageUrl": r.image_url,
+                "imageUrl": _localize_image_url(r.image_url),
                 "sellingPoints": list(r.selling_points or []),
                 "designScore": r.design_score,
                 "sourceUrl": r.source_url,
