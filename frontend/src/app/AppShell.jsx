@@ -7,14 +7,15 @@
 
 import { useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { prefetchPage } from './router';
 import { Layout, Menu, Drawer, Button, Grid } from 'antd';
 import {
   HomeOutlined,
-  PlusOutlined,
   BarChartOutlined,
   ShopOutlined,
   BgColorsOutlined,
   MenuOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 
 const { Sider, Header, Content } = Layout;
@@ -24,8 +25,7 @@ const MENU_ITEMS = [
     type: 'group',
     label: '企划流程',
     children: [
-      { key: '/', icon: <HomeOutlined />, label: '任务中心' },
-      { key: '/new', icon: <PlusOutlined />, label: '新建企划' },
+      { key: '/', icon: <HomeOutlined />, label: '企划中心' },
     ],
   },
   {
@@ -34,6 +34,7 @@ const MENU_ITEMS = [
     children: [
       { key: '/dashboard', icon: <BarChartOutlined />, label: '数据看板' },
       { key: '/insight-base', icon: <ShopOutlined />, label: '名创内部' },
+      { key: '/ip-library', icon: <AppstoreOutlined />, label: 'IP 资源库' },
       { key: '/trend-gallery', icon: <BgColorsOutlined />, label: '流行元素板' },
     ],
   },
@@ -42,8 +43,8 @@ const MENU_ITEMS = [
 const BRAND = 'SKU Hunters';
 
 function selectedKey(pathname) {
-  if (pathname.startsWith('/tasks/')) return '/'; // 任务详情页选中「任务中心」
-  if (pathname.startsWith('/new')) return '/new';
+  if (pathname.startsWith('/tasks/')) return '/'; // 任务详情页选中「企划中心」
+  if (pathname.startsWith('/new')) return '/'; // 新建企划是动作非目的地，高亮企划中心
   return '/' + (pathname.split('/')[1] || '');
 }
 
@@ -59,12 +60,26 @@ export default function AppShell() {
     setDrawerOpen(false);
   };
 
+  // 悬停菜单项即预取对应页面 chunk（点击时已就绪，切换秒开）
+  const PREFETCH_BY_KEY = {
+    '/': 'taskCenter',
+    '/new': 'newPlan',
+    '/dashboard': 'dataBoard',
+    '/insight-base': 'insightBase',
+    '/ip-library': 'ipLibrary',
+    '/trend-gallery': 'trendGallery',
+  };
+  const handleMenuHover = ({ key }) => {
+    prefetchPage(PREFETCH_BY_KEY[key]);
+  };
+
   const menu = (
     <Menu
       mode="inline"
       selectedKeys={[selectedKey(pathname)]}
       items={MENU_ITEMS}
       onClick={handleMenuClick}
+      onHover={handleMenuHover}
     />
   );
 

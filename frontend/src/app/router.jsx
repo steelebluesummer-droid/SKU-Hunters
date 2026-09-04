@@ -15,6 +15,7 @@ const NewPlan = lazy(() => import('../features/plans/pages/NewPlan'));
 const TaskFlow = lazy(() => import('../features/plans/pages/TaskFlow'));
 const DataBoard = lazy(() => import('../features/dashboard/DataBoard'));
 const InsightBase = lazy(() => import('../features/dashboard/InsightBase'));
+const IpLibrary = lazy(() => import('../features/dashboard/IpLibrary'));
 const TrendGallery = lazy(() => import('../features/dashboard/TrendGallery'));
 const NotFound = lazy(() => import('../shared/components/NotFound'));
 
@@ -28,6 +29,20 @@ function PageLoading() {
 }
 
 // 每个 lazy 页面包一层语义 Suspense
+// 路由预加载：悬停菜单时提前拉取页面 chunk，点击时免编译等待
+export function prefetchPage(name) {
+  const map = {
+    taskCenter: () => import('../features/plans/pages/TaskCenter'),
+    newPlan: () => import('../features/plans/pages/NewPlan'),
+    taskFlow: () => import('../features/plans/pages/TaskFlow'),
+    dataBoard: () => import('../features/dashboard/DataBoard'),
+    insightBase: () => import('../features/dashboard/InsightBase'),
+    ipLibrary: () => import('../features/dashboard/IpLibrary'),
+    trendGallery: () => import('../features/dashboard/TrendGallery'),
+  };
+  map[name]?.();
+}
+
 function lazyElement(Component) {
   return (
     <Suspense fallback={<PageLoading />}>
@@ -46,6 +61,7 @@ export const router = createBrowserRouter([
       { path: 'tasks/:id', element: lazyElement(TaskFlow) },
       { path: 'dashboard', element: lazyElement(DataBoard) },
       { path: 'insight-base', element: lazyElement(InsightBase) },
+      { path: 'ip-library', element: lazyElement(IpLibrary) },
       { path: 'trend-gallery', element: lazyElement(TrendGallery) },
       { path: '*', element: lazyElement(NotFound) },
     ],

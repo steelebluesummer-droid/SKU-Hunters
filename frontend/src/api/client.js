@@ -6,11 +6,29 @@
 
 const BASE = '/api/v1';
 
+// ── GET 短缓存：看板类数据 30 秒内二次请求直接复用，切页免重复转圈 ──
+// 仅缓存无参数 GET；带参数 url（含 ?）不缓存；非 GET 不缓存。
+const GET_CACHE_TTL = 30 * 1000;
+const _getCache = new Map(); // url → { at, promise }
+
+async function requestWithGetCache(url, opts) {
+  const cacheable = !opts.method || opts.method === 'GET';
+  if (!cacheable || url.includes('?')) return rawRequest(url, opts);
+  const hit = _getCache.get(url);
+  if (hit && Date.now() - hit.at < GET_CACHE_TTL) return hit.promise;
+  const promise = rawRequest(url, opts).catch((e) => {
+    _getCache.delete(url); // 失败不缓存
+    throw e;
+  });
+  _getCache.set(url, { at: Date.now(), promise });
+  return promise;
+}
+
 /**
  * 统一请求封装：返回解析后的 JSON；非 2xx 抛出结构化错误。
  * 数据契约统一为 camelCase（与后端 loader / fixtures 对齐）。
  */
-export async function request(url, opts = {}) {
+async function rawRequest(url, opts = {}) {
   let res;
   try {
     res = await fetch(BASE + url, {
@@ -45,3 +63,16 @@ export async function request(url, opts = {}) {
 }
 
 export { BASE };
+
+
+/** 对外请求入口：GET 走 30s 短缓存，其余直接请求 */
+export function request(url, opts = {}) {
+  return requestWithGetCache(url, opts);
+}
+
+/** 使指定 url 的 GET 缓存失效（增删改后调用，保证下次拉到最新数据） */
+export function invalidateGetCache(urlPrefix) {
+  for (const key of [..._getCache.keys()]) {
+    if (!urlPrefix || key.startsWith(urlPrefix)) _getCache.delete(key);
+  }
+}

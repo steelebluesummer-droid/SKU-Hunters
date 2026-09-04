@@ -7,8 +7,8 @@
  * ============================================================ */
 
 import { useState } from 'react';
-import { Button, Card, Popconfirm, Tag, Typography } from 'antd';
-import { DeleteOutlined, LockOutlined, StarOutlined, StarFilled } from '@ant-design/icons';
+import { Button, Card, Popconfirm, Progress, Tag, Typography } from 'antd';
+import { DeleteOutlined, LoadingOutlined, LockOutlined, StarOutlined, StarFilled } from '@ant-design/icons';
 
 const { Paragraph } = Typography;
 
@@ -22,17 +22,27 @@ const STATUS_META = {
   opportunities_ready: { label: '机会生成', color: 'green', bar: '#52c41a' },
   plan_card_ready: { label: '新品企划卡', color: 'purple', bar: '#722ed1' },
   archived: { label: '已归档', color: 'default', bar: '#d9d9d9' },
+  failed: { label: '生成失败', color: 'red', bar: '#ff4d4f' },
 };
+
+// 异步后台执行阶段 → 人话文案 + 进度序号（0/3 起跑 → 3/3 完成）
+const STAGE_LABEL = { insights: '洞察分析中', opportunities: '机会卡生成中', done: '已完成' };
+const STAGE_STEP = { insights: 1, opportunities: 2, done: 3 };
+const STAGE_TOTAL = 3;
 
 /**
  * @param {object} task     任务摘要（plan_id / theme / category / audience / status / created_at / mode / concept_image / price / margin）
  * @param {Function} onClick 整卡点击
  * @param {Function} onDelete 删除回调（可选；Popconfirm 二次确认后触发，不冒泡整卡跳转）
  */
-export default function TaskCard({ task, onClick, onDelete }) {
+export default function TaskCard({ task, onClick, onDelete, style }) {
   const meta = STATUS_META[task.status] || STATUS_META.brief_locked;
   const isArchived = task.status === 'archived';
   const created = (task.created_at || '').slice(0, 10);
+  // 运行中：异步后台执行（stage 未到终态）或处于中间态/running/failed（等待用户推进或后台跑）
+  const stageRunning =
+    (!!task.stage && !['done', 'failed'].includes(task.stage) && task.status !== 'failed') ||
+    ['running', 'brief_locked', 'insights_ready', 'opportunities_ready'].includes(task.status);
 
   // 收藏状态：读 localStorage 初始化，点击切换（stopPropagation，不触发整卡跳转）
   const [fav, setFav] = useState(() => {
@@ -73,7 +83,7 @@ export default function TaskCard({ task, onClick, onDelete }) {
         }
       }}
       className="task-card"
-      style={{ cursor: 'pointer', height: '100%', borderLeft: `4px solid ${meta.bar}` }}
+      style={{ cursor: onClick ? 'pointer' : 'default', height: '100%', borderLeft: `4px solid ${meta.bar}`, ...style }}
     >
       <div style={{ display: 'flex', gap: 12 }}>
         {/* 左：概念图缩略（未出企划卡显示占位） */}
@@ -117,6 +127,11 @@ export default function TaskCard({ task, onClick, onDelete }) {
           {/* 阶段 + 归档只读标记（文字表达状态）+ 收藏/删除 */}
           <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
             <Tag color={meta.color} style={{ marginRight: 0 }}>{meta.label}</Tag>
+            {stageRunning ? (
+              <Tag color="processing" icon={<LoadingOutlined />} style={{ marginRight: 0 }}>
+                {STAGE_LABEL[task.stage] || '进行中'}
+              </Tag>
+            ) : null}
             {isArchived ? (
               <Tag icon={<LockOutlined />} style={{ marginRight: 0 }}>只读</Tag>
             ) : null}
@@ -128,7 +143,7 @@ export default function TaskCard({ task, onClick, onDelete }) {
                 icon={fav ? <StarFilled style={{ color: '#fadb14' }} /> : <StarOutlined />}
                 onClick={toggleFav}
               />
-              {onDelete ? (
+              {onDelete && !stageRunning ? (
                 <Popconfirm
                   title="删除该企划任务？"
                   description="删除后不可恢复"
@@ -153,6 +168,18 @@ export default function TaskCard({ task, onClick, onDelete }) {
               ) : null}
             </span>
           </div>
+
+          {/* 进行中：细进度条（stage 序号/3；无 stage 的中间态从 0 起步），375px 小屏隐藏仅留 Tag */}
+          {stageRunning ? (
+            <Progress
+              percent={Math.round(((STAGE_STEP[task.stage] || 0) / STAGE_TOTAL) * 100)}
+              showInfo={false}
+              size="small"
+              strokeColor="var(--color-action-primary)"
+              style={{ margin: '4px 0 2px', maxWidth: 220 }}
+              className="task-stage-progress"
+            />
+          ) : null}
 
           {/* 主题：超长/英文自动换行，超两行截断并悬停显示完整标题 */}
           <Paragraph
