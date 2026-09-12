@@ -14,7 +14,7 @@ import { createPlanAsync } from '../../../api/plans';
 import { invalidateGetCache } from '../../../api/client';
 import { getIpResource, getIpLibrary } from '../../../api/dashboard';
 import { fromForm } from '../../../shared/utils/normalizeBrief';
-import { IP_OPTIONS_FALLBACK, NO_IP_OPTION, mergeIpOptions } from '../../../shared/utils/ipOptions';
+import { IP_OPTIONS_FALLBACK, NO_EXTERNAL_IP, buildIpSelectGroups } from '../../../shared/utils/ipOptions';
 
 // 品类 / 市场 / IP / 目标 的可选项（UI 选项，非 fixture 数据）
 const CATEGORIES = ['小风扇', '保温杯', '香薰', '雨伞'];
@@ -58,9 +58,9 @@ export default function NewPlan() {
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const [pageError, setPageError] = useState(null);
-  // IP 选项：fallback 5 项 ∪ 策展 12 ∪ 扩充库（Base 当前 35；无配置时内置 33 条快照）
-  // 并行拉取，全失败降级 fallback，不阻塞表单
-  const [ipOptions, setIpOptions] = useState(IP_OPTIONS_FALLBACK);
+  // IP 策略三档分组：无外部联名 / 自有 IP（标注「（自有IP）」）/ 外部联名 IP
+  // fallback ∪ 策展 12 ∪ 扩充库（保留 ipType 以识别自有 IP）；并行拉取，全失败降级 fallback，不阻塞表单
+  const [ipGroups, setIpGroups] = useState(() => buildIpSelectGroups(IP_OPTIONS_FALLBACK));
 
   useEffect(() => {
     let alive = true;
@@ -69,13 +69,29 @@ export default function NewPlan() {
       getIpLibrary().catch(() => null),
     ]).then(([resource, library]) => {
       if (!alive) return;
-      const curated = (resource?.ips || []).map((ip) => ip.nameCn || ip.name).filter(Boolean);
-      const expanded = (library?.ips || []).map((ip) => ip.name).filter(Boolean);
-      const merged = mergeIpOptions(IP_OPTIONS_FALLBACK, curated, expanded);
-      if (merged.length) setIpOptions(merged);
+      const curated = (resource?.ips || [])
+        .map((ip) => ({ name: ip.nameCn || ip.name, ipType: '外部联名' }))
+        .filter((ip) => ip.name);
+      const expanded = (library?.ips || [])
+        .map((ip) => ({ name: ip.name, ipType: ip.ipType }))
+        .filter((ip) => ip.name);
+      setIpGroups(buildIpSelectGroups(IP_OPTIONS_FALLBACK, curated, expanded));
     });
     return () => { alive = false; };
   }, []);
+
+  // 「无外部联名」与任何具体 IP 互斥：以本次新勾选项为准
+  const onIpChange = (next) => {
+    const prev = form.getFieldValue('ipStrategy') || [];
+    const added = (next || []).filter((v) => !prev.includes(v));
+    let out = [...(next || [])];
+    if (added.includes(NO_EXTERNAL_IP)) {
+      out = [NO_EXTERNAL_IP]; // 刚勾选“无外部联名”→ 只保留它
+    } else if (added.length) {
+      out = out.filter((v) => v !== NO_EXTERNAL_IP); // 刚勾选具体 IP → 移除“无外部联名”
+    }
+    form.setFieldValue('ipStrategy', out);
+  };
 
   // 应用内导航守卫：dirty 时任何导航（侧栏/后退/取消）都需确认
   const blocker = useBlocker(() => dirtyRef.current);
@@ -272,14 +288,19 @@ export default function NewPlan() {
             <InputNumber min={0} style={{ width: '100%' }} placeholder="如 25" />
           </Form.Item>
 
-          <Form.Item label="IP 策略" name="ipStrategy" extra="可选多个 IP；两档资源库请求失败时回退基础选项">
+          <Form.Item
+            label="IP 策略"
+            name="ipStrategy"
+            extra="三档：无外部联名（原创不走 IP）/ 自有 IP（名创自研，已标注）/ 外部联名 IP（仅限资源库，可多选）；「无外部联名」与具体 IP 互斥"
+          >
             <Select
               mode="multiple"
               showSearch
               allowClear
-              placeholder="搜索并选择 IP（可多选）"
+              placeholder="选择 IP 策略：无外部联名 / 自有 IP / 外部联名 IP"
               optionFilterProp="label"
-              options={[...ipOptions, NO_IP_OPTION].map((name) => ({ value: name, label: name }))}
+              options={ipGroups}
+              onChange={onIpChange}
               aria-label="IP 策略多选"
             />
           </Form.Item>

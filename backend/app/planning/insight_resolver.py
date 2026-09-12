@@ -86,6 +86,38 @@ def _resolve_insight_bundle(category: str, brief: dict | None = None) -> dict[st
     return _crawled_or_llm_bundle(category, brief)
 
 
+def category_has_real_evidence(category: str) -> bool:
+    """轻量判定某品类是否已有真实数据（飞书 Base 实时明细 或 本地社媒采集）。
+
+    用于群闭环在跑 LLM 洞察前识别「全新品类」：两者都无才返回 False（触发是否调研卡）。
+    不触发任何 LLM 生成。数据源临时故障时保守返回 True，避免把「查不到」误判成「新品类」，
+    具体取数与报错交回主流程。
+    """
+    # ① 飞书 Base 实时明细
+    if os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower() == "feishu":
+        try:
+            from app.data.base_adapter import BaseDataAdapter, normalize_category
+            from app.planning.live_insights import _records_for_category
+
+            cat = normalize_category(category) or category
+            if _records_for_category(BaseDataAdapter(), cat):
+                return True
+        except Exception as exc:  # noqa: BLE001 — Base 临时不可用不武断为新品类，继续查本地
+            logger.warning("飞书 Base 品类存在性探测异常，继续查本地采集：%s", exc)
+
+    # ② 本地真实社媒采集文件
+    try:
+        from app.insights.loaders.social_evidence import SocialEvidenceLoader
+
+        SocialEvidenceLoader().get_insight_bundle(category)
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception as exc:  # noqa: BLE001 — 本地文件存在但解析异常，按「有数据」交回主流程
+        logger.warning("本地社媒采集探测异常，按已有数据保守处理：%s", exc)
+        return True
+
+
 def _crawled_or_llm_bundle(category: str, brief: dict) -> dict[str, Any]:
     """本地真实社媒采集(crawled)优先；本地也无该品类采集时，才 LLM 现场生成（来源如实标注）。"""
     try:

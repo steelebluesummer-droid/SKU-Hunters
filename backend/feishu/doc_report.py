@@ -1,7 +1,7 @@
-"""把一个已归档 plan 生成飞书在线文档（docx）：五看洞察驾驶舱 + 机会方向 + 企划案 + 即梦概念图。
+"""把企划卡已定稿（plan_card_ready，尚未归档）的 plan 生成飞书在线文档（docx）：五看洞察驾驶舱 + 机会方向 + 企划案 + 即梦概念图。
 
-运行时用应用身份（tenant_access_token）自动创建，供群闭环在归档后调用，把文档链接发回群，
-用户在飞书内即可看全，不必跳转本地前端。
+运行时用应用身份（tenant_access_token）自动创建，供群闭环「先出在线报告、人工确认后再归档」时调用，
+把文档链接发回群，用户在飞书内即可看全，不必跳转本地前端；点『确认归档』后才真正写入资产库。
 
 - 块结构遵循飞书 docx OpenAPI；children 单批最多 50 块，内部自动分批。
 - fail-soft：任一非关键小节/图片/分享设置失败都不拖垮整体，文档仍产出。
@@ -12,7 +12,6 @@ from __future__ import annotations
 import ast
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -88,7 +87,7 @@ def B(runs: list | str) -> dict[str, Any]:
     return _blk(T_BULLET, "bullet", runs)
 
 
-def O(runs: list | str) -> dict[str, Any]:
+def ordered(runs: list | str) -> dict[str, Any]:
     return _blk(T_ORDERED, "ordered", runs)
 
 
@@ -534,7 +533,7 @@ class DocReportBuilder:
                 for e in it.get("evidenceSource", []):
                     kids.append(Q([_run(f"[{e.get('source', '')}] ", True, GREEN), _run(e.get("fact", ""))]))
                 for r in it.get("reasoning", []):
-                    kids.append(O([_run("信号 ", True, GREY), _run(str(r.get("signal", ""))),
+                    kids.append(ordered([_run("信号 ", True, GREY), _run(str(r.get("signal", ""))),
                                    _run(" → 解读 ", True, GREY), _run(str(r.get("interpretation", ""))),
                                    _run(" → 机会 ", True, GREEN), _run(str(r.get("opportunity", "")))]))
                 # 排名第一用高亮块突出，其余用普通标题块
@@ -761,7 +760,7 @@ class DocReportBuilder:
             if chain:
                 out.append(P([_run("商品决策链", True, BLUE)]))
                 for lab, txt in chain:
-                    out.append(O([_run(f"{lab}　", True, BLUE), _run(str(txt))]))
+                    out.append(ordered([_run(f"{lab}　", True, BLUE), _run(str(txt))]))
 
             bg = proposal.get("background") or {}
             # 01 市场机会
@@ -819,7 +818,7 @@ class DocReportBuilder:
             if growth:
                 out.append(h2("06 ｜ 增长路线（Growth Roadmap）"))
                 for g in growth:
-                    out.append(O([_run(f"{g.get('stage', '')}　", True, BLUE), _run(str(g.get("action", "")))]))
+                    out.append(ordered([_run(f"{g.get('stage', '')}　", True, BLUE), _run(str(g.get("action", "")))]))
 
         # 07 落地执行细节（plan_card 补充）
         out.append(h2("07 ｜ 落地执行细节"))
@@ -844,7 +843,7 @@ class DocReportBuilder:
         schedule = _coerce(card.get("schedule"))
         if isinstance(schedule, list) and schedule:
             for s in schedule:
-                out.append(O([_run(f"{s.get('time', '')}　", True, BLUE), _run(str(s.get("action", "")))]))
+                    out.append(ordered([_run(f"{s.get('time', '')}　", True, BLUE), _run(str(s.get("action", "")))]))
         validation = _coerce(card.get("validation"))
         if isinstance(validation, list) and validation:
             for v in validation:
@@ -868,41 +867,8 @@ class DocReportBuilder:
         return {"document_id": doc_id, "url": url, "title": title}
 
 
-def build_report_card(plan: dict[str, Any], report: dict[str, str]) -> dict[str, Any]:
-    """归档后发回群的卡片：摘要 + 「在飞书内打开完整在线报告」按钮（不跳本地前端）。"""
-    brief = plan.get("brief") or {}
-    card = plan.get("plan_card") or {}
-    ins = plan.get("insights") or {}
-    pricing = _coerce(card.get("pricing"))
-    price = pricing.get("price", "") if isinstance(pricing, dict) else ""
-    name = card.get("name", report.get("title", "新品企划"))
-    lines = [
-        f"**{name}**",
-        str(card.get("concept", "")),
-        "—— 完整内容已汇总到飞书在线文档 ——",
-        f"**品类**：{brief.get('category', '')}　**建议定价**：{price}　**数据来源**：{ins.get('dataSource', '')}",
-        "文档内含：五看洞察驾驶舱（趋势/用户/对手/IP/流行元素）、机会方向、企划案全文、即梦概念图。",
-    ]
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": "📄 完整企划报告已生成（飞书内直接查看）"},
-            "template": "violet",
-        },
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}},
-            {"tag": "hr"},
-            {"tag": "note", "elements": [
-                {"tag": "plain_text", "content": "无需跳转本地页面，点下方按钮即可在飞书内阅读全文与概念图"}]},
-            {"tag": "action", "actions": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "📖 打开完整在线报告"},
-                 "type": "primary", "url": report.get("url", "")}]},
-        ],
-    }
-
-
 def build_plan_report(plan: dict[str, Any]) -> dict[str, str] | None:
-    """便捷封装：用环境变量凭证为 plan 生成在线文档；失败返回 None（fail-soft，不影响归档）。"""
+    """便捷封装：用环境变量凭证为 plan 生成在线文档；失败返回 None（fail-soft，群闭环改发降级待确认卡）。"""
     try:
         config = FeishuConfig.from_env()
         if not (config.app_id and config.app_secret):

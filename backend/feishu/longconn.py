@@ -108,7 +108,7 @@ def _on_message(data) -> None:
 
 
 def _on_card_action(data):
-    """card.action.trigger：3 秒内回 toast；业务由 group_bot 丢后台"""
+    """card.action.trigger：3 秒内回 toast + 按需回传替换卡片(raw)；重业务由 group_bot 丢后台"""
     from lark_oapi.event.callback.model.p2_card_action_trigger import (
         P2CardActionTriggerResponse,
     )
@@ -121,8 +121,15 @@ def _on_card_action(data):
         value = getattr(action, "value", None) or {}
         form_value = getattr(action, "form_value", None) or {}
         _state["last_event_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        toast = get_group_bot().handle_card_action(value, form_value, user_id, chat_id)
-        return P2CardActionTriggerResponse({"toast": toast})
+        result = get_group_bot().handle_card_action(value, form_value, user_id, chat_id) or {}
+        # toast 给即时浮层提示；card(raw) 让飞书用新卡片同步替换被点击的那张，做到"点完卡片就变样"
+        payload = {
+            "toast": {"type": result.get("type", "info"), "content": result.get("content", "")}
+        }
+        new_card = result.get("card")
+        if isinstance(new_card, dict):
+            payload["card"] = {"type": "raw", "data": new_card}
+        return P2CardActionTriggerResponse(payload)
     except Exception:  # noqa: BLE001 — 回调必须有响应，否则客户端报交互错误
         logger.exception("处理卡片回传异常（回错误 toast，连接不受影响）")
         return P2CardActionTriggerResponse(
@@ -152,7 +159,6 @@ def _build_client():
 
 
 def _run_forever() -> None:
-    import lark_oapi as lark
     from lark_oapi.ws import client as ws_internal
 
     # 预热 IP 资源库（首次可能拉飞书表，避免首个卡片回调超过 3 秒）

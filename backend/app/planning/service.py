@@ -23,7 +23,7 @@ from app.engine.strict_mode import is_demo_hidden
 from app.planning import fixtures, insight_cache
 from app.planning.cost_rules import cost_check
 from app.planning.insight_resolver import _parse_llm_json, _resolve_insight_bundle
-from app.planning.opportunity_discovery import build_opportunity_pool
+from app.planning.opportunity_discovery import build_opportunity_pool, personalize_pool
 from app.planning.opportunity_engine import (
     _fallback_opportunities,
     _opportunities_from_bundle,
@@ -115,14 +115,29 @@ def _ensure_opportunity_pool(plan: dict[str, Any], bundle: dict[str, Any]) -> No
     机会池是「五看洞察 → 产品决策」的中间产物，挂在 bundle 顶层；
     洞察驾驶舱 Block5 与机会生成消费同一份，禁止二次生成。
     pool 生成日志追加到 trendRadar.processLog，前端渐进日志可见。
+
+    个性化：飞书策展快照自带的 opportunityPool 是「品类级历史候选」，与本次
+    IP/人群/价位无关，直接复用会导致同品类换 IP 也得到一模一样的方向；因此对快照
+    pool 做保 id 个性化重写（保 id 以维持下游痛点/竞品/资产适配的 id 绑定），
+    LLM 失败时回退原始快照 pool，不阻断主流程。
     """
-    if bundle.get("opportunityPool"):
-        return
     category = plan["brief"].get("category", "")
+    process_log = bundle.setdefault("trendRadar", {}).setdefault("processLog", [])
+
+    snapshot_pool = bundle.get("opportunityPool")
+    if snapshot_pool:
+        rewritten = personalize_pool(snapshot_pool, category, bundle, plan["brief"])
+        if rewritten:
+            bundle["opportunityPool"] = rewritten
+            process_log.append(
+                f"机会方向已按本次企划约束（IP / 目标人群 / 价格带）个性化重写 {len(rewritten)} 个候选方向"
+            )
+        return
+
     pool, pool_log = build_opportunity_pool(category, bundle, plan["brief"])
     if pool:
         bundle["opportunityPool"] = pool
-    bundle.setdefault("trendRadar", {}).setdefault("processLog", []).extend(pool_log)
+    process_log.extend(pool_log)
 
 
 def _ensure_enrichment(plan: dict[str, Any], bundle: dict[str, Any]) -> None:

@@ -3,10 +3,13 @@
 闭环（与用户确认的五项决策一致）：
   群里 @机器人 一句话提需求
     → NL 解析品类/IP/价格/人群（feishu.nl_brief）
-    → 缺“品类/联名IP”或 IP 不在资源库：发【表单卡片 2.0】补全（IP 只能从资源库下拉选）
+    → 缺“品类/IP 策略”或外部 IP 不在资源库：发【表单卡片 2.0】补全
+      （IP 三档下拉：无外部联名 / 自有 IP（已标注）/ 外部联名 IP，外部仅限资源库内）
     → 信息齐全：同进程直调 pipeline 跑 五看洞察 → 机会
     → 机会卡点：发三张方向卡，人点选（不全自动）
-    → 点选后：生成企划卡（即梦出图）→ 归档 → 归档卡发回发起群
+    → 点选后：生成企划卡（即梦出图）→ 生成飞书在线完整报告并发【待确认卡】（此阶段不归档）
+    → 人审阅在线报告后点『确认归档』：才推进归档状态 + 同步多维表「企划资产库」，并回发归档回执
+    （先文档、后归档：未经人工确认不归档，避免问题方案直接入库）
 
 工程约束：
 - 长连接事件回调要求 3 秒内响应，重活（洞察约 1 分钟、出图约 30 秒）一律丢线程池，
@@ -76,7 +79,11 @@ class GroupBot:
 
     def _send_card(self, chat_id: str, card: dict[str, Any]) -> None:
         try:
-            self.bot.send_card(chat_id, card)
+            resp = self.bot.send_card(chat_id, card) or {}
+            code = resp.get("code")
+            if code not in (0, None):  # HTTP 200 但卡片被飞书拒收（如非法标签）必须暴露，不能静默当成功
+                logger.error("群卡片被飞书拒收 chat=%s code=%s msg=%s",
+                             chat_id, code, str(resp.get("msg", ""))[:300])
         except Exception:  # noqa: BLE001
             logger.exception("群卡片发送失败 chat=%s", chat_id)
 
@@ -124,8 +131,10 @@ class GroupBot:
         if not text:
             self._send_text(
                 chat_id,
-                "你好，我是趋势官。直接告诉我想做的品类和联名 IP 即可，例如：\n"
-                "“做一款保温杯，和三丽鸥联名”。",
+                "你好，我是趋势官。告诉我想做的品类和 IP 策略即可，例如：\n"
+                "· “做一款保温杯，和三丽鸥联名”（外部联名）\n"
+                "· “做一款保温杯，用自有 IP YOYO”（自有 IP）\n"
+                "· “做一款保温杯，不做联名”（无外部联名 · 原创设计）",
             )
             return
 
@@ -137,7 +146,7 @@ class GroupBot:
         logger.info("需求解析完成 text=%r parsed=%s", text, parsed)
 
         missing = []
-        note_lines = ["请补全以下信息后点「开始生成企划」（**品类 + 联名 IP 为必填**）："]
+        note_lines = ["请补全以下信息后点「开始生成企划」（**品类 + IP 策略为必填**）："]
         if not parsed.get("category"):
             missing.append("category")
         ip_match = parsed.get("ip_match")
@@ -145,7 +154,11 @@ class GroupBot:
         if not ip_match:
             missing.append("ip")
             if ip_raw:
-                note_lines.insert(0, f"⚠️ IP 资源库中无『{ip_raw}』，请从下方 IP 下拉里重选（仅支持资源库内 IP）。")
+                note_lines.insert(
+                    0,
+                    f"⚠️ 外部 IP 资源库中无『{ip_raw}』。请从下方 IP 策略下拉重选："
+                    "可选「无外部联名」、标注「（自有IP）」的名创自有 IP，或资源库内的外部联名 IP。",
+                )
 
         if missing:
             logger.info("缺必填字段 %s（ip_raw=%r），发送补全表单卡", missing, ip_raw)
@@ -159,7 +172,7 @@ class GroupBot:
             }
             card = cards_v2.brief_form_card(
                 session_key=self._session_key(key),
-                ip_names=nl_brief.list_ip_options(),
+                ip_options=nl_brief.list_ip_select_options(),
                 prefill=prefill,
                 note="\n".join(note_lines),
             )
@@ -179,8 +192,10 @@ class GroupBot:
         form_value: dict[str, Any],
         user_id: str,
         chat_id: str,
-    ) -> dict[str, str]:
-        """处理 card.action.trigger。返回 toast dict（{type,content}），由 longconn 回给飞书。"""
+    ) -> dict[str, Any]:
+        """处理 card.action.trigger。返回 {type,content,card?}：type/content 组成 toast（必填），
+        card 为点击后用于「同步替换原卡」的新卡片（schema2.0 dict，可选）；最终由 longconn 组装回飞书。
+        校验拦截类分支只回 toast、不换卡（保留原卡让用户可继续操作）。"""
         value = value or {}
         form_value = form_value or {}
         act = value.get("act", "")
@@ -196,18 +211,24 @@ class GroupBot:
             if not category:
                 return {"type": "error", "content": "请填写品类"}
             if not ip_name:
-                return {"type": "error", "content": "请从资源库选择联名 IP"}
-            # 双保险：下拉值必须确实在资源库内（拒绝任何库外 IP）
+                return {"type": "error", "content": "请选择 IP 策略（无外部联名 / 自有 IP / 外部联名 IP）"}
+            # 双保险：值必须合法（『无外部联名』+ 自有/外部资源库内），拒绝任何库外外部 IP
             if ip_name not in nl_brief.list_ip_options():
                 matched = nl_brief.match_ip(ip_name)
                 if not matched:
-                    return {"type": "error", "content": "该 IP 不在资源库，请用下拉选择"}
+                    return {"type": "error", "content": "该外部 IP 不在资源库，请用下拉选择（或选无外部联名/自有 IP）"}
                 ip_name = matched
             if self._is_running(key):
                 return {"type": "info", "content": "上一个任务仍在进行中，请稍候"}
 
             self._kickoff(chat_id, user_id, category, ip_name, audience, price_range)
-            return {"type": "success", "content": "已收到，开始生成企划（约 1-2 分钟），完成后发群里"}
+            accepted = cards_v2.notice_card(
+                "✅ 需求已提交",
+                f"已收到需求：**{category}**｜IP 策略：**{ip_name}**\n"
+                "正在生成五看洞察与机会方向（约 30-60 秒），完成后会在本群发「机会选择卡」供你点选，无需重复提交。",
+                template="blue",
+            )
+            return {"type": "success", "content": "已收到，开始生成企划", "card": accepted}
 
         if act == "pick_opp":
             plan_id = str(value.get("plan_id", ""))
@@ -223,10 +244,85 @@ class GroupBot:
                 return {"type": "error", "content": "该方向不存在，请重新选择"}
             if self._is_running(key):
                 return {"type": "info", "content": "正在处理中，请稍候"}
+            opps = plan.get("opportunities", [])
+            picked = next((o for o in opps if o.get("id") == opp_id), {}) or {}
+            opp_idx = next((i for i, o in enumerate(opps, 1) if o.get("id") == opp_id), "")
+            opp_title = picked.get("title") or picked.get("direction") or f"方向 {opp_idx}"
             self._set_running(key, "plan_card")
-            logger.info("用户点选方向 plan_id=%s opp_id=%s，后台生成企划卡", plan_id, opp_id)
-            self._submit(self._run_card_and_archive, chat_id, key, plan_id, opp_id)
-            return {"type": "success", "content": "已选定方向，正在生成企划卡与概念图…"}
+            logger.info("用户点选方向 plan_id=%s opp_id=%s，后台生成企划卡与在线报告", plan_id, opp_id)
+            self._submit(self._run_card_and_report, chat_id, key, plan_id, opp_id)
+            accepted = cards_v2.notice_card(
+                "✅ 已选定机会方向",
+                f"已选择方向 {opp_idx}：**{picked.get('emoji', '')}{opp_title}**\n"
+                "正在生成企划卡、即梦概念图与在线完整报告（约 2-3 分钟），完成后发「待确认卡」，请在本群稍候、无需重复点选。",
+                template="green",
+            )
+            return {"type": "success",
+                    "content": "已选定方向，正在生成企划卡与在线报告…", "card": accepted}
+
+        if act == "confirm_archive":
+            plan_id = str(value.get("plan_id", ""))
+            if not plan_id:
+                return {"type": "error", "content": "归档参数缺失"}
+            plan = pipeline.get_plan(plan_id)
+            if plan is None:
+                return {"type": "error", "content": "任务不存在或已被清理"}
+            status = plan.get("status")
+            if status == "archived":
+                return {"type": "info", "content": "该企划已归档，无需重复操作"}
+            if status != "plan_card_ready":
+                return {"type": "info", "content": f"当前状态为 {status}，企划卡定稿后才能归档"}
+            if self._is_running(key):
+                return {"type": "info", "content": "正在处理中，请稍候"}
+            self._set_running(key, "归档中")
+            logger.info("用户确认归档 plan_id=%s，后台执行归档+多维表同步", plan_id)
+            self._submit(self._do_confirm_archive, chat_id, key, plan_id)
+            accepted = cards_v2.notice_card(
+                "⏳ 正在归档到企划资产库",
+                "已收到你的确认，正在推进归档并写入多维表「企划资产库」（约几秒），"
+                "完成后本群会发「✅ 已归档」回执，此卡无需再点。",
+                template="orange",
+            )
+            return {"type": "success", "content": "已收到，正在归档…", "card": accepted}
+
+        # ── 新品类调研：登记到调研需求池（只写品类名+待调研），本次任务暂停 ──
+        if act == "request_research":
+            plan_id = str(value.get("plan_id", ""))
+            category = str(value.get("category", "")).strip()
+            if not plan_id or not category:
+                return {"type": "error", "content": "调研参数缺失，无法登记"}
+            plan = pipeline.get_plan(plan_id)
+            if plan is None:
+                return {"type": "error", "content": "任务不存在或已被清理"}
+            if plan.get("status") != "brief_locked":
+                return {"type": "info", "content": "该任务已开始生成，无需再登记调研"}
+            if self._is_running(key):
+                return {"type": "info", "content": "正在处理中，请稍候"}
+            from feishu.research_pool import submit_research_request
+            try:
+                created, _rid = submit_research_request(category)  # 同步写表（快），失败不换卡可重试
+            except Exception as exc:  # noqa: BLE001 — 权限/接口异常：提示并保留原卡允许重试
+                logger.exception("登记调研需求失败 plan_id=%s", plan_id)
+                return {"type": "error", "content": f"登记调研需求失败：{exc}，请稍后重试"}
+            self._clear_running(key)
+            verb = "已在「调研需求池」新建一条需求" if created else "该品类已在调研队列中（待调研/调研中），未重复登记"
+            done = cards_v2.notice_card(
+                "✅ 已提交调研需求，本次任务暂停",
+                f"**{category}**：{verb}（状态：待调研）。\n"
+                "等豆包工作伙伴把趋势 / 痛点 / 竞品 / 热词等数据补全进 Base 后，再在群里@我，"
+                "即可基于真实数据生成企划。",
+                template="green",
+            )
+            return {"type": "success", "content": "已登记调研需求，本次任务暂停", "card": done}
+
+        if act == "cancel_research":
+            self._clear_running(key)
+            done = cards_v2.notice_card(
+                "已取消本次调研",
+                "未登记调研需求，任务到此结束。需要时重新@我发起即可。",
+                template="blue",
+            )
+            return {"type": "info", "content": "已取消调研", "card": done}
 
         return {"type": "info", "content": "未识别的卡片操作"}
 
@@ -240,7 +336,7 @@ class GroupBot:
         self._set_running(key, "五看洞察")
         self._send_text(
             chat_id,
-            f"✅ 已受理：{ip_name} × {category} 联名企划\n"
+            f"✅ 已受理：{nl_brief.brief_headline(category, ip_name)}\n"
             "正在做五看洞察与机会分析（约 1 分钟），完成后我会把可选方向发到群里。",
         )
         self._submit(
@@ -263,6 +359,15 @@ class GroupBot:
             plan = pipeline.create_plan(brief)
             plan_id = plan["plan_id"]
             logger.info("已建档 plan_id=%s，开始五看洞察", plan_id)
+
+            # 新品类拦截：飞书 Base 与本地采集都无真实数据 → 发「是否调研」卡并暂停，不跑 LLM 空推
+            from app.planning.insight_resolver import category_has_real_evidence
+            if not category_has_real_evidence(draft["category"]):
+                self._clear_running(key)
+                self._send_card(chat_id, cards_v2.research_confirm_card(plan, draft["category"]))
+                logger.info("新品类「%s」无真实数据 plan_id=%s，已发调研确认卡并暂停",
+                            draft["category"], plan_id)
+                return
 
             self._set_running(key, "五看洞察")
             pipeline.generate_insights(plan)
@@ -287,7 +392,8 @@ class GroupBot:
             logger.exception("群闭环洞察阶段异常 plan_id=%s", plan_id)
             self._fail(chat_id, key, plan_id, "洞察/机会生成失败，请检查 LLM/数据源后重试")
 
-    def _run_card_and_archive(self, chat_id, key, plan_id, opp_id) -> None:
+    def _run_card_and_report(self, chat_id, key, plan_id, opp_id) -> None:
+        """阶段一：企划卡（即梦图）→ 飞书在线完整报告 → 发【待确认卡】。此阶段不归档。"""
         try:
             plan = pipeline.get_plan(plan_id)
             if plan is None:
@@ -296,42 +402,69 @@ class GroupBot:
             self._send_text(chat_id, "🎨 正在生成企划卡与即梦概念图（约 30-60 秒），请稍候…")
             self._set_running(key, "企划卡出图")
             logger.info("开始生成企划卡(含即梦图) plan_id=%s opp_id=%s", plan_id, opp_id)
-            card = pipeline.generate_plan_card(plan, opp_id)
+            card = pipeline.generate_plan_card(plan, opp_id)  # 成功后状态 → plan_card_ready
             if card is None:
                 self._fail(chat_id, key, plan_id, "未找到所选方向，企划卡生成失败")
                 return
-            logger.info("企划卡完成，执行归档 plan_id=%s", plan_id)
+            logger.info("企划卡完成（暂不归档），开始生成在线报告 plan_id=%s", plan_id)
 
-            # 出企划卡即归档（用户拍板：出企划卡 = 归档）
-            pipeline.archive_plan(plan)
-            self._set_running(key, "归档同步")
-            self._archive_hooks(plan)
-
-            # 归档后生成飞书在线完整报告（五看驾驶舱+企划案+即梦概念图），群内直接看、不跳前端；
-            # 云文档需逐块写入（约 2-4 分钟），先发一条进度，避免群里长时间静默以为卡住
+            # 先文档：生成飞书在线完整报告（五看驾驶舱+企划案+即梦概念图），群内直接看、不跳前端；
+            # 云文档逐块写入约 2-3 分钟，先发进度避免群里静默。归档要等用户点『确认归档』。
             self._send_text(
                 chat_id,
-                "📝 企划已归档，正在生成飞书在线完整报告（五看驾驶舱 + 企划案 + 概念图，约 2-3 分钟），"
-                "完成后直接发到本群，无需跳转。",
+                "📝 企划卡已生成，正在汇总飞书在线完整报告（五看驾驶舱 + 企划案 + 概念图，约 2-3 分钟），"
+                "完成后发到本群供你审阅，确认无误再点归档。",
             )
-            from feishu.doc_report import build_plan_report, build_report_card
-            report = build_plan_report(plan)
+            self._set_running(key, "在线报告")
+            from feishu.doc_report import build_plan_report
+            report = build_plan_report(plan)  # plan_card_ready 即可生成，不依赖 archived
+            # 文档成功/失败都发待确认卡（失败降级时仍可基于企划卡确认归档或进工作室改稿）
+            self._send_card(chat_id, cards_v2.review_report_card(plan, report, self._frontend_base()))
+            self._clear_running(key)  # 释放在途锁，等待用户点『确认归档』
             if report and report.get("url"):
-                self._send_card(chat_id, build_report_card(plan, report))
-                logger.info("在线完整报告已发回群 plan_id=%s doc=%s", plan_id, report.get("document_id"))
+                logger.info("在线报告+待确认卡已发群，等人工确认归档 plan_id=%s doc=%s",
+                            plan_id, report.get("document_id"))
             else:
-                from feishu.notify import build_archive_card
-                self._send_card(chat_id, build_archive_card(plan, self._frontend_base()))
-                logger.warning("在线报告未生成，降级旧归档卡 plan_id=%s", plan_id)
-            self._clear_running(key)
-            logger.info("归档闭环完成 plan_id=%s", plan_id)
+                logger.warning("在线报告未生成，已发降级待确认卡 plan_id=%s", plan_id)
         except StateTransitionError as e:
             self._fail(chat_id, key, plan_id, f"流程状态异常（{e.action or '状态机'}），请回到方向选择重试")
         except LLMGenerationError:
             self._fail(chat_id, key, plan_id, "企划卡 AI 生成暂时不可用，请稍后重试")
         except Exception:  # noqa: BLE001
-            logger.exception("群闭环企划卡/归档阶段异常 plan_id=%s", plan_id)
-            self._fail(chat_id, key, plan_id, "企划卡生成或归档失败，请稍后重试")
+            logger.exception("群闭环企划卡/在线报告阶段异常 plan_id=%s", plan_id)
+            self._fail(chat_id, key, plan_id, "企划卡或在线报告生成失败，请稍后重试")
+
+    def _do_confirm_archive(self, chat_id, key, plan_id) -> None:
+        """阶段二：用户在待确认卡点『确认归档』后，才推进归档 + 多维表同步，并回发归档回执。"""
+        try:
+            plan = pipeline.get_plan(plan_id)
+            if plan is None:
+                self._fail(chat_id, key, plan_id, "任务不存在，无法归档")
+                return
+            if plan.get("status") == "archived":  # 幂等：重复点击 / 并发兜底
+                self._send_card(chat_id, cards_v2.notice_card(
+                    "ℹ️ 已归档", "该企划此前已归档，企划资产库中已有记录，无需重复操作。", template="blue"))
+                self._clear_running(key)
+                return
+            logger.info("用户确认，执行归档 plan_id=%s", plan_id)
+            pipeline.archive_plan(plan)  # plan_card_ready → archived，写 archived_at
+            self._set_running(key, "归档同步")
+            self._archive_hooks(plan)  # 多维表同步依赖 archived_at，fail-soft 不拖垮归档
+            brief = plan.get("brief") or {}
+            card = plan.get("plan_card") or {}
+            name = card.get("name") or brief.get("theme", "新品企划")
+            self._send_card(chat_id, cards_v2.notice_card(
+                "✅ 已归档到企划资产库",
+                f"**{name}**\n状态：已归档，已在多维表「企划资产库」新增一行；"
+                "完整在线报告见上方卡片，可随时复盘。",
+                template="green"))
+            self._clear_running(key)
+            logger.info("确认归档闭环完成 plan_id=%s", plan_id)
+        except StateTransitionError as e:
+            self._fail(chat_id, key, plan_id, f"流程状态异常（{e.action or '状态机'}），请刷新后重试")
+        except Exception:  # noqa: BLE001
+            logger.exception("群闭环确认归档阶段异常 plan_id=%s", plan_id)
+            self._fail(chat_id, key, plan_id, "归档失败，请稍后重试")
 
     def _archive_hooks(self, plan: dict[str, Any]) -> None:
         """归档后同步多维表格（fail-soft；未配置 bitable 时静默跳过）"""

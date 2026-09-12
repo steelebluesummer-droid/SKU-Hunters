@@ -38,6 +38,10 @@ _LLM_SYSTEM_PROMPT = """你是名创优品资深商品经理，负责「市场�
 4. evidenceSource 的 fact 必须来自输入信号中的真实数据，禁止编造数字。
 5. reasoning 是推理链：signal（市场信号）→ interpretation（解读）→ opportunity（机会含义）。
 6. confidence 0-100：信号越强、多方证据越交叉，置信度越高；单信号支撑的方向不超过 70。
+7. 几个方向必须分属明显不同的切入角度（痛点 / 场景 / 情绪 / 设计 / 技术各有侧重），标题彼此明显不同，
+   禁止给出换个品类也成立的空泛通用方向，也禁止三个方向同质化。
+8. 必须紧扣【本次 IP 策略】与目标人群做差异化：外部联名方向要让该 IP 的形象、调性或粉丝人群自然落到产品上；
+   名创自有 IP 结合其自有形象表达、不使用「联名」字样；无外部联名时不出现任何 IP、走纯品类原创设计。
 
 JSON 结构：
 {
@@ -248,6 +252,15 @@ def _parse_llm_json(raw: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _brief_ip_line(brief: dict) -> str:
+    """提取本次 IP 策略为可读文本：外部联名 / 自有 IP / 无外部联名（原创）"""
+    ips = brief.get("ip_strategy") or brief.get("ipStrategy") or []
+    if isinstance(ips, str):
+        return ips
+    names = [str(x) for x in ips if x]
+    return "、".join(names)
+
+
 def _serialize_signals(bundle: dict, brief: dict, category: str) -> str:
     """把五看 bundle 压缩成 LLM 可读的信号摘要（只列真实字段，不加工）"""
     tr = bundle.get("trendRadar", {})
@@ -255,14 +268,19 @@ def _serialize_signals(bundle: dict, brief: dict, category: str) -> str:
     cm = bundle.get("competitiveMap", {})
     ib = bundle.get("insightBase", {})
 
+    ip_line = _brief_ip_line(brief)
     lines = [
         f"【品类】{category}",
         f"【目标人群】{brief.get('audience', '') or '大众'}",
         f"【零售价格带】{brief.get('price_range', brief.get('priceRange', ''))}",
         f"【企划主题】{brief.get('theme', '')}",
-        "",
-        "【趋势信号】",
     ]
+    if ip_line:
+        lines.append(
+            f"【本次 IP 策略】{ip_line}（外部联名方向要体现该 IP 的形象/调性/粉丝人群；"
+            "名创自有 IP 不使用『联名』表述；若为无外部联名则做纯品类原创设计）"
+        )
+    lines += ["", "【趋势信号】"]
     for s in tr.get("signals", [])[:8]:
         lines.append(f"- {s.get('name', '')}（{s.get('metric', '')}，{s.get('period', '')}）")
     if tr.get("hotWords"):
@@ -309,7 +327,7 @@ def _llm_pool(category: str, bundle: dict, brief: dict) -> tuple[list[dict[str, 
         raw = llm.complete(
             system_prompt=_LLM_SYSTEM_PROMPT,
             user_prompt=prompt,
-            temperature=0.4,
+            temperature=0.7,
             max_tokens=4000,
             node="opportunity_pool",
         )
@@ -341,6 +359,100 @@ def _llm_pool(category: str, bundle: dict, brief: dict) -> tuple[list[dict[str, 
         return pool, ""
 
     return None, last_error
+
+
+# ── 快照机会池的本次个性化重写 ────────────────────────────────
+
+_PERSONALIZE_SYSTEM_PROMPT = """你是名创优品资深商品经理。给你某品类的「候选机会方向草稿」（来自历史策展信号，与本次企划无关）
+和「本次企划约束」（品类 / 本次 IP 策略 / 目标人群 / 价格带 / 主题 / 实时信号）。
+请把每条草稿「个性化重写」成贴合本次企划的具体产品方向。
+
+重写纪律：
+1. 严格按草稿条数与顺序逐条对应输出，必须沿用每条给定的 id 与 opportunityType，不得新增、删除、调换或改 id。
+2. title 重写为具体产品方向，并自然体现本次 IP 策略：
+   - 外部联名 IP：让该 IP 的形象、调性、粉丝人群自然落到产品上，标题可点出该 IP；
+   - 名创自有 IP：结合其自有形象做产品表达，标题不使用「联名」字样；
+   - 无外部联名（原创设计）：不出现任何 IP，走纯品类原创方向。
+3. 各方向必须是明显不同的切入角度（痛点/场景/情绪/设计/技术各有侧重），禁止换个 IP 仍给出雷同、空泛、换品类也成立的方向。
+4. summary 是一句贴合本次人群与场景的市场判断；reasoning 给出 signal→interpretation→opportunity 的推理；
+   evidenceSource 的 fact 只能引用输入信号中的真实事实，禁止编造数字。
+5. confidence 0-100，按该方向与本次 IP/人群/信号的契合度重新评估。
+6. 只输出一个 JSON 对象，不要任何其他文字或代码围栏：
+{"pool":[{"id":"沿用原值","title":"","rank":1,"confidence":80,"opportunityType":"沿用原值",
+"summary":"","evidenceSource":[{"source":"trend|consumer|competitor|internal","fact":""}],
+"reasoning":[{"signal":"","interpretation":"","opportunity":""}]}]}"""
+
+
+def personalize_pool(base_pool: list[dict[str, Any]], category: str, bundle: dict, brief: dict) -> list[dict[str, Any]] | None:
+    """把品类级快照机会池按本次 brief（IP/人群/价位）做「保 id 个性化重写」。
+
+    为什么保 id：下游 consumerVoice/competitiveMap/assetFit 用 supportsOpportunityIds /
+    opportunityId 强绑机会池 id；保留 id 与 opportunityType 即可个性化标题又不断链。
+    LLM 失败 / 输出不合契约时返回 None，由调用方回退原始快照 pool（鲁棒，不阻断主流程）。
+    """
+    if not base_pool:
+        return None
+    from app.engine import llm
+
+    draft_lines = []
+    for i, it in enumerate(base_pool, 1):
+        draft_lines.append(
+            f"#{i} id={it.get('id', '')} type={it.get('opportunityType', '')} "
+            f"rank={it.get('rank', i)} 原标题={it.get('title', '')} 原判断={it.get('summary', '')}"
+        )
+    user_prompt = (
+        _serialize_signals(bundle, brief, category)
+        + "\n\n【候选机会方向草稿（逐条重写，必须沿用其 id 与 type）】\n"
+        + "\n".join(draft_lines)
+        + "\n\n请输出个性化重写后的机会池 JSON。"
+    )
+
+    last_error = "LLM 未返回内容"
+    for attempt in range(2):
+        prompt = user_prompt if attempt == 0 else (
+            f"{user_prompt}\n\n上次输出未通过契约校验：{last_error}。请严格按结构重新输出，并沿用每条草稿 id。"
+        )
+        raw = llm.complete(
+            system_prompt=_PERSONALIZE_SYSTEM_PROMPT,
+            user_prompt=prompt,
+            temperature=0.75,
+            max_tokens=4000,
+            node="opportunity_personalize",
+        )
+        if not raw:
+            last_error = "LLM 未配置或调用失败"
+            continue
+        data = _parse_llm_json(raw)
+        if data is None:
+            last_error = "输出不是合法 JSON"
+            continue
+        items = data.get("pool")
+        if not isinstance(items, list) or not items:
+            last_error = "缺少 pool 数组"
+            continue
+        try:
+            validated = [OpportunityPoolItem.model_validate(_snake_keys(it)) for it in items]
+        except ValueError as e:
+            last_error = f"schema 校验失败：{str(e)[:160]}"
+            continue
+        # 保 id/type/rank：按顺序强制对齐回草稿，保证下游 id 绑定不断
+        rewritten: list[dict[str, Any]] = []
+        for i, item in enumerate(validated[: len(base_pool)]):
+            src = base_pool[i]
+            d = _camel_keys(item.model_dump())
+            d["id"] = src.get("id", d.get("id"))
+            d["opportunityType"] = src.get("opportunityType", d.get("opportunityType"))
+            d["rank"] = src.get("rank", i + 1)
+            rewritten.append(d)
+        # LLM 少给时用原草稿补齐，保持条数与 id 完整
+        have = {x["id"] for x in rewritten}
+        for src in base_pool:
+            if src.get("id") not in have:
+                rewritten.append(dict(src))
+        rewritten.sort(key=lambda x: x.get("rank", 99))
+        return rewritten
+
+    return None
 
 
 def _camel_keys(obj: Any) -> Any:

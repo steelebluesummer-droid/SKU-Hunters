@@ -2,10 +2,14 @@
 
 职责：
 - parse_brief_text：把“做一款保温杯，和三丽鸥联名”这类口语解析成结构化字段（LLM，失败规则兜底）；
-- list_ip_options：IP 下拉选项，唯一来源是资源库（策展 12 + 扩充库，Base 当前 35 / 内置快照 33，去重）；
-- match_ip：把口语里的 IP（含角色名/英文/别名）匹配到资源库**规范展示名**，匹配不到返回 None
-  （上层据此回“资源库中无该 IP”，并让用户改从下拉选，绝不允许 LLM 自造 IP）；
-- build_brief：组装 PlanBrief dict（群场景强制 mode=live，theme 由 IP+品类拼）。
+- list_ip_options：IP 合法值列表（『无外部联名』+ 自有 IP + 外部联名资源库，策展 12 与扩充库去重）；
+- list_ip_option_rows / list_ip_select_options：三档分组下拉（无外部联名 → 自有 IP → 外部联名 IP），
+  自有 IP 展示名带「（自有IP）」备注、value 仍为规范名；
+- match_ip：把口语里的 IP（含角色名/英文/别名）匹配到资源库**规范展示名**，匹配不到返回 None；
+  口语表达“不联名/不用 IP”时归一到『无外部联名』（上层据此放行，不缺 IP）；
+  其余库外 IP 由上层回“资源库中无该 IP”，绝不允许 LLM 自造 IP；
+- build_brief：组装 PlanBrief dict（群场景强制 mode=live；无外部联名时 ip_strategy 为空、
+  theme 不带“联名”，自有 IP 用“新品企划”，外部联名才用“联名企划”）。
 
 注意：本模块在“尚未跑洞察”阶段也要能用，因此候选池用 merged_candidate_pool(None)
 （不依赖 insightBase.ipPool）。
@@ -16,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 from difflib import SequenceMatcher
+from typing import Any
 
 from app.engine import llm
 from app.planning.insight_resolver import _parse_llm_json
@@ -29,6 +34,19 @@ _CANDIDATES: list[dict[str, str]] | None = None
 
 # 合作状态优先级：持续合作 / 战略共创排前，方便下拉里常用 IP 靠前
 _STATUS_RANK = {"持续合作": 0, "战略共创": 0, "合作中": 1, "快闪限定": 2, "一次性联名": 3}
+
+# ── IP 策略三档：无外部联名 / 自有 IP / 外部联名 IP ──────────────
+# 无外部联名：本企划不使用任何 IP（对应名创“刚需非 IP 保流量”的自有品牌原创线），下游 ip_strategy 为空
+NO_EXTERNAL_IP = "无外部联名"
+NO_EXTERNAL_IP_LABEL = "无外部联名（原创设计 · 不走 IP 联名）"
+# 自有 IP 在下拉展示名后追加的备注（规范 value 不带后缀）
+OWN_IP_SUFFIX = "（自有IP）"
+# 口语里表达“不做联名 / 不用 IP”时归一到 NO_EXTERNAL_IP（匹配前会去空格、转小写）
+_NO_IP_PHRASES = (
+    "无外部联名", "不联名", "不要联名", "不做联名", "不用联名", "不需要联名", "别联名",
+    "不带ip", "不要ip", "不用ip", "不使用ip", "不走ip", "无ip", "没有ip", "不选ip",
+    "自有品牌", "原创设计", "纯原创",
+)
 
 # 角色名 / 别称 → 资源库规范名（normalize 后的 key）。
 # 仅映射到资源库内真实存在的 IP，不引入任何库外 IP。
@@ -87,6 +105,7 @@ def _load_candidates() -> list[dict[str, str]]:
             "key": normalize_ip_name(name),
             "status_rank": _STATUS_RANK.get(str(item.get("cooperationStatus") or item.get("status") or ""), 2),
             "heat": _heat(item),
+            "own": bool(item.get("own")) or str(item.get("ipType") or "") == "自有IP",
         })
     # 去重（同名保留排序靠前的一条）
     dedup: dict[str, dict[str, str]] = {}
@@ -99,9 +118,76 @@ def _load_candidates() -> list[dict[str, str]]:
     return rows
 
 
+def is_no_external_ip(name: str) -> bool:
+    """该值是否为『无外部联名』（含“不联名/不用 IP/原创”等口语别名）"""
+    key = normalize_ip_name(str(name or ""))
+    if not key:
+        return False
+    if key == normalize_ip_name(NO_EXTERNAL_IP):
+        return True
+    compact = key.replace(" ", "")
+    return any(p.replace(" ", "") in compact for p in _NO_IP_PHRASES)
+
+
+def is_own_ip(name: str) -> bool:
+    """规范名（或别名）是否命中名创自有 IP"""
+    if not name or is_no_external_ip(name):
+        return False
+    target = normalize_ip_name(str(name))
+    for cand in _load_candidates():
+        if not cand.get("own"):
+            continue
+        if cand["key"] == target or target in _CHARACTER_ALIAS.get(cand["name"], ()):
+            return True
+    return False
+
+
+def list_ip_option_rows() -> list[dict[str, Any]]:
+    """IP 策略下拉行（有序、分三组）：无外部联名置顶 → 自有 IP（按热度）→ 外部联名 IP。
+
+    返回 [{group, value, label, own}]：value 为可直接进 brief/校验的规范值，label 供展示
+    （自有 IP 追加「（自有IP）」备注，与外部授权联名区分）。
+    """
+    candidates = _load_candidates()
+    own_rows = sorted((c for c in candidates if c.get("own")), key=lambda r: (-r["heat"], r["name"]))
+    ext_rows = [c for c in candidates if not c.get("own")]  # _load_candidates 已按状态/热度排序
+    rows: list[dict[str, Any]] = [{
+        "group": "不使用 IP",
+        "value": NO_EXTERNAL_IP,
+        "label": NO_EXTERNAL_IP_LABEL,
+        "own": False,
+    }]
+    for c in own_rows:
+        rows.append({
+            "group": "自有 IP（名创自研）", "value": c["name"],
+            "label": f"{c['name']}{OWN_IP_SUFFIX}", "own": True,
+        })
+    for c in ext_rows:
+        rows.append({"group": "外部联名 IP", "value": c["name"], "label": c["name"], "own": False})
+    return rows
+
+
+def list_ip_select_options() -> list[dict[str, str]]:
+    """飞书表单卡 select_static 用：[{value, label}]（平铺不支持 optgroup，靠排序+后缀体现分组）"""
+    return [{"value": r["value"], "label": r["label"]} for r in list_ip_option_rows()]
+
+
 def list_ip_options() -> list[str]:
-    """IP 下拉选项（资源库规范展示名，按合作优先级排序）"""
-    return [r["name"] for r in _load_candidates()]
+    """IP 合法值列表（含『无外部联名』+ 自有/外部资源库规范名），用于入站强校验"""
+    return [r["value"] for r in list_ip_option_rows()]
+
+
+def brief_headline(category: str, ip_display: str) -> str:
+    """受理/展示用一句话标题（三档文案与 build_brief.theme 同口径）"""
+    category = (category or "").strip()
+    ip_display = (ip_display or "").strip()
+    if is_no_external_ip(ip_display):
+        return f"{category} · 无外部联名（原创设计）"
+    if is_own_ip(ip_display):
+        return f"{ip_display}（自有IP）× {category}"
+    if ip_display:
+        return f"{ip_display} × {category}（外部联名）"
+    return category
 
 
 def match_ip(raw: str) -> str | None:
@@ -111,6 +197,8 @@ def match_ip(raw: str) -> str | None:
     """
     if not raw:
         return None
+    if is_no_external_ip(raw):
+        return NO_EXTERNAL_IP
     candidates = _load_candidates()
     key = normalize_ip_name(str(raw))
     if not key:
@@ -225,6 +313,11 @@ def parse_brief_text(text: str) -> dict:
     if result["ip_raw"]:
         result["ip_match"] = match_ip(result["ip_raw"])
 
+    # 用户明确表达“不做联名 / 不用 IP / 原创”→ 视为已选『无外部联名』，不缺 IP、直接放行
+    if not result["ip_match"] and is_no_external_ip(text):
+        result["ip_raw"] = NO_EXTERNAL_IP
+        result["ip_match"] = NO_EXTERNAL_IP
+
     # 品类兜底：LLM 没抽到时，去掉常见动词/IP/联名词后的短语不稳健，宁留空交表单补
     if not result["category"]:
         result["category"] = _rule_category(text)
@@ -266,17 +359,35 @@ def _rule_category(text: str) -> str:
 
 def build_brief(category: str, ip_display: str, audience: str = "",
                 price_range: list[float] | None = None) -> dict:
-    """组装可直接传给 pipeline.create_plan 的 brief（snake_case，群场景强制 live）"""
+    """组装可直接传给 pipeline.create_plan 的 brief（snake_case，群场景强制 live）
+
+    三档 IP 策略：
+      - 无外部联名：ip_strategy 为空（下游不锁 IP、概念图不带“联名”），theme 走原创；
+      - 自有 IP：ip_strategy=[该自有 IP]，theme 用“新品企划”（非外部授权，不称联名）；
+      - 外部联名 IP：ip_strategy=[该 IP]，theme 用“联名企划”。
+    """
     category = (category or "").strip()
     ip_display = (ip_display or "").strip()
+    if is_no_external_ip(ip_display):
+        theme = f"{category} 原创新品企划"
+        ip_strategy: list[str] = []
+    elif is_own_ip(ip_display):
+        theme = f"{ip_display} × {category} 新品企划"
+        ip_strategy = [ip_display]
+    elif ip_display:
+        theme = f"{ip_display} × {category} 联名企划"
+        ip_strategy = [ip_display]
+    else:
+        theme = f"{category} 新品企划"
+        ip_strategy = []
     brief = {
-        "theme": f"{ip_display} × {category} 联名企划" if ip_display else f"{category} 新品企划",
+        "theme": theme,
         "category": category,
         "market": "中国大陆",
         "audience": (audience or "").strip(),
         "price_range": price_range or [39, 99],
         "cost_limit": 25,
-        "ip_strategy": [ip_display] if ip_display else [],
+        "ip_strategy": ip_strategy,
         "launch_window": "",
         "goals": [],
         "mode": "live",

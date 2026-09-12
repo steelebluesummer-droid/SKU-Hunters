@@ -6,6 +6,8 @@
  * 纯函数：不 import fixtures、不发请求。
  * ============================================================ */
 
+import { NO_EXTERNAL_IP, NO_IP_OPTION } from './ipOptions';
+
 // 后端 brief 为 snake_case（PlanBrief schema 冻结），前端消费契约统一 camelCase。
 const SNAKE_TO_CAMEL = {
   price_range: 'priceRange',
@@ -40,7 +42,10 @@ export function fromForm(values, defaults = {}) {
       values.priceMax ?? defaults.priceRange?.[1] ?? 0,
     ],
     cost_limit: values.costLimit ?? defaults.costLimit ?? 0,
-    ip_strategy: values.ipStrategy || [],
+    // 「无外部联名」（及旧“不带 IP”哨兵）不是真实 IP，提交时剔除 → 空 ip_strategy 表示原创不走 IP
+    ip_strategy: (values.ipStrategy || []).filter(
+      (v) => v !== NO_EXTERNAL_IP && v !== NO_IP_OPTION,
+    ),
     launch_window: values.launchWindow || '',
     goals: values.goals || [],
   };

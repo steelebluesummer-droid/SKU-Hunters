@@ -1,15 +1,17 @@
 """MINISO IP 资源库（扩充）— 飞书 Base 合作情报 + 内置 seed 双档数据
 
 定位：与 ip_resource.py（名创内部 12 个策展 IP）**并列**的扩充数据模块，
-承载飞书 Base「base_ip_partnerships」的当前 35 条名创 IP 合作情报；
-无飞书配置时使用内置 33 条快照；
+承载飞书 Base「base_ip_partnerships」的名创 IP 合作情报（外部授权联名 + 名创自有 IP）；
+无飞书配置时使用内置 39 条快照（29 外部联名 + 10 自有 IP，2026-09-12）；
 不 import 也不修改 ip_resource.py，原「名创内部」内容一行不改。
+ipType=="自有IP" 即名创自研 / 自有艺术家 IP（YOYO、CHOUCHOU、Nommi 糯米儿等），
+供下拉分组与「（自有IP）」标注使用；「无外部联名」是独立的不使用 IP 选项，不在本库内。
 
 数据两档：
 - feishu 档：BASE_PROVIDER_MODE=feishu 且配置 FEISHU_IP_PARTNERSHIP_TABLE_ID 时，
   从飞书多维表格拉取（app_token=FEISHU_BASE_APP_TOKEN，表 base_ip_partnerships）；
   网络/配置失败降级 seed，不抛错阻塞功能。
-- seed 档：内置 33 条快照（2026-09-04），无飞书凭证时功能完整可用；两档结构一致。
+- seed 档：内置 39 条快照（外部联名 29 + 自有 IP 10，2026-09-12），无飞书凭证时功能完整可用；两档结构一致。
 
 展示字段映射规则（两档通用，规则式推演）：
 - potential：ipHeat >= 9 → 5；7~8 → 4；6 及以下 → 3
@@ -137,6 +139,13 @@ IP_LIBRARY_SEED: list[dict[str, Any]] = [
     {"ipId": "ip-031", "slug": "多邻国", "name": "多邻国（Duolingo）", "ipType": "国际动漫影视", "licensor": "Duolingo", "cooperationStatus": "快闪限定", "cooperationSince": "2026年起", "latestSeries": "多邻国联名系列（与哈利波特25周年、玩具总动员5同档上新）", "productLines": "盲盒、配件、生活百货", "starProducts": "多邻国猫头鹰Duo主题周边", "priceMin": 19.9, "priceMax": 59.9, "channelStrategy": ["全渠道通贩", "快闪店"], "ipHeat": 7, "notes": "互联网梗文化IP入局案例，与影视大IP同档期组货，主打年轻社媒话题人群", "sourceUrl": "https://www.miniso.cn/"},
     {"ipId": "ip-032", "slug": "蒙奇奇", "name": "蒙奇奇（Monchhichi）", "ipType": "日韩系", "licensor": "Sekiguchi（关口玩具）", "cooperationStatus": "持续合作", "cooperationSince": "长期合作", "latestSeries": "蒙奇奇联名系列", "productLines": "毛绒、盲盒、包饰", "starProducts": "蒙奇奇毛绒公仔与挂件系列", "priceMin": 19.9, "priceMax": 129, "channelStrategy": ["全渠道通贩"], "ipHeat": 6, "notes": "日本经典绒偶IP，补充日系中性客群，多走毛绒高客单货架位", "sourceUrl": "https://www.miniso.cn/"},
     {"ipId": "ip-033", "slug": "wigglewiggle", "name": "wigglewiggle", "ipType": "潮玩艺人", "licensor": "wigglewiggle（韩国）", "cooperationStatus": "持续合作", "cooperationSince": "2025年起", "latestSeries": "wigglewiggle联名系列", "productLines": "毛绒、盲盒、包饰、生活百货", "starProducts": "wigglewiggle主题毛绒与挂件", "priceMin": 19.9, "priceMax": 99, "channelStrategy": ["全渠道通贩"], "ipHeat": 7, "notes": "韩系ins风新锐IP，社媒话题度高，与Loopy共同构成韩流潮玩矩阵", "sourceUrl": "https://www.miniso.cn/"},
+    # ── 名创自有 IP 矩阵（ipType=自有IP；名创自研/自有艺术家 IP，非外部授权联名）──
+    {"ipId": "ip-034", "slug": "Nommi糯米儿", "name": "Nommi 糯米儿", "ipType": "自有IP", "licensor": "名创优品自研", "cooperationStatus": "战略共创", "cooperationSince": "核心自有IP", "latestSeries": "糯米儿毛绒/搪胶毛绒长线系列", "productLines": "毛绒公仔、搪胶毛绒盲盒、挂件、包饰", "starProducts": "Nommi 糯米儿搪胶毛绒系列", "priceMin": 19.9, "priceMax": 199, "channelStrategy": ["全渠道通贩", "主题店"], "ipHeat": 8, "notes": "名创优品核心自有IP之一，2025年销售额突破2亿元，走治愈系潮玩毛绒主线", "sourceUrl": "https://www.bjnews.com.cn/detail/1775277140169923.html"},
+    {"ipId": "ip-035", "slug": "PENPEN企鹅", "name": "PENPEN 企鹅", "ipType": "自有IP", "licensor": "名创优品自研", "cooperationStatus": "持续合作", "cooperationSince": "早期自有形象", "latestSeries": "PENPEN 企鹅日常系列", "productLines": "毛绒、挂件、文具、生活小物", "starProducts": "PENPEN 企鹅毛绒与挂件", "priceMin": 9.9, "priceMax": 99, "channelStrategy": ["全渠道通贩"], "ipHeat": 6, "notes": "名创早期内部孵化的自有形象之一，与DUNDUN鸡、中国熊猫同属自研IP储备", "sourceUrl": "http://finance.sina.cn/2025-05-21/detail-inexiinf0682248.d.html"},
+    {"ipId": "ip-036", "slug": "中国熊猫", "name": "中国熊猫", "ipType": "自有IP", "licensor": "名创优品自研", "cooperationStatus": "持续合作", "cooperationSince": "早期自有形象", "latestSeries": "中国熊猫国风系列", "productLines": "毛绒、盲盒、包饰、文创周边", "starProducts": "中国熊猫毛绒公仔", "priceMin": 9.9, "priceMax": 129, "channelStrategy": ["全渠道通贩", "主题店"], "ipHeat": 6, "notes": "名创早期内部孵化的自有形象，主打国风与出海文化符号", "sourceUrl": "http://finance.sina.cn/2025-05-21/detail-inexiinf0682248.d.html"},
+    {"ipId": "ip-037", "slug": "萝卜街", "name": "萝卜街", "ipType": "自有IP", "licensor": "名创自有艺术家IP", "cooperationStatus": "战略共创", "cooperationSince": "2025年起", "latestSeries": "萝卜街艺术家系列", "productLines": "搪胶毛绒、盲盒、艺术周边", "starProducts": "萝卜街艺术家搪胶毛绒", "priceMin": 29.9, "priceMax": 199, "channelStrategy": ["全渠道通贩", "主题店"], "ipHeat": 7, "notes": "名创签约潮玩艺术家自有IP，与YOYO、Kumaru同属自有艺术家矩阵", "sourceUrl": "https://www.miniso.cn/brand/news_191.html"},
+    {"ipId": "ip-038", "slug": "Kumaru", "name": "Kumaru", "ipType": "自有IP", "licensor": "名创自有艺术家IP", "cooperationStatus": "战略共创", "cooperationSince": "2025年起", "latestSeries": "Kumaru 艺术家系列", "productLines": "搪胶毛绒、盲盒、挂件", "starProducts": "Kumaru 搪胶毛绒盲盒", "priceMin": 29.9, "priceMax": 199, "channelStrategy": ["全渠道通贩", "主题店"], "ipHeat": 7, "notes": "名创签约潮玩艺术家自有IP，与YOYO、萝卜街共同构建自有IP生态", "sourceUrl": "https://www.miniso.cn/brand/news_191.html"},
+    {"ipId": "ip-039", "slug": "气宝AngryAimee", "name": "气宝 Angry Aimee", "ipType": "自有IP", "licensor": "名创自有艺术家IP", "cooperationStatus": "战略共创", "cooperationSince": "2026年起", "latestSeries": "气宝 Angry Aimee 系列", "productLines": "搪胶毛绒、盲盒、解压周边", "starProducts": "气宝 Angry Aimee 搪胶毛绒", "priceMin": 29.9, "priceMax": 169, "channelStrategy": ["全渠道通贩"], "ipHeat": 7, "notes": "名创签约潮玩艺术家自有IP，治愈+情绪价值方向", "sourceUrl": "https://news.southcn.com/node_810c33d731/653b0b19b4.shtml"},
 ]
 
 TYPE_FILTERS = ["国际动漫影视", "日韩系", "潮玩艺人", "国潮", "自有IP"]
@@ -306,7 +315,12 @@ def _link_of(raw: Any) -> str:
 
 
 def get_ip_library() -> list[dict[str, Any]]:
-    """IP 资源库（扩充）全量：feishu 档优先，失败降级 seed；统一补展示字段"""
+    """IP 资源库（扩充）全量。
+
+    feishu 在线档优先；在线成功时仍用内置 seed 补齐“在线缺失”项（本地新增的名创自有 IP
+    尚未写入只读 Base，靠 seed 兜底并入，按 normalize_ip_name 规范名去重、在线同名优先）；
+    feishu 整体失败 / 未配置时降级为纯 seed。最后统一补展示字段。
+    """
     global _library_cache
     if _library_cache is not None:
         return _library_cache
@@ -315,7 +329,16 @@ def get_ip_library() -> list[dict[str, Any]]:
         raw = _feishu_records()
         if raw is not None and raw:
             records = [_map_feishu_record(r) for r in raw]
-    ips = [apply_display_fields(r) for r in (records if records else IP_LIBRARY_SEED)]
+    if records:
+        online_keys = {normalize_ip_name(str(r.get("name") or "")) for r in records}
+        source = list(records)
+        for seed in IP_LIBRARY_SEED:  # 在线缺失（如本地补充的自有 IP）→ seed 补齐，不重复
+            skey = normalize_ip_name(str(seed.get("name") or ""))
+            if skey and skey not in online_keys:
+                source.append(seed)
+    else:
+        source = IP_LIBRARY_SEED
+    ips = [apply_display_fields(r) for r in source]
     _library_cache = ips
     return ips
 
@@ -326,7 +349,7 @@ def reset_library_cache() -> None:
     _library_cache = None
 
 
-# ── IP官候选池合并（策展 12 + 扩充库，Base 当前 35 / 内置快照 33；同名/别名去重）────
+# ── IP官候选池合并（策展 12 + 扩充库，Base 当前 35 / 内置快照 39；同名/别名去重；带出 ipType/own）────
 
 def merged_candidate_pool(curated_pool: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """把扩充库并入 IP官 候选池。
@@ -353,19 +376,24 @@ def merged_candidate_pool(curated_pool: list[dict[str, Any]] | None) -> list[dic
                 "audienceGroup": ip.get("audienceGroup"),
                 "styleTags": ip.get("styleTags"),
                 "matrix": ip.get("matrix"),
+                "ipType": "外部联名",
+                "own": False,
             })
 
-    # 扩充库（Base 当前 35；无配置时内置快照 33）并入：同名保留并集
+    # 扩充库（Base 当前 35；无配置时内置快照 39）并入：同名保留并集；带出 ipType/own 供分组
     for ip in get_ip_library():
         key = normalize_ip_name(str(ip.get("name") or ""))
         if not key:
             continue
         price_band = f"¥{ip.get('priceMin', '?')}-¥{ip.get('priceMax', '?')}"
+        ip_type = str(ip.get("ipType") or "外部联名").strip()
         extra = {
             "licensor": ip.get("licensor"),
             "cooperationStatus": ip.get("cooperationStatus"),
             "priceBand": price_band,
             "ipHeat": ip.get("ipHeat"),
+            "ipType": ip_type,
+            "own": ip_type == "自有IP",
         }
         if key in seen:
             for exist in pool:
