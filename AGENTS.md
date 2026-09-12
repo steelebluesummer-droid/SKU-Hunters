@@ -1,23 +1,35 @@
 # AGENTS.md — AI 编程工具协作者指南
 
 > 本文件面向 AI 编程助手（Claude Code / Cursor / Copilot 等）。
-> 人类队友请先看各模块 README；本文件是**机器可执行的接口契约**。
+> 人类队友请先看各模块 README；本文件是当前仓库的机器可执行接口契约。
 
 ## 项目一句话
 
-SKU Hunters · AI Product Committee：7 个角色 Agent 模拟名创优品商品评审会，
-LangGraph 编排，FastAPI + 飞书机器人交互。代码在 `backend/`。
+SKU Hunters 是一个证据驱动的 AI 新品企划工作室：FastAPI 后端负责“五看洞察 → 机会方向 → 企划卡 → 归档复盘”链路，React 前端负责工作室交互，飞书负责群入口、通知和资产归档。
+
+## 当前架构
+
+- `backend/app/api/planning.py`：`/api/v1/plans` 及原子业务动作 API。
+- `backend/app/planning/repository.py`：企划任务持久化、创建、查询和状态事实源。
+- `backend/app/planning/service.py`：洞察、机会、企划卡、改稿、归档和复盘服务。
+- `backend/app/planning/pipeline.py`：规划服务的兼容导出入口；新代码优先调用明确的 service/API 函数。
+- `backend/app/engine/strict_mode.py`：严格真实模式和默认任务模式的单一事实源。
+- `backend/feishu/group_bot.py`：飞书群需求解析、表单补全、机会点选、企划卡生成和归档闭环。
+- `backend/feishu/longconn.py`：飞书 WebSocket 长连接；由 `app.main` 启动，不依赖公网 webhook 或内网穿透。
+- `backend/feishu/cards_v2.py`、`doc_report.py`：新版飞书卡片和在线报告。
+- `frontend/src/api/`：按 `client`、`plans`、`insights`、`dashboard` 拆分的请求层。
+- `frontend/src/features/`：任务中心、任务流程、洞察、机会、企划卡和数据看板页面。
 
 ## 硬性纪律（违反 = CI 红）
 
-1. **密钥只存在于 `.env`**，禁止硬编码 App ID / Secret / API Key（GitHub push protection 会拦截）
-2. **D1 已冻结的 schema 不得修改**（`app/schemas/` 现有文件）；新增契约 = 新增文件
-3. 所有路径用 `Path(__file__).resolve()` 锚定，禁止绝对路径
-4. 提交前本地跑：`ruff check backend/`（从仓库根）+ `pytest tests/ --cov=app`（从 backend/）
+1. **密钥只存在于 `.env`**，禁止硬编码 App ID / Secret / API Key。
+2. **D1 已冻结的 schema 不得修改**（`backend/app/schemas/` 现有文件）；新增契约必须新增文件。
+3. 所有路径用 `Path(__file__).resolve()` 锚定，禁止写死绝对路径。
+4. 提交前从仓库根运行 `ruff check backend/`，从 `backend/` 运行 `pytest tests/ --cov=app`。
 
 ## 严格真实模式（Strict Real Mode）
 
-生产环境禁止一切 Mock / fixture / 演示数据回退，由 `app/engine/strict_mode.py` 单一事实源判定：
+生产环境使用以下配置：
 
 ```env
 APP_ENV=production
@@ -28,83 +40,54 @@ AGENT_PROVIDER=real
 LEARNING_AGENT_PROVIDER=real
 ```
 
-- `APP_ENV=production` 且 `ALLOW_MOCK=false` → 严格模式：LLM / 数据源失败**阻断**（抛 `StrictModeError`），不回退 Mock；真实数据不足 → `unavailable`（合法态），不用演示内容填满页面；字段缺失 → `unknown`。
-- 严格模式强制：企划默认模式 `live`；**禁止**创建/打开 `fixture` 与 `demo` 任务；`/health` 返回 `mock_allowed=false, strict_real=true`。
-- Agent 注册表（`get_*_agent_class`）经 `resolve_provider` 校验：严格模式必须 `real`（或含确定性官允许 `deterministic`），否则启动即阻断。
-- 真实 Agent 内部 Mock fallback 经 `require_mock_allowed`：严格模式抛错，非严格放行（测试用）。
-- 使用真实数据的 deterministic Agent（如 ConsumerInsightAgent / IPStrategyAgent / GoToMarketAgent）不属于 Mock，可保留。
-- Mock 代码保留给自动化测试（测试环境 `APP_ENV` 留空、`ALLOW_MOCK` 默认 true）。
+- `APP_ENV=production` 且 `ALLOW_MOCK=false` 时，禁止 Mock、fixture 和 demo 回退；LLM/数据源失败必须显式阻断，真实数据不足使用 `unavailable`，字段缺失使用 `unknown`。
+- 严格模式默认任务模式强制为 `live`，禁止创建或打开 fixture/demo 任务；`/health` 应返回 `mock_allowed=false, strict_real=true`。
+- 非生产环境默认允许测试/演示用的 fixture；任务默认模式由 `PLANNING_DEFAULT_MODE` 控制，未配置时为 `crawled`。
+- `live` 任务的数据事实源应记录为 Feishu 或 `unavailable`，不可静默伪装成 fixture。
 
-## 接口 A：接入新 Agent（替换 mock）
+## 后端 API 契约
 
-编排层在 `backend/app/engine/graph.py`。所有图节点是薄包装层，只认注册表：
+主要链路：
 
-1. 继承 `app.agents.base_agent.BaseAgent`，实现 `async def run(self, context: dict) -> dict`
-2. 返回值必须通过对应 schema 的 `model_validate`：
+1. `POST /api/v1/plans`：同步创建企划任务。
+2. `POST /api/v1/plans/async`：异步创建并后台执行洞察、机会。
+3. `GET /api/v1/plans/{id}`：读取任务、状态和产物。
+4. `POST /api/v1/plans/{id}/actions/generate-insights`：生成五看洞察。
+5. `POST /api/v1/plans/{id}/actions/generate-opportunities`：生成机会方向。
+6. `POST /api/v1/plans/{id}/actions/generate-plan-card`：点选方向后生成企划卡。
+7. `POST /api/v1/plans/{id}/actions/archive`：归档并触发飞书同步。
+8. `POST /api/v1/plans/{id}/revise/preview`、`revise/apply`、`revise/cancel`：改稿预览、应用和取消。
+9. `POST /api/v1/plans/{id}/review`：归档后的只读复盘追问。
 
-| 注册表键 | 返回契约 |
-|:---|:---|
-| `trend` | `FeatureMatrix` |
-| `user` | `UserSentiment` |
-| `ip` | `IPAssessment` |
-| `creative` | `ProposalSet` |
-| `business` | `{"opportunity_scores": [OpportunityScore, ...]}` |
-| `gtm` | `{"gtm_plans": [GTMPlan, ...]}` |
-| `learning` | `{"normalized_actual_signal": NormalizedActualSignal, "retro_report": RetroReport, "archive_update": {...}}` |
+`advance`、无 `actions` 的 `plan-card` 和 `archive` 端点仍保留为旧客户端兼容入口；新客户端使用 `actions/*` 原子动作，避免状态已推进但产物未生成的半完成态。
 
-3. 洞察官（trend/user/ip）的 `evidence_refs` 必须非空，否则节点边界拒绝
-   （例外：`confidence="unknown"` 时合法，自动记 C5 冲突——"无法判断"是合法输出）
-4. context 可用键：
-   - 所有 Agent：`brief`、`feedback`（人工修改意见，修改回退重跑时非空）
-   - creative：+ `feature_matrix`、`user_sentiment`、`ip_assessment`
-   - business：+ `weights`、`proposal_set`、`upstream_confidences`、`feature_matrix`、`user_sentiment`、`ip_assessment`
-   - gtm：+ `proposal_set`、`challenges`、`opportunity_scores`、`ip_assessment`、`feedback`
-   - learning：+ `proposal`、`opportunity_score`、`decision`、`human_action`、`session_id`、`category`、`market`
-5. 接入方式：改 `graph.py` 里 `AGENT_REGISTRY` 对应键的类，**其他一律不动**
-6. 禁止：Agent 返回未过 schema 的 dict；依赖 state 里未声明的键
+## 飞书群闭环
 
-## 接口 C：消费评审事件流（飞书 handler）
+飞书群里 @机器人后：
 
-```python
-from app.engine.graph import run_review
-
-async for event in run_review(brief, ask_human=your_callback, session_id=None):
-    ...  # event 恒为 {"role": str, "content": str, "evidence": list[str], "score": float | None}
+```text
+一句话需求 → NL 解析品类/IP/价格/人群
+→ 信息不足时发 Card 2.0 表单补全
+→ 五看洞察 → 三张机会方向卡
+→ 人工点选方向 → 生成企划卡/概念图
+→ 归档 → 群内回传报告卡，并同步企划资产库
 ```
 
-- `role` 枚举：`trend` / `user` / `ip` / `creative` / `business` / `global` /
-  `decision` / `learning` / `challenge` / `act1_gate` / `human_gate` / `retro` / `qa`
-  （`challenge` 为 ACT2_CHALLENGE 质询环节事件：三位洞察官对 ProposalSet 的结构化
-  质询，四键契约不变，evidence 为质询证据链，来源角色保留在 content 中）
-- `brief` 必须过 `Brief` schema：`{"category": str, "market": str, "budget_range": "low"|"mid"|"high"}`
-- `ask_human(gate_info) -> dict`，`gate_info = {"gate", "prompt", "options"}`。
-  门有两个半：act1_gate（方向确认）、human_gate（立项拍板）、retro（首次复盘入口：
-  **归档之后**开启，不打回重做，只对话/总结教训；归档后另有 API 历史复盘入口）。
-  返回值按门选用：
-  - `{"action": "confirm"}`
-  - `{"action": "modify", "suggestion": str, "scope"?: str, "custom_weights"?: dict}`
-    （`scope` 仅 human_gate 用：`"business"`=只重算评分（默认）/ `"creative"`=回退重做方案；
-    `custom_weights` 合法时写入 state 即 reweight，权重和必须 = 1.0）
-  - `{"action": "question", "question": str}`（qa 作答后自动回到同一门再次询问）
-  - `{"action": "reject", "reason": str}`（仅 human_gate：否决立项 = bad case，
-    记 C4 冲突后**先归档**（负样本）再进复盘入口——否决理由是负样本来源）
-  - retro 门专用：`{"action": "chat", "content": str}`（LLM 基于本场证据链作答，
-    无 Key 降级为产物索引）/ `{"action": "done"}`（结束本轮复盘，轮数追加入档）
-- **10 秒超时由调用方实现**：`asyncio.wait_for(等待按钮回调, timeout=10)`，超时返回 `confirm`
-  （retro 门超时返回 `done`）。图对超时一无所知（interrupt 无限期等待是 checkpoint 可靠性特性）
-- 门事件会成对出现：先是提问（prompt），`ask_human` 返回后紧跟一条人决策回显
-- `decision` 事件额外携带 `report` 键（完整《立项建议书》dict）；
-  `learning` 事件额外携带 `snapshot` 键（归档快照），出现两次：建档 + 复盘轮数追加。
-  四键契约不变
-- 归档顺序：human_gate 结论 → learning_node 建档 → retro 首次复盘入口 →
-  learning_node 二过追加 retro_turns → END（learning_node 幂等，靠路由函数分流）
+入站事件由 `longconn.py` 接收，重任务交给 `group_bot.py` 线程池；长连接回调必须快速返回。飞书卡片使用新版 schema 2.0。归档后可在前端或 API 只读复盘，不能继续改稿。
+
+## 修改和验证原则
+
+- 不依赖未声明的 state 字段；API/服务边界返回值必须通过对应 Pydantic schema 校验。
+- 前端展示组件使用 props 和事件回调，不直接 import 企划 fixture，不在请求失败时静默替换成演示数据。
+- 真实数据来源必须显式标注：`feishu`、`crawled`、`llm`、`fixture` 或 `unavailable`。
+- 修改完成后至少执行 `git diff --check`、目标文件语法/构建检查，以及项目规定的 ruff/pytest 命令；若环境缺依赖，必须在提交说明中如实记录。
 
 ## 排障速查
 
-| 报错 | 原因 | 解法 |
-|:---|:---|:---|
-| `InvalidUpdateError: Can receive only one value per step` | 并行节点同写共享标量键 | 并行节点只写各自 artifact 键和 reducer 键；`current_act` 由下游单点写 |
-| msgpack 反序列化告警 | 枚举/日期实例进 checkpoint | 入 state 一律 `model_dump(mode="json")` |
-| 会议在门之间无限循环 | `ask_human` 每次都返回 modify | 回调侧控制：修改意见生效后人应 confirm；飞书侧 10s 超时兜底 |
-| API 后台会议不推进 | TestClient 没用 `with` | `with TestClient(app) as c:`，portal 持续运转任务才推进 |
-| `pytest` exit code 5 | tests/ 无测试被收集 | 检查文件名 `test_*.py` 与目录结构 |
+| 现象 | 优先检查 |
+|:---|:---|
+| API 后台任务不推进 | 使用 `with TestClient(app) as c:`，保证后台任务生命周期持续 |
+| 企划卡状态错误 | 确认调用的是 `actions/generate-*` 原子端点，而不是旧兼容组合 |
+| 飞书群无响应 | 检查 `FEISHU_APP_ID/SECRET`、`FEISHU_LONGCONN`，并确认单进程、单 worker |
+| 飞书卡片无回调 | 检查卡片 schema 2.0、唯一 `name` 和 callback 行为 |
+| 严格模式仍出现演示数据 | 检查 `APP_ENV`、`ALLOW_MOCK`、`BASE_PROVIDER_MODE` 和 fallback 守卫 |

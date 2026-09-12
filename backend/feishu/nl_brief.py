@@ -2,7 +2,7 @@
 
 职责：
 - parse_brief_text：把“做一款保温杯，和三丽鸥联名”这类口语解析成结构化字段（LLM，失败规则兜底）；
-- list_ip_options：IP 下拉选项，唯一来源是资源库（策展 12 + 扩充 33 去重）；
+- list_ip_options：IP 下拉选项，唯一来源是资源库（策展 12 + 扩充库，Base 当前 35 / 内置快照 33，去重）；
 - match_ip：把口语里的 IP（含角色名/英文/别名）匹配到资源库**规范展示名**，匹配不到返回 None
   （上层据此回“资源库中无该 IP”，并让用户改从下拉选，绝不允许 LLM 自造 IP）；
 - build_brief：组装 PlanBrief dict（群场景强制 mode=live，theme 由 IP+品类拼）。

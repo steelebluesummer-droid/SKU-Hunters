@@ -2,6 +2,8 @@
 
 > 门禁文档 · 前端视觉重构前必须对齐「用户在系统里如何完成任务」。
 > v1.1 变更：①区分 AS-IS / TO-BE；②流程推进从「advance + GET 两请求」改为「原子业务动作」；③补齐边界态与 state/action/recovery 表。
+>
+> 状态：本文保留为历史设计对照。Stage 5 的原子动作 API 已落地，当前前端使用 `actions/*`；`advance` 仅作为旧客户端兼容入口。
 
 ---
 
@@ -110,7 +112,7 @@ brief_locked → insights_ready → opportunities_ready → plan_card_ready → 
 | 企划卡生成 | `POST /plan-card` | `POST /actions/generate-plan-card` |
 | 后端状态枚举 | 5 种（running 仅 aily 响应） | 5 种（generating 不落盘） |
 
-> AS-IS → TO-BE 的 API 改造（advance 端点 → actions 端点）属于 Stage 5 功能实现阶段，**本轮仅记录设计**。
+> AS-IS → TO-BE 的 API 改造（`advance` 端点 → `actions/*` 端点）已在 Stage 5 落地；当前实现以原子业务动作作为主路径，旧 `advance` 仅保留兼容。
 
 ---
 
@@ -151,7 +153,7 @@ brief_locked → insights_ready → opportunities_ready → plan_card_ready → 
 
 ### 6.5 演示降级（严格限定）
 
-- **只有 `/tasks/demo` 任务允许使用本地 fixture 降级**，且必须挂「演示数据（后端离线）」标识。
+- **只有显式 `mode=fixture` 的任务（演示任务通常为 `plan_id=demo`）允许使用本地 fixture**，且必须标注数据来源。
 - **真实任务接口失败只能显示错误 + 重试，禁止替换成演示内容。**
 
 ---
@@ -192,4 +194,4 @@ brief_locked → insights_ready → opportunities_ready → plan_card_ready → 
 2. **一页一个主 CTA**：每步只突出一个主行动按钮。
 3. **状态推进原子化**：生成成功才推进落盘状态；generating 只是前端瞬时态。
 4. **归档只读**：归档不可改稿，只能复盘追问。
-5. **演示降级限定**：仅 `/tasks/demo` 可 fixture 降级，真实任务失败只报错。
+5. **演示降级限定**：仅显式 fixture 任务可使用冻结演示数据，真实任务失败只显示错误与重试。

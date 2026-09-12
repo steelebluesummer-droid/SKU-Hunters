@@ -3,17 +3,21 @@
     POST /api/v1/plans                      ① 创建企划任务（约束输入）
     GET  /api/v1/plans                      任务列表
     GET  /api/v1/plans/{id}                 任务详情（约束 + 状态）
-    GET  /api/v1/plans/{id}/insights        ② 五看洞察（三Agent + 两块策展数据）
-    GET  /api/v1/plans/{id}/opportunities   ③ 机会生成（3 张方向卡）
-    POST /api/v1/plans/{id}/plan-card       ④⑤⑥ 选定方向 → 生成企划卡
+    GET  /api/v1/plans/{id}/insights        五看洞察（只读）
+    GET  /api/v1/plans/{id}/opportunities   机会方向（只读）
+    POST /api/v1/plans/{id}/actions/generate-insights
+    POST /api/v1/plans/{id}/actions/generate-opportunities
+    POST /api/v1/plans/{id}/actions/generate-plan-card
+    POST /api/v1/plans/{id}/actions/archive
     POST /api/v1/plans/{id}/revise          改稿沟通
 
     GET  /api/v1/insight-base               名创内部（策展数据独立页）
     GET  /api/v1/trend-gallery              流行元素板（策展数据独立页）
     GET  /api/v1/data-board                 数据看板（大盘）
 
-数据策略「真管线、冻数据」：默认 fixture 模式返回冻结分析结果；
-brief 传 mode="live" 走真实 LLM + 即梦出图（失败自动降级）。
+数据模式：非生产环境默认 `crawled`（本地真实采集 + LLM 分析），可显式使用
+`fixture` 演示数据或 `live` 飞书实时数据；严格生产模式默认 `live`，禁止 Mock/fixture
+静默回退。旧的 `advance`、无 `actions` 的 `plan-card` 和 `archive` 端点仅作为兼容入口保留。
 """
 
 from __future__ import annotations
@@ -486,7 +490,7 @@ async def review_plan(plan_id: str, payload: dict):
 
 @router.get("/ip-library")
 async def get_ip_library():
-    """IP 资源库（扩充）：飞书 base_ip_partnerships 33 条合作情报，无凭证时 seed 降级"""
+    """IP 资源库（扩充）：飞书 base_ip_partnerships 当前 35 条；无凭证时使用 33 条 seed 快照"""
     return {
         "ips": ip_library.get_ip_library(),
         "typeFilters": ip_library.TYPE_FILTERS,

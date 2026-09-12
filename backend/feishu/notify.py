@@ -1,10 +1,10 @@
 """
-企划就绪通知 — Aily 发起企划后，pipeline 产出机会卡 → 推送飞书消息卡片
+企划阶段通知 — Aily/HTTP 异步入口的机会卡与归档摘要通知；群机器人完整归档报告另走在线云文档
 
-设计文档：docs/guides/feishu-ai-guide.md §2.2 / §4.1
+设计文档：docs/guides/feishu-ai-guide.md §2.2 / §4.1 / §4.2
 - Aily 插件调用有超时限制（10-30s），API 立即返回，pipeline 在后台跑
 - 跑完由后端主动调飞书 API 推卡片（不是 Aily 回调）
-- 卡片只放摘要 + 跳转前端（深度交互在前端完成，见分工原则）
+- Aily 阶段通知卡只放机会摘要 + 跳转前端；群机器人归档由 group_bot.py 调用 doc_report.py 生成在线完整企划文档
 - fail-soft：推送失败不影响 pipeline 结果
 """
 

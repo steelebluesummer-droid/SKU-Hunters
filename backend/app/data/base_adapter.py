@@ -1,10 +1,10 @@
-"""Base 数据访问层 — 统一适配器 + provider protocol + mock/fixture provider
+"""Base 数据访问层 — 统一适配器 + provider protocol + mock/fixture/Feishu provider
 
 约束：
 - BaseDataAdapter 只能由 connector_gateway 或数据服务层持有，不能直接注入 Agent。
 - 真实配置只从环境变量读取（FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BASE_APP_TOKEN / FEISHU_DATA_TABLE_ID / FEISHU_SUMMARY_TABLE_ID）。
 - 缺少配置时应用可启动；只有真正调用 Base 数据时才抛 BaseUnavailable。
-- 当前未接入真实飞书 Base API（无字段映射），真实 provider 一律 fail-closed。
+- `FeishuBaseProvider` 已接入真实飞书 Base 只读 API；配置缺失、权限失败或字段异常时保持 fail-closed。
 - 不打印 Token、不猜测飞书 API 字段、不伪造真实数据。
 """
 
@@ -25,7 +25,7 @@ from app.schemas.competitor_data import CompetitorRecord, VerificationStatus
 
 
 class BaseUnavailable(Exception):
-    """Base 数据源不可用（配置缺失或真实 API 未接入），与「无数据」严格区分"""
+    """Base 数据源不可用（配置缺失或真实 API 不可用），与「无数据」严格区分"""
 
 
 class BaseProviderError(Exception):
@@ -40,7 +40,7 @@ def _resolve_provider_mode() -> str:
     """解析 Base 数据源模式：mock / feishu / disabled（默认 disabled = 生产 fail-closed）
 
     - mock：本地 fixture，仅显式开启（开发/演示/测试）
-    - feishu：真实飞书 Base（需配置，未接字段映射前仍 fail-closed）
+    - feishu：真实飞书 Base 只读 provider（需配置；请求/权限/字段异常 fail-closed）
     - disabled：默认，任何 Base 数据调用都抛 BaseUnavailable（生产安全默认）
     """
     return os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower()
@@ -59,7 +59,7 @@ def _provider_for_mode(mode: str) -> BaseProvider:
 
 
 class BaseProvider(Protocol):
-    """Base 数据 provider 抽象接口（真实实现未接入，先定义协议）"""
+    """Base 数据 provider 抽象接口（Mock 和 Feishu provider 均实现）"""
 
     def search_records(
         self,
@@ -256,7 +256,7 @@ class FeishuBaseProvider:
     - 认证复用 FeishuAuth（FEISHU_APP_ID/APP_SECRET → tenant_access_token），不自行维护 token。
     - 数据定位：FEISHU_BASE_APP_TOKEN（多维表格 ID）+ FEISHU_DATA_TABLE_ID（明细）/ FEISHU_SUMMARY_TABLE_ID（汇总）。
     - 缺配置 → BaseUnavailable；网络/飞书非零错误码 → BaseProviderError；与「无数据」严格区分。
-    - 字段映射以 docs/guides/feishu-base-mapping.md §四/§五 为准（真实字段名未核对前为设计假设）。
+    - 字段映射以 docs/guides/feishu-base-mapping.md §四/§五 为准；未映射字段保持空值并记录 caveat。
     - 分页：飞书 page_token 游标；一期「拉全表 + 内存过滤 + 内存分页」，超 2 万条需 filter 下推优化。
     """
 

@@ -2,6 +2,8 @@
 
 > 门禁文档 · 定义目标目录结构、组件职责与 props 契约、分包方案。
 > v1.1 变更：①API 拆分 client/plans/insights/dashboard；②plans 增加 hooks/usePlanWorkspace；③容器/展示职责收紧；④StateCard 单一 status 枚举；⑤SourceTag/EvidenceRef 契约扩充；⑥lazy 路径修正 + 二级懒加载收缩；⑦补屏幕树/状态所有权/ARIA/测试责任与迁移回滚策略。
+>
+> 状态：本文记录的迁移方案已完成。当前请求层为 `frontend/src/api/{client,plans,insights,dashboard}.js`，旧 `src/api.js`、旧 mock 入口已删除。
 
 ---
 
@@ -65,7 +67,7 @@ const workspace = usePlanWorkspace(planId);
   opportunities,   // 已落盘机会（只读）
   status,          // 后端落盘状态（5 种）
   uiState,         // 'idle' | 'generating' | 'error'（前端瞬时态，不落盘）
-  source,          // 数据运行来源：live/snapshot/fixture/demo
+  source,          // 数据运行来源：feishu/crawled/llm/fixture/unavailable
   error,           // 结构化错误
   actions: {
     generateInsights,       // POST actions/generate-insights
@@ -168,14 +170,14 @@ status: 'idle' | 'loading' | 'success' | 'empty' | 'error'
 
 ```js
 // ① 数据运行来源（怎么产生的数据）
-runSource: 'live' | 'snapshot' | 'fixture' | 'demo'
+runSource: 'feishu' | 'crawled' | 'llm' | 'fixture' | 'unavailable'
 // ② 证据类型（数据来自哪类系统）
 evidenceType: 'local_kb' | 'warehouse' | 'rule' | 'external'
 ```
 
-- `runSource`：live（实时 LLM/即梦）· snapshot（冻结快照）· fixture（冻结 fixture）· demo（演示兜底）。
+- `runSource`：feishu（飞书实时数据）· crawled（本地采集证据）· llm（模型生成）· fixture（显式冻结演示）· unavailable（真实数据不足或不可用）。
 - `evidenceType`：local_kb（名创内部知识库）· warehouse（电商数据仓库）· rule（规则推导）· external（外部社媒/趋势）。
-- 二者可叠加（如「snapshot + external」）。
+- 二者可叠加（如「feishu + external」）。
 
 ### 5.3 EvidenceRef —— 扩充契约
 
@@ -315,10 +317,10 @@ TaskFlow(step0) 点击「开始洞察分析」
 
 ## 12. 兼容 / 迁移 / 回滚策略
 
-- **兼容**：AS-IS 的 `api.js`（`advancePlan + getInsights`）在 Stage 5 先保留，新增 `api/plans.js` 的原子动作函数，双轨并存至前端切完再删旧。
+- **历史说明**：迁移期间曾保留 `api.js`（`advancePlan + getInsights`）与原子动作双轨；当前 `api.js` 已删除，现行请求层使用 `api/{client,plans,insights,dashboard}.js` 和 `actions/*`。
 - **迁移**：按第 10 节垂直切片先行，跑通后再逐 feature 迁移（dashboard → insights → opportunities → plan-card → plans），每迁一个跑 `npm run build` + 冒烟。
 - **回滚**：每个 feature 迁移独立 commit；若某 feature 白屏，`git revert` 该 commit 即可，不影响其他 feature。
-- **红线**：迁移期间不删除 `mock/fanData.js`（改名 `fixtures/fanData.js`），保留 demo 兜底。
+- **当前红线**：展示组件不得直接 import fixture；离线演示必须显式创建 fixture 任务，真实请求失败显示错误与重试，不静默切换演示数据。
 
 ---
 
@@ -328,7 +330,7 @@ TaskFlow(step0) 点击「开始洞察分析」
 |---------|---------|------|
 | `main.jsx` | `main.jsx` | 引入 AppShell + router + theme |
 | `App.jsx` | `app/AppShell.jsx` + `app/router.jsx` | 拆布局/路由 |
-| `api.js` | `api/{client,plans,insights,dashboard}.js` | 拆分 |
+| 旧 `api.js`（已删除） | `api/{client,plans,insights,dashboard}.js` | 已完成拆分 |
 | `pages/TaskFlow.jsx` | `features/plans/pages/TaskFlow.jsx` + `hooks/usePlanWorkspace.js` | 拆编排 hook |
 | `pages/Home.jsx` | `features/plans/pages/TaskCenter.jsx` | 迁移 |
 | `pages/NewPlan.jsx` | `features/plans/pages/NewPlan.jsx` | 迁移 |

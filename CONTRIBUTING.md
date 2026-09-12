@@ -1,4 +1,4 @@
-# 团队协作规范
+# 团队协作规范（SKU Hunters）
 
 ## 一、分支策略
 
@@ -6,43 +6,37 @@
 
 | 分支类型 | 命名格式 | 示例 | 说明 |
 |:---|:---|:---|:---|
-| 主分支 | `main` | `main` | 生产就绪代码，保护分支，需 PR 审核 |
-| 开发分支 | `develop` | `develop` | 日常集成分支，功能分支合并目标 |
-| 功能分支 | `feat/<描述>` | `feat/trend-agent` | 新功能开发 |
-| 修复分支 | `fix/<描述>` | `fix/evidence-schema` | Bug 修复 |
-| 重构分支 | `refactor/<描述>` | `refactor/artifact-schema` | 代码重构 |
-| 文档分支 | `docs/<描述>` | `docs/api-usage` | 文档更新 |
-| 测试分支 | `test/<描述>` | `test/review-agent` | 测试补充 |
+| 主分支 | `main` | `main` | 默认/生产分支，变更通过 PR 审核 |
+| 功能分支 | `codex/<描述>` | `codex/ip-lock` | 新功能开发；也可按团队约定使用 `feat/<描述>` |
+| 修复分支 | `codex/fix-<描述>` | `codex/fix-api-error` | Bug 修复 |
+| 重构分支 | `codex/refactor-<描述>` | `codex/refactor-docs` | 代码或文档重构 |
+| 测试分支 | `codex/test-<描述>` | `codex/test-planning` | 测试补充 |
 
 ### 工作流
 
 ```mermaid
 gitGraph
    commit
-   branch develop
-   checkout develop
-   branch feat/trend-agent
+   branch codex/ip-lock
+   checkout codex/ip-lock
    commit
    commit
-   checkout develop
-   merge feat/trend-agent
-   branch feat/report-agent
-   commit
-   checkout develop
-   merge feat/report-agent
    checkout main
-   merge develop
+   merge codex/ip-lock
+   branch codex/feishu-report
+   commit
+   checkout main
+   merge codex/feishu-report
 ```
 
 ### 流程说明
 
-1. **从 `develop` 创建功能分支**：`git checkout -b feat/<描述> develop`
+1. **从 `main` 创建功能分支**：`git checkout -b codex/<描述> main`
 2. **在功能分支上开发**：小步提交，见下方提交规范
-3. **发起 Pull Request 到 `develop`**：至少 1 人 Review
-4. **合并到 `develop`**：Squash Merge 保持历史整洁
-5. **发布时从 `develop` 合并到 `main`**：使用 Merge Commit
+3. **发起 Pull Request 到 `main`**：至少 1 人 Review
+4. **合并到 `main`**：按仓库设置使用 Squash Merge 或 Merge Commit
 
-> **禁止直接向 `main` 提交代码。** 所有变更必须经过 PR 审核。
+> **禁止直接向 `main` 提交代码。** 所有变更必须经过 PR 审核；本地临时验证可以直接在工作区进行。
 
 ---
 
@@ -113,23 +107,18 @@ Closes #12
 
 ```
 SKU-Hunters/
-├── .github/workflows/   # CI/CD 配置
-├── docs/                 # 文档
-│   ├── architecture/     # 架构设计文档
-│   ├── api/              # API 文档
-│   └── guides/           # 开发指南
-├── backend/              # 后端服务
-│   ├── app/
-│   │   ├── agents/       # Agent 实现（每个 Agent 一个文件）
-│   │   ├── schemas/      # Pydantic 数据模型
-│   │   ├── engine/       # Decision Engine 核心
-│   │   ├── data/         # 数据连接器
-│   │   └── api/          # FastAPI 路由
-│   └── tests/            # 测试
-├── frontend/             # 前端仪表盘（可选）
-├── data/                 # 样本数据与配置
-├── scripts/              # 工具脚本
-└── references/           # 参考资料
+├── docs/                 # 设计、API、数据接入和演示文档
+├── backend/
+│   ├── app/api/          # FastAPI 路由
+│   ├── app/planning/     # 企划任务、洞察、机会、企划卡和归档服务
+│   ├── app/engine/       # 严格模式、任务数据上下文和 LLM 客户端
+│   ├── app/data/         # 飞书 Base / 社媒数据适配器
+│   ├── app/schemas/      # 冻结 Pydantic 契约
+│   ├── feishu/           # 群机器人、长连接、卡片、报告和同步
+│   └── tests/             # 后端测试
+├── frontend/src/api/     # client / plans / insights / dashboard 请求层
+├── frontend/src/features/# 任务中心、流程、洞察、机会、企划卡和看板
+└── data/                 # 样本与证据数据
 ```
 
 ### 关键命名约定
@@ -140,8 +129,8 @@ SKU-Hunters/
 | 类名 | 大驼峰：`TrendAgent` |
 | 函数/变量 | 蛇形：`calculate_heat_index()` |
 | Schema 字段 | 蛇形：`evidence_refs` |
-| API 路由 | 小写 + 连字符：`/api/v1/trends` |
-| 测试文件 | `test_<模块名>.py`：`test_trend_agent.py` |
+| API 路由 | 统一挂 `/api/v1`，资源和动作使用小写连字符：`/api/v1/plans/{id}/actions/generate-insights` |
+| 测试文件 | `test_<模块名>.py`：`test_pipeline.py` |
 
 ---
 
@@ -156,15 +145,17 @@ class EvidenceRef(BaseModel):
     snippet: str       # 关键摘要（<200字）
 ```
 
-### 结构化产物类型
+### 当前结构化产物
 
 | 产物 | 文件 | 用途 |
 |:---|:---|:---|
-| `FeatureMatrix` | `feature.py` | 趋势分析矩阵 |
-| `PricingComparison` | `pricing.py` | 定价对比表 |
-| `UserSentiment` | `sentiment.py` | 用户情感分析 |
-| `SWOTAnalysis` | `swot.py` | SWOT 分析 |
-| `ReviewResult` | `review.py` | 审查结果 |
+| `PlanBrief` / `InsightBundle` | `backend/app/schemas/planning.py` | 企划约束与五看洞察 |
+| `Opportunity` / `PlanCard` | `backend/app/schemas/planning.py` | 机会方向与新品企划卡 |
+| `BaseRecord` / `BaseRecordPage` | `backend/app/schemas/base_data.py` | 飞书 Base 采集数据 |
+| `CompetitorRecord` | `backend/app/schemas/competitor_data.py` | 商品级竞品数据 |
+| `PlanSummaryV2` | `backend/app/schemas/planning_api_v2.py` | 任务中心列表摘要 |
+
+`backend/app/schemas/` 中现有 D1 文件视为冻结契约，不直接改字段；新契约使用新文件，并同步更新 API 文档和测试。
 
 ---
 
@@ -173,13 +164,13 @@ class EvidenceRef(BaseModel):
 ### 日开发流程
 
 ```
-1.  git pull origin develop       # 同步最新代码
-2.  git checkout -b feat/xxx      # 创建功能分支
+1.  git pull origin main          # 同步最新代码
+2.  git checkout -b codex/xxx main # 创建功能分支
 3.  开发 + 本地测试
 4.  git add . && git commit -m "msg"  # 提交
 5.  git push origin feat/xxx      # 推送
 6.  创建 PR → 请求 Review
-7.  合并到 develop
+7.  合并到 main
 ```
 
 ### 周同步节奏

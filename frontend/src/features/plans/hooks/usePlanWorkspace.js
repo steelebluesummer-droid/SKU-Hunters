@@ -44,7 +44,7 @@ export default function usePlanWorkspace(planId) {
   const [pendingAction, setPendingAction] = useState(null); // 当前原子动作名
   const [error, setError] = useState(null);           // 最近一次结构化错误
 
-  // 数据来源标识：取自后端洞察的 dataSource（crawled 真实采集 / llm LLM 生成），洞察未生成前不展示
+  // 数据来源标识：取自后端洞察的 dataSource（feishu/crawled/llm/fixture/unavailable），洞察未生成前不展示
   const source = insights?.dataSource || null;
   const status = plan?.status || 'brief_locked';
   const errorSummary = plan?.error_summary || '';

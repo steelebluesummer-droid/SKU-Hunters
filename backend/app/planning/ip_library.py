@@ -1,7 +1,8 @@
 """MINISO IP 资源库（扩充）— 飞书 Base 合作情报 + 内置 seed 双档数据
 
 定位：与 ip_resource.py（名创内部 12 个策展 IP）**并列**的扩充数据模块，
-承载飞书 Base「base_ip_partnerships」的 33 条名创 IP 合作情报；
+承载飞书 Base「base_ip_partnerships」的当前 35 条名创 IP 合作情报；
+无飞书配置时使用内置 33 条快照；
 不 import 也不修改 ip_resource.py，原「名创内部」内容一行不改。
 
 数据两档：
@@ -325,7 +326,7 @@ def reset_library_cache() -> None:
     _library_cache = None
 
 
-# ── IP官候选池合并（策展 12 + 扩充 33，同名/别名去重，字段并集）──────────────
+# ── IP官候选池合并（策展 12 + 扩充库，Base 当前 35 / 内置快照 33；同名/别名去重）────
 
 def merged_candidate_pool(curated_pool: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """把扩充库并入 IP官 候选池。
@@ -354,7 +355,7 @@ def merged_candidate_pool(curated_pool: list[dict[str, Any]] | None) -> list[dic
                 "matrix": ip.get("matrix"),
             })
 
-    # 扩充 33（ip_library）并入：同名保留并集
+    # 扩充库（Base 当前 35；无配置时内置快照 33）并入：同名保留并集
     for ip in get_ip_library():
         key = normalize_ip_name(str(ip.get("name") or ""))
         if not key:

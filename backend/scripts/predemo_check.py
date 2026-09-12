@@ -3,7 +3,7 @@
 用法（backend/ 目录，后端服务已启动）：
     ./venv/Scripts/python scripts/predemo_check.py
 
-检查项：后端存活 / 企划六步链路 / 飞书 webhook fail-closed / 即梦配置状态。
+检查项：后端存活 / 企划链路 / 严格模式状态 / 即梦配置状态。
 全绿输出 "演示可开始"；任何一项红 → 按提示修复后再演示。
 """
 
@@ -62,7 +62,7 @@ def main() -> int:
     # 2. demo 任务存在
     code, plan = get("/api/v1/plans/demo")
     check("演示任务 demo 存在", code == 200,
-          "重置演示状态：删 backend/data/plans_state.json 后重启后端")
+          "重置演示状态：按需清理 backend/data/state/plans_state.json 后重启后端")
     if code == 200:
         check("demo 状态可演示（brief_locked / plan_card_ready / archived 均可）",
               plan.get("status") in {"brief_locked", "insights_ready", "opportunities_ready",
@@ -83,20 +83,36 @@ def main() -> int:
     check("创建企划任务（POST /plans）", ok)
     if ok:
         pid = created["plan_id"]
-        code, card_resp = post(f"/api/v1/plans/{pid}/plan-card", {"opportunity_id": "ip-collect"})
-        card = card_resp.get("plan_card", {})
-        check("企划卡生成 + 成本校验实时计算", code == 200 and
-              card.get("costCheck", {}).get("passed") is True and
-              "成本校验" in (card.get("processLog") or [""])[-1])
-        check("概念图路径已冻结", bool(card.get("conceptImage")),
-              "检查 frontend/public/assets/ 三张概念图是否在")
+        code, _ = post(f"/api/v1/plans/{pid}/actions/generate-insights", {})
+        insights_ok = code == 200
+        check("生成洞察（原子动作）", insights_ok)
+        if insights_ok:
+            code, opp_resp = post(
+                f"/api/v1/plans/{pid}/actions/generate-opportunities", {},
+            )
+            opportunities = opp_resp.get("opportunities", [])
+            opportunities_ok = code == 200 and len(opportunities) >= 1
+            check("生成机会方向（原子动作）", opportunities_ok)
+            if opportunities_ok:
+                opportunity_id = opportunities[0].get("id")
+                code, card_resp = post(
+                    f"/api/v1/plans/{pid}/actions/generate-plan-card",
+                    {"opportunity_id": opportunity_id},
+                )
+                card = card_resp.get("plan_card", {})
+                check("企划卡生成 + 成本校验实时计算", code == 200 and
+                      card.get("costCheck", {}).get("passed") is True and
+                      "成本校验" in (card.get("processLog") or [""])[-1])
+                check("概念图路径已生成或本地化", bool(card.get("conceptImage")),
+                      "检查 backend/data/evidence/images/concepts/ 是否有当前 plan 的概念图文件")
 
-    # 5. 飞书 webhook fail-closed
-    code, _ = post("/api/v1/feishu/events", {"token": "wrong", "type": "event_callback"})
-    check("飞书 webhook 验签 fail-closed（错误 token → 403）", code == 403,
-          "检查 backend/.env 的 FEISHU_* 配置与 webhook 路由")
+    # 5. 健康检查与运行模式
+    code, health = get("/health")
+    check("健康检查（GET /health）", code == 200)
+    if code == 200:
+        check("运行模式字段完整", "strict_real" in health and "mock_allowed" in health)
 
-    # 6. 即梦配置状态（不阻断演示，缺 Key 自动降级冻结图）
+    # 6. 即梦配置状态（不阻断演示，缺 Key 显示已沉淀概念图或占位图）
     from dotenv import load_dotenv
     load_dotenv()
     has_volc = bool(os.getenv("VOLC_ACCESS_KEY_ID") and os.getenv("VOLC_SECRET_ACCESS_KEY"))

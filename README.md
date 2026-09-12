@@ -52,19 +52,19 @@ SKU-Hunters：    五看证据 → 机会池评分排序 → 机会卡 → 企�
 | 状态 | 内容 |
 |:---|:---|
 | ✅ 已跑通 | 六步企划管线全链路（约束→五看洞察→机会卡×3→创意→策略含成本回环→企划案改稿），测试覆盖链路与数据契约 |
-| ✅ 三态数据源 | fixture（冻结演示）/ crawled（本地采集 JSON + LLM 二次分析，默认）/ live（飞书实时），四品类社媒证据入库（保温杯 / 小风扇 / 香薰 / 雨伞） |
+| ✅ 三态数据源 | fixture（显式冻结演示）/ crawled（本地采集 JSON + LLM 二次分析，非生产默认）/ live（严格生产或配置后飞书实时），四品类社媒证据入库（保温杯 / 小风扇 / 香薰 / 雨伞） |
 | ✅ 竞品图板 | live 模式直连飞书竞品表，竞品全景 / 需求满足矩阵 / AI 机会空位三层展示 |
 | ✅ 概念图 | 即梦出图 + 本地化沉淀（不依赖临时签名 URL），任务中心封面与详情主图一致 |
-| ✅ 飞书闭环已通 | 企划归档自动同步飞书多维表格（幂等建字段）+ 通知群推送卡片；飞书侧可一键发起企划（202 异步跑洞察+机会卡，完成后推卡片跳转前端任务页） |
+| ✅ 飞书闭环已通 | 群机器人经 WebSocket 长连接完成表单、机会点选和归档；归档同步已存在的飞书多维表格，并生成包含完整企划与概念图的在线云文档回群。Aily 仍可异步发起企划并接收机会通知 |
 | ✅ 前端工作室 | 任务中心（按流程/品类分组、星标收藏、左图右文卡片）/ 洞察驾驶舱 / 机会卡 / 企划案改稿 / 数据看板 / 流行元素板（情绪板 Moodboard） |
 | ✅ 已接入 | LLM 统一客户端（智谱/豆包/DeepSeek/通义可切换）、即梦图片生成（火山引擎） |
 | 🔨 施工中 | 桌面摆件/冰袖等品类证据采集、Google Trends 数据导入、企划案被引用统计（source_plan_id 已就位） |
 
 ## 技术栈
 
-**FastAPI** · **Pydantic**（输入输出契约强制）· **React + Ant Design + ECharts**（企划工作室前端）· **飞书**（多维表格台账 / 群机器人通知 / Aily 发起入口）
+**FastAPI** · **Pydantic**（输入输出契约强制）· **React + Ant Design + ECharts**（企划工作室前端）· **飞书**（多维表格台账 / 群机器人长连接闭环 / 在线云文档 / Aily 轻入口）
 
-数据策略：**三态模式**——fixture（冻结演示）/ crawled（本地采集 JSON + LLM 二次分析，默认）/ live（飞书实时）；真实采集证据优先、LLM 生成兜底，不造假数据回退。
+数据策略：**三态模式**——fixture（显式冻结演示）/ crawled（本地采集 JSON + LLM 二次分析，非生产默认）/ live（严格生产或配置后使用飞书实时）；真实采集证据优先，来源始终标注，不静默伪装或回退演示数据。
 
 ## 快速开始
 
@@ -72,26 +72,29 @@ SKU-Hunters：    五看证据 → 机会池评分排序 → 机会卡 → 企�
 git clone https://github.com/steelebluesummer-droid/SKU-Hunters.git
 cd SKU-Hunters
 
-# 后端
+# 后端（Windows PowerShell）
 cd backend
-python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-cp .env.example .env   # 填入 LLM Key 与飞书凭证（可选）
-./venv/Scripts/python -m uvicorn app.main:app --port 8000
+Copy-Item .env.example .env   # 填入 LLM Key 与飞书凭证（可选）
+python -m uvicorn app.main:app --port 8000  # 单进程单 worker，禁止 --reload
+
+# macOS/Linux：source venv/bin/activate；复制配置用 cp .env.example .env
 
 # 前端
 cd ../frontend
 npm install && npm run dev   # → http://localhost:5173
 ```
 
-完整演示走查见 [演示手册](docs/guides/demo-walkthrough.md)；飞书归档同步端到端验证：`python scripts/e2e_bitable_archive.py`。
+完整演示走查见 [演示手册](docs/guides/demo-walkthrough.md)；飞书归档同步端到端验证请在 `backend/` 目录运行：`python scripts/e2e_bitable_archive.py`。
 
 ## 文档导航
 
 | 文档 | 内容 |
 |:---|:---|
 | [演示走查手册](docs/guides/demo-walkthrough.md) | 前后端启动与端到端演示步骤 |
-| [飞书 AI 使用指南](docs/guides/feishu-ai-guide.md) | 多维表格 / 群通知 / Aily 发起的落地方式与边界 |
+| [飞书 AI 使用指南](docs/guides/feishu-ai-guide.md) | 群机器人长连接 / 在线云文档 / 多维表格 / Aily 轻入口的落地方式与边界 |
 | [飞书多维表格字段映射](docs/guides/feishu-base-mapping.md) | 归档同步字段约定 |
 | [社媒采集 Prompt 包](docs/guides/openclaw-社媒采集prompt包.md) | 证据采集 schema 与各品类采集模板 |
 | [API 端点约定](docs/api/endpoints.md) | 前后端对接契约 |

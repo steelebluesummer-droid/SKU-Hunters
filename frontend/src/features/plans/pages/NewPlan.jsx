@@ -17,7 +17,7 @@ import { fromForm } from '../../../shared/utils/normalizeBrief';
 import { IP_OPTIONS_FALLBACK, NO_IP_OPTION, mergeIpOptions } from '../../../shared/utils/ipOptions';
 
 // 品类 / 市场 / IP / 目标 的可选项（UI 选项，非 fixture 数据）
-const CATEGORIES = ['小风扇', '保温杯', '香薰', '桌面摆件', '雨伞', '冰袖'];
+const CATEGORIES = ['小风扇', '保温杯', '香薰', '雨伞'];
 const MARKETS = ['中国大陆', '东南亚', '日本', '欧美'];
 const GOAL_OPTIONS = ['夏季销售提升', '打造IP爆款', '拓展新人群', '提升连带率'];
 
@@ -58,7 +58,8 @@ export default function NewPlan() {
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const [pageError, setPageError] = useState(null);
-  // IP 选项：fallback 5 项 ∪ 策展 12 ∪ 扩充 33（并行拉取，全失败降级 fallback，不阻塞表单）
+  // IP 选项：fallback 5 项 ∪ 策展 12 ∪ 扩充库（Base 当前 35；无配置时内置 33 条快照）
+  // 并行拉取，全失败降级 fallback，不阻塞表单
   const [ipOptions, setIpOptions] = useState(IP_OPTIONS_FALLBACK);
 
   useEffect(() => {

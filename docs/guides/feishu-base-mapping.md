@@ -1,7 +1,7 @@
-# Stage 9B · 飞书 Base 字段映射设计（门禁文档）
+# 飞书 Base 字段映射与实时数据接入
 
-> 本文件是 Stage 9B 的第一道门禁：在写任何飞书读取代码前，先钉死「飞书表字段 ↔ BaseRecord」的映射、
-> 时间字段规则、边界处理与分页/超时/权限契约。
+> 本文保留 Stage 9B 的字段决策记录，同时作为当前 `FeishuBaseProvider` 的映射依据。
+> 当前 provider 已实现真实飞书 Base 只读请求；缺配置、权限失败、网络失败或字段异常时仍必须 fail-closed。
 > 字段事实以 `backend/app/schemas/base_data.py`（BaseRecord/BaseQuery）为准；飞书 API 事实以飞书开放平台
 > Bitable v1 文档为准；认证复用 `backend/feishu/auth.py`（FeishuAuth）。
 
@@ -9,8 +9,8 @@
 
 ## 一、目标与范围
 
-**目标**：让 `FeishuBaseProvider`（Stage 9A 中 fail-closed 的占位）接入真实飞书多维表格，作为 `BaseRecord`
-的统一只读数据源。
+**当前职责**：`FeishuBaseProvider` 从环境变量读取配置，通过 `FeishuAuth` 访问真实飞书多维表格，
+将明细、汇总和商品级竞品记录转换为 `BaseRecord`/竞品契约，作为规划洞察的数据源。
 
 **范围（本阶段）**：
 - 只读 provider：查询记录 + 分页 + 字段转换。
@@ -201,11 +201,11 @@ Stage 9A 的 `FeishuBaseProvider` 用了三枚环境变量，其中两枚的语�
 
 ---
 
-## 九、已拍板结论（2026-08-14 定稿）
+## 九、历史决策记录（2026-08-14 定稿）
 
 | # | 事项 | 结论 |
 |---|------|------|
-| 1 | 数据表/汇总表是否已存在 | **尚未建立**，按新建处理；**不复用**现有「企划资产库」 |
+| 1 | 数据表/汇总表配置 | 不在代码中硬编码；由 `FEISHU_BASE_APP_TOKEN`、`FEISHU_DATA_TABLE_ID`、`FEISHU_SUMMARY_TABLE_ID` 提供，调用时校验 |
 | 2 | 新建表命名 | 同一 `app_token` 下两张表：`base_records`（采集明细）、`base_summaries`（聚合快照） |
 | 3 | 字段名 | 按 §四/§五 建议字段名作为建表标准 |
 | 4 | 认证变量 | 废弃 `FEISHU_BASE_TOKEN`，统一 `FEISHU_APP_ID`/`FEISHU_APP_SECRET` + `FEISHU_BASE_APP_TOKEN`/`FEISHU_DATA_TABLE_ID`/`FEISHU_SUMMARY_TABLE_ID`；认证复用 `FeishuAuth`，**不自行维护 token** |
@@ -214,20 +214,20 @@ Stage 9A 的 `FeishuBaseProvider` 用了三枚环境变量，其中两枚的语�
 | 7 | `get_summary()` 降级 | 一期**不做静默实时聚合降级**，汇总表不可用就明确失败（`BaseUnavailable`） |
 | 8 | `snapshot_id` 生成 | 每次采集批次一个唯一批次号 `snap-YYYYMMDDTHHMMSSZ-<run-id>`；同一批共用，不能只用日期、不能每条单独生成 |
 
-> **关键约束**：真实字段名与真实 `app_token`/`table_id` 尚未核对前，Provider 必须继续 **fail-closed**；
-> 只能做 Mock API 测试，不能宣称已接入真实数据。
+> **当前约束**：provider 已接入真实 API，但每个部署仍需核对实际字段和表 ID；未配置或核对失败时必须
+> **fail-closed**，不能用 fixture/Mock 冒充真实数据。
 
 ---
 
-## 十、验收门禁（Stage 9B 第 1 步完成标准）
+## 十、验收与维护
 
 - [x] 字段映射已定稿（字段名按设计假设，真实字段待建表时核对）。
 - [x] 配置统一方案已拍板（§三、§九）。
 - [x] 边界处理、分页/超时/权限契约无歧义。
 - [x] 待确认事项已逐条闭环（§九）。
 
-> 门禁已通过（2026-08-14）。进入 Stage 9B 第 2 步「实现只读 Feishu Provider」。
-> 注意：真实字段名与真实 `app_token`/`table_id` 尚未核对，Provider 必须继续 fail-closed，只做 Mock API 测试。
+> Stage 9B 的字段、分页、超时、权限和 fail-closed 规则已落到
+> `backend/app/data/base_adapter.py`；新增字段或表结构时，应先更新本文和对应测试，再改 provider。
 
 
 ---

@@ -1,8 +1,10 @@
-# Stage 11B — Strict Real Mode（生产环境严格真实模式）
+# Stage 11B — Strict Real Mode（生产环境严格真实模式，历史记录）
 
 > 目标：正式环境完全禁用 Mock / fixture / 演示数据回退，做到「LLM 失败→阻断、
 > 飞书失败→阻断、数据为空→unavailable、字段缺失→unknown、禁止回退 Mock、
 > 禁止运行 fixture/demo 任务」。
+>
+> 本文记录阶段验收结果，不替代当前运行说明；当前非生产默认模式为 `crawled`，严格生产模式强制为 `live`。
 > 状态：实现 + 真实 E2E 验证完成，待人工审核后提交。
 
 ## 1. 单一事实源：`backend/app/engine/strict_mode.py`
@@ -12,7 +14,7 @@
 - 对外接口：
   - `resolve_provider(role, env_key, allowed)`：严格校验 provider 必须为 `allowed` 内真实实现，否则抛 `StrictModeError`。
   - `require_mock_allowed(where)`：Mock/演示数据回退点调用，严格模式抛错阻断。
-  - `planning_default_mode()`：严格模式强制 `live`，否则取 `PLANNING_DEFAULT_MODE`（默认 fixture）。
+  - `planning_default_mode()`：严格模式强制 `live`，否则取 `PLANNING_DEFAULT_MODE`（默认 `crawled`）。
   - `allow_fixture_tasks()` / `is_demo_hidden()`：严格模式禁 fixture、隐藏 demo。
 
 ## 2. 改动点

@@ -2,6 +2,8 @@
 
 > 审计时间：以当前代码（HEAD `fb7ddab`）与 `backend/data/state/plans_state.json` 实际状态为准。
 > 本审计不假设任何先前迁移报告的准确性。
+>
+> **历史记录**：本文只反映当次审计快照，不代表当前仓库状态。当前实现与运行规则以 `AGENTS.md`、`README.md`、`docs/api/endpoints.md` 和代码事实源为准。
 
 ## 1. 当前任务清单（plans_state.json 共 6 个）
 

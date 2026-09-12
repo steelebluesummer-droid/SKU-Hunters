@@ -1,206 +1,105 @@
 # 飞书对接模块使用说明
 
-## 功能
+当前模块服务于 SKU Hunters 新品企划工作室，包含两条飞书链路：
 
-- 飞书群里 @机器人 说「评审 XXX」，自动启动一轮 AI 委员会评审
-- 7 个委员用不同颜色的卡片发言，模拟圆桌讨论
-- 最后输出评审结论卡片，带「通过/否决」按钮，真人拍板
-- 已接入 LangGraph `run_review()` 事件流：委员 + 质询环节用不同颜色卡片发言
-- 卡片内容全部来自 LangGraph 事件 / Artifact，禁止硬编码角色结论与评分
-- 人工 Gate（洞察确认/立项拍板/复盘）发带 `session_id` 按钮卡片，点击后恢复同一
-  LangGraph checkpoint（不重启流程）；支持文本指令 `通过/否决/修改/追问/结束`
-- webhook 保持身份校验（fail-closed）+ event_id 幂等 + 异步快速返回
+1. **群机器人闭环**：群里 @机器人提需求，补全约束、生成五看洞察和机会方向，人工点选方向后生成企划卡并归档；归档后生成包含完整企划与概念图的在线云文档并回群。
+2. **后端通知/归档**：前端或 Aily 触发的企划任务完成后，后端把机会卡或归档摘要推送到指定群，并把归档结果同步到飞书多维表格；完整云文档交付由群机器人归档流程负责。
+
+本模块不是旧版“七委员圆桌评审会”，不使用 `cards.py`、`handler.py` 或 `webhook.py`，也不依赖公网回调地址。
 
 ## 文件结构
 
-```
+```text
 feishu/
-├── __init__.py      # 模块入口
-├── config.py        # 配置（从环境变量读取）
-├── auth.py          # Token 管理（自动缓存刷新）
-├── cards.py         # 7个委员的卡片模板
-├── bot.py           # 消息发送封装
-├── handler.py       # 消息处理 + 评审流程调度
-└── webhook.py       # FastAPI 路由
+├── auth.py          # tenant_access_token 获取与缓存
+├── config.py        # 环境变量配置
+├── bot.py           # 飞书 IM 发消息封装
+├── cards_v2.py      # Card schema 2.0 表单、机会选择和状态卡
+├── group_bot.py     # 群消息解析、企划流程和卡片回调
+├── longconn.py      # WebSocket 长连接生命周期
+├── nl_brief.py      # 一句话需求解析和 IP/约束归一化
+├── doc_report.py    # 归档企划案在线文档/报告卡
+├── bitable_sync.py  # 企划归档同步到多维表格
+└── notify.py        # Aily/后端任务结果通知
 ```
 
 ## 快速开始
 
 ### 1. 创建飞书应用
 
-1. 访问 https://open.feishu.cn → 开发者后台
-2. 创建企业自建应用，名字「SKU 委员会」
-3. 添加应用能力 → 开启「机器人」
-4. 权限管理 → 开通：
-   - `im:message`（发送消息）
-   - `im:message.receive_v1`（接收消息）
-5. 事件与回调 → 配置请求地址：
-   - `https://你的域名/feishu/webhook`
-   - 本地开发用内网穿透（cpolar/ngrok）
-   - 订阅事件：`接收消息 v2.0`
-6. 拿到 App ID 和 App Secret
+在飞书开放平台创建企业自建应用并开启机器人能力，按实际部署开通消息接收、发送消息和多维表格读写权限。将应用机器人拉入目标群。
+
+长连接使用 `im.message.receive_v1` 和 `card.action.trigger` 事件。长连接由后端主动建立，因此不需要配置公网 webhook、cpolar 或 ngrok 回调地址。
 
 ### 2. 配置环境变量
 
-在 `.env` 文件中添加：
+在 `backend/.env` 中填写密钥；不要把真实值提交到 Git：
 
 ```bash
 FEISHU_APP_ID=cli_xxxxxxxxxxxx
 FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
-FEISHU_VERIFICATION_TOKEN=xxxxxxxx  # 事件与回调页面的 Verification Token
-FEISHU_ENCRYPT_KEY=xxxxxxxx         # 加密 Key（如果开启了加密）
+FEISHU_LONGCONN=1
+
+# 企划归档同步（可选）
+FEISHU_BITABLE_APP_TOKEN=
+FEISHU_BITABLE_TABLE_ID=
+
+# Aily/后端任务完成后的通知群（可选）
+FEISHU_NOTIFY_CHAT_ID=
+FRONTEND_BASE_URL=http://localhost:5173
 ```
 
-### 3. 集成到 FastAPI
+使用飞书真实洞察数据时，还需要配置 `BASE_PROVIDER_MODE=feishu`、`FEISHU_BASE_APP_TOKEN`、`FEISHU_DATA_TABLE_ID` 和相应的摘要/竞品表变量；详见 [飞书 Base 字段映射](../../docs/guides/feishu-base-mapping.md)。
 
-在你的主应用文件中添加：
-
-```python
-from fastapi import FastAPI
-from feishu import FeishuConfig
-from feishu.webhook import create_feishu_router
-
-app = FastAPI()
-
-# 注册飞书路由
-config = FeishuConfig.from_env()
-app.include_router(create_feishu_router(config), prefix="/feishu")
-```
-
-### 4. 把机器人拉进群
-
-1. 在飞书群里 → 群设置 → 群机器人 → 添加机器人
-2. 搜索你创建的「SKU 委员会」应用，添加进去
-
-### 5. 测试
-
-在群里 @SKU委员会 说：
-```
-评审 解压玩具
-```
-
-应该会看到：
-1. 一张「评审开始」卡片
-2. 然后依次出现 7 个委员的发言卡片（趋势官是真实逻辑，其他是占位）
-3. 最后一张「评审结论」卡片，带通过/否决按钮
-
-## 接入你的 Agent
-
-### 接入趋势官（已预留接口）
-
-在 `handler.py` 的 `_run_review` 方法中，趋势官部分：
-
-```python
-# 已经写好了，只要你的 TrendAgent 有 analyze 方法，返回 dict
-from agents.trend_agent import TrendAgent
-agent = TrendAgent()
-result = agent.analyze(topic)
-# result 格式：
-# {
-#     "content": "趋势分析内容...",
-#     "evidence": ["来源1", "来源2", ...]
-# }
-```
-
-### 接入其他 Agent
-
-把 `handler.py` 中对应的占位代码替换成真实 Agent 调用即可。每个 Agent 的返回格式统一为：
-
-```python
-{
-    "content": "分析内容（支持 markdown）",
-    "evidence": ["证据1", "证据2", ...],  # 可选
-    "score": 85.5,  # 可选，商业官用
-}
-```
-
-## 后续替换为 LangGraph
-
-等你的 LangGraph 编排写好了，把 `handler.py` 里的 `_run_review` 方法整个替换掉就行：
-
-```python
-async def _run_review(self, chat_id: str, topic: str):
-    # 原来的串行代码替换成 LangGraph 调用
-    from your_langgraph_app import run_review
-    async for event in run_review(topic):
-        # event: {"role": "trend", "content": "...", "evidence": [...]}
-        self.bot.send_committee_report(
-            chat_id=chat_id,
-            role=event["role"],
-            content=event["content"],
-            evidence=event.get("evidence"),
-            score=event.get("score"),
-        )
-```
-
-## 本地开发调试
-
-### 内网穿透（让飞书能调通你本地的接口）
-
-推荐用 cpolar 或 ngrok：
+### 3. 启动后端
 
 ```bash
-# 假设你的 FastAPI 跑在 8000 端口
-cpolar http 8000
-# 得到一个公网地址，比如 https://abc.cpolar.cn
-# 飞书回调地址填：https://abc.cpolar.cn/feishu/webhook
+cd backend
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --port 8000
 ```
 
-### 测试发送消息
+`app.main` 启动时会幂等拉起飞书长连接。建议单进程、单 worker 运行，不要使用 `--reload` 或多个 worker，否则可能产生多个竞争连接。
 
-不用等飞书回调，直接写个测试脚本：
+### 4. 群内使用
 
-```python
-from feishu import FeishuConfig
-from feishu.auth import FeishuAuth
-from feishu.bot import FeishuBot
+在群里 @机器人，例如：
 
-config = FeishuConfig.from_env()
-auth = FeishuAuth(config)
-bot = FeishuBot(auth)
-
-# 发个测试消息（chat_id 从群链接或 API 获取）
-bot.send_text("oc_xxxxxxxxxx", "hello from SKU Hunters!")
+```text
+帮我做一个 2027 夏季户外小风扇企划，价格带 39-99 元，联名三丽鸥
 ```
 
-## 常见问题
+流程为：
 
-**Q: 收不到消息回调？**
-- 检查回调地址是否正确（要公网可访问）
-- 检查事件订阅是否开启了「接收消息 v2.0」
-- 检查机器人是否已经被拉进群
+```text
+一句话需求
+→ 缺少品类/IP 时填写 Card 2.0 表单
+→ 五看洞察
+→ 三张机会方向卡
+→ 人工点选方向
+→ 企划卡与概念图
+→ 归档、同步多维表格
+→ 生成在线完整企划文档（含概念图）并回传报告卡
+```
 
-**Q: 发消息失败？**
-- 检查 App ID 和 App Secret 是否正确
-- 检查权限是否开通了 `im:message`
-- 检查机器人是否在群里
+IP 下拉选项来自资源库；已指定的 IP 会被锁定到所有机会方向和概念图 prompt。任何阶段失败都会回传明确错误，不会伪装成成功。
 
-**Q: @机器人没反应？**
-- 检查消息里是否真的 @ 了机器人（飞书会把 @ 替换成 @_user_1）
-- 检查 handler.py 里的正则是否匹配
+## 与后端 API 的关系
 
-## 已知限制（生产部署前必须处理）
+前端工作室使用 `/api/v1/plans` 和 `actions/*` 原子动作接口；飞书群机器人在 `group_bot.py` 内调用同一套 planning service/pipeline，不再调用旧的 `run_review()` 评审事件流。
 
-**Gate / 会话状态仅在进程内存中（checkpoint 恢复不支持进程重启）**
+归档后的企划可以在前端或 `POST /api/v1/plans/{plan_id}/review` 进行只读复盘；归档任务不可继续改稿。
 
-- `MessageHandler._sessions`、`gate_future` 都保存在内存中，LangGraph 的 checkpoint
-  （thread_id=session_id）虽然持久化在磁盘，但进程一旦重启：
-  - `_sessions` 与 `gate_future` 全部丢失；
-  - 飞书按钮携带的 `session_id` 会返回 `no pending gate`；
-  - 无法真正恢复人工 Gate。
-- **当前能力边界**：仅支持「同一进程内」恢复 checkpoint，**不支持服务重启后恢复**。
-  明天演示可接受，生产上线前必须处理。
-- **建议的修复方向**（二选一）：
-  1. 将 pending gate / session 元数据落盘持久化（如 SQLite/Redis），重启后按
-     `session_id` 重建 Gate 状态；
-  2. 按钮直接调用 LangGraph 的 `Command(resume=...)` 恢复 checkpoint，不依赖内存
-     `Future`。
+## 排障
 
-**鉴权（fail-closed）**
-- webhook 一律先校验 token：token 缺失或 `FEISHU_VERIFICATION_TOKEN` 未配置时直接
-  返回 403，验证通过后才返回 URL challenge。生产必须配置 `verification_token`。
+- 群里无响应：检查 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_LONGCONN`，以及应用是否已加入群。
+- 长连接重复或不稳定：确认只有一个 uvicorn 进程和一个 worker。
+- 卡片回调失败：确认使用 Card schema 2.0、表单组件 `name` 唯一且非空。
+- 归档未写入多维表格：检查 `FEISHU_BITABLE_APP_TOKEN`、`FEISHU_BITABLE_TABLE_ID` 和对应权限；同步失败不影响本地归档状态。
+- Aily 没有结果通知：检查 `FEISHU_NOTIFY_CHAT_ID`；Aily 入口仍可使用 `/api/v1/plans/aily-create`，但任务由后端后台执行。
 
-**发送失败状态**
-- `send_text` / `send_card` 返回非零 `code` 时抛 `BotSendError`，`_run_review` 将会话
-  置为 `failed` 并保存 `error` / `failed_stage` / `last_event`，不会错误地显示为
-  `completed`。
+## 运行边界
+
+- 长连接必须在单进程中运行；回调线程只做解析和分发，洞察、出图、归档等重任务交给后台线程池。
+- 密钥只从环境变量读取，日志不打印 Secret、Token 或完整原始记录。
+- 生产环境按 `AGENTS.md` 启用 Strict Real Mode，禁止 Mock/fixture 演示数据静默回退。

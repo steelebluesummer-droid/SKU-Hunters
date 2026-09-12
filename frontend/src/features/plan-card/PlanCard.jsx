@@ -115,7 +115,7 @@ function ProductProposalView({ proposal = {}, opportunity }) {
               <img src={d.imageUrl} alt="产品概念图" style={{ width: '100%', borderRadius: 12 }} />
             ) : (
               <div className="concept-image" style={{ background: 'var(--grad-default)' }}>
-                <div>{emoji}</div><div className="concept-caption">产品概念图 · 即梦文生图接入后替换</div>
+                <div>{emoji}</div><div className="concept-caption">产品概念图 · 未生成或生成失败，当前显示占位图</div>
               </div>
             )}
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 8, lineHeight: 1.8 }}>
@@ -366,7 +366,7 @@ export default function PlanCard({ card, proposal, opportunity, brief, status, i
               ) : (
                 <div className="concept-image" style={{ background: gradient }}>
                   <div>{emoji}</div>
-                  <div className="concept-caption">产品概念图 · 即梦文生图接入后替换</div>
+                  <div className="concept-caption">产品概念图 · 未生成或生成失败，当前显示占位图</div>
                 </div>
               )}
               {card.costCheck && (

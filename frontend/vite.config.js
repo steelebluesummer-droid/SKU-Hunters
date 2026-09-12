@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// 开发模式：前端 5173，/api 代理到后端 8000（uvicorn app.main:app --reload）
+// 开发模式：前端 5173，/api 代理到后端 8000（后端单进程启动，禁止 --reload 以避免长连接重复）
 // 生产模式：npm run build 后由后端 StaticFiles 托管，同源无跨域
 export default defineConfig({
   plugins: [react()],

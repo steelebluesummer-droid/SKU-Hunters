@@ -1,7 +1,8 @@
 # SKU-Hunters 重构验收 Checklist
 
 > 用法：队友每交付一个阶段，对照本单逐项打勾。**全勾 → 通过，进下一阶段；有叉 → 打回，注明哪条没过。**
-> 验收环境：后端 `uvicorn app.main:app --reload`（backend/ 目录）+ 前端 `npm run dev`（frontend/ 目录）。
+> 验收环境：后端 `python -m uvicorn app.main:app --port 8000`（backend/ 目录，单进程单 worker，禁止 `--reload`）+ 前端 `npm run dev`（frontend/ 目录）。
+> 当前说明：本清单保留阶段验收项；离线演示必须显式使用 fixture，线上/真实任务不自动回退本地 mock。
 
 ---
 
@@ -41,7 +42,7 @@
 - [ ] 刷新页面后任务状态不丢（持久化生效）
 
 ### 断网兜底
-- [ ] 关掉后端，前端用本地 mock 完整走通 demo 任务，**不白屏**
+- [ ] 后端不可用时，前端显示明确网络错误并提供重试，**不白屏**；如需离线演示，显式创建 fixture 任务并标注来源
 
 ---
 

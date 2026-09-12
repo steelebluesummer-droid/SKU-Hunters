@@ -2,7 +2,7 @@
  * SKU Hunters · IpLibrary（IP 资源库 · 扩充）
  *
  * 与「名创内部 · IP 资源库」（InsightBase）并列的独立页面：
- * 承载飞书 base_ip_partnerships 的 33 条名创 IP 合作情报。
+ * 承载飞书 base_ip_partnerships 的当前 35 条名创 IP 合作情报；无配置时展示后端 33 条快照。
  * 三级结构：分类 Tab → IP 卡片（状态筛选 + 搜索）→ 详情抽屉（图轮播 + 产品信息）。
  * 图片：飞书附件经后端 /ip-library/image 代理；seed 档无图自动降级色块；
  * 支持 public/assets/ip-library/{slug}/ 本地图后补生效。

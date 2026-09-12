@@ -179,7 +179,7 @@ Component tokens（组件：button/card/nav/chart/chat 的具体取值）
 | App 背景 | `--color-bg`（暖灰），内容面板 `--color-surface`（白） |
 | 任务卡状态色带 | 左侧 3px 竖条，进行中 `--purple-400`，归档 `#BBB`（配文字/图标第二编码） |
 | 机会卡选中态 | 2px `--color-action-primary` 边框 + 淡紫底 + 勾选图标（非仅颜色） |
-| 概念图 | 圆角 16、高 340px，占位态渐变底 + 图标（即梦接入后换真图） |
+| 概念图 | 圆角 16、高 340px；有概念图时显示即梦结果，未生成或失败时保留占位态 |
 | 色板（TrendGallery） | WGSN 式大色块：高 ≥120px，色名叙事（非 #hex） |
 | 证据角标 | 灰色圆形上标 `[1]`，hover 弹出来源 Popover |
 | 过程日志 | 折叠式顶部条 |
