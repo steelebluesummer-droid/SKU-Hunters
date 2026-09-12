@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
 
 # 启动即加载 backend/.env（LLM Key、即梦 AK/SK、飞书配置）——必须在 app.* 导入前
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -60,10 +63,31 @@ app.include_router(planning_router)
 # 小红书公开数据接入（第一阶段：本地导入 + 统计）：/api/v1/xhs...
 app.include_router(xhs_router)
 
+@app.on_event("startup")
+async def _startup_feishu_longconn() -> None:
+    """应用启动后在独立 daemon 线程拉起飞书长连接（群机器人闭环入站）。
+
+    fail-soft：长连接起不来不影响 HTTP/前端主服务，只记录告警。
+    """
+    try:
+        from feishu.longconn import start_feishu_longconn
+        started = start_feishu_longconn()
+        logger.info("飞书长连接启动状态: %s", "已拉起" if started else "未启用/缺凭证")
+    except Exception:  # noqa: BLE001
+        logger.exception("飞书长连接启动异常（不影响主服务）")
+
+
 @app.get("/health")
 async def health():
     from app.engine.strict_mode import mock_allowed, strict_real
-    return {"status": "ok", "service": "AI 新品企划工作室", "mock_allowed": mock_allowed(), "strict_real": strict_real()}
+    longconn = {}
+    try:
+        from feishu.longconn import status as longconn_status
+        longconn = longconn_status()
+    except Exception:  # noqa: BLE001
+        longconn = {"started": False}
+    return {"status": "ok", "service": "AI 新品企划工作室", "mock_allowed": mock_allowed(),
+            "strict_real": strict_real(), "feishu_longconn": longconn}
 
 
 # 生产模式：前端 build 产物由后端托管（npm run build 后一条 uvicorn 命令起全站）。

@@ -40,9 +40,20 @@ def _derive_price_from_band(price_band: str) -> float:
 
 
 def _concept_prompt_dynamic(opportunity: dict, brief: dict) -> str:
-    """动态企划卡即梦 prompt：机会卡标题 + 方向 + 关键词 → 视觉描述"""
+    """动态企划卡即梦 prompt：机会卡标题 + 方向 + 关键词 → 视觉描述
+
+    联名 IP 注入：优先取该方向资产适配锁定的 IP，回退到 brief.ip_strategy[0]，
+    让“和某 IP 联名”真正体现在概念图上；无指定 IP 时与原逻辑一致。
+    """
+    asset = opportunity.get("assetFit") or opportunity.get("asset_fit") or {}
+    ip_name = str(asset.get("ip", "") or "")
+    if not ip_name:
+        ip_strategy = brief.get("ip_strategy") or brief.get("ipStrategy") or []
+        if isinstance(ip_strategy, list) and ip_strategy:
+            ip_name = str(ip_strategy[0])
+    ip_clause = f"{ip_name}联名设计，" if ip_name else ""
     return (
-        f"产品概念渲染图，{opportunity.get('title', '')}，{opportunity.get('direction', '')}风格，"
+        f"产品概念渲染图，{ip_clause}{opportunity.get('title', '')}，{opportunity.get('direction', '')}风格，"
         f"关键词：{'、'.join(opportunity.get('keywords', []) or [])}，"
         f"名创优品风格，干净背景，柔光，高质感"
     )
@@ -290,9 +301,11 @@ def _build_product_proposal(plan: dict, opportunity: dict) -> dict:
 
     fields = _llm_proposal_fields(plan, opportunity, asset)
 
-    # 即梦图 prompt 绑定 Opportunity + AssetFit + 设计语言 + 颜色 + 材质
+    # 即梦图 prompt 绑定 联名IP + Opportunity + AssetFit + 设计语言 + 颜色 + 材质
+    ip_name = str(asset.get("ip", "") or "")
+    ip_clause = f"{ip_name}联名设计，" if ip_name else ""
     image_prompt = (
-        f"{opportunity.get('title', '')}，{asset.get('designLanguage', '')}风格，"
+        f"{ip_clause}{opportunity.get('title', '')}，{asset.get('designLanguage', '')}风格，"
         f"{asset.get('color', '')}，{asset.get('material', '')}，"
         f"{opportunity.get('scenario', '')}场景，产品设计渲染图，名创优品风格，柔光高质感"
     )

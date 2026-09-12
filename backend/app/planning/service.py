@@ -527,6 +527,38 @@ def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
 
 # ── ③ 机会生成 ─────────────────────────────────────────
 
+def _locked_ip_from_brief(brief: dict[str, Any]) -> str:
+    """取本次任务用户锁定的联名 IP（群闭环：入口已校验在资源库内）。"""
+    strategy = brief.get("ip_strategy") or brief.get("ipStrategy") or []
+    if isinstance(strategy, list) and strategy and str(strategy[0]).strip():
+        return str(strategy[0]).strip()
+    return ""
+
+
+def _lock_opportunity_ip(opps: list[dict[str, Any]], brief: dict[str, Any]) -> None:
+    """把每个机会方向的 assetFit.ip 统一锁定为当次 brief 指定的 IP（原地修改）。
+
+    品类级 insight_cache 可能复用历史增强结果（其 assetFit.ip 为空或属于别的 IP），
+    但当次联名 IP 永远以用户本次 brief 为准，不能由品类缓存决定，故在机会出口统一覆盖，
+    与 plan_card_builder 的 IP 兜底策略保持一致。
+    """
+    locked = _locked_ip_from_brief(brief)
+    if not locked:
+        return
+    for o in opps:
+        af = o.get("assetFit")
+        if not isinstance(af, dict):
+            af = {}
+            o["assetFit"] = af
+        if af.get("ip") != locked:
+            af["ip"] = locked
+        if not str(af.get("ipReason", "")).strip():
+            af["ipReason"] = (
+                f"{locked} 的形象风格、色系与情感调性同该方向的目标人群和使用场景高度契合，"
+                "可自然融入外观、图案与包装表达。"
+            )
+
+
 def get_opportunities(plan: dict[str, Any], advance: bool = False) -> list[dict[str, Any]]:
     """机会生成（只读）：洞察 → 3 张方向卡，经 Opportunity schema 校验
 
@@ -544,6 +576,7 @@ def get_opportunities(plan: dict[str, Any], advance: bool = False) -> list[dict[
     opps = _opportunities_from_bundle(category, bundle, brief)
     if not opps:
         opps = _fallback_opportunities(category, brief)
+    _lock_opportunity_ip(opps, brief)
     for o in opps:
         _ = Opportunity.model_validate(_snake_keys(o))
     plan["opportunities"] = opps
@@ -567,6 +600,7 @@ def generate_opportunities(plan: dict[str, Any]) -> list[dict[str, Any]]:
         opps = _opportunities_from_bundle(category, bundle, brief)
         if not opps:
             opps = _fallback_opportunities(category, brief)
+        _lock_opportunity_ip(opps, brief)
         for o in opps:
             _ = Opportunity.model_validate(_snake_keys(o))
         plan["opportunities"] = opps

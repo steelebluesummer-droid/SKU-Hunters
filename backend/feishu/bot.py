@@ -3,6 +3,8 @@
 """
 from typing import Any
 
+import json
+
 import requests
 
 from .auth import FeishuAuth
@@ -32,7 +34,8 @@ class FeishuBot:
             json={
                 "receive_id": chat_id,
                 "msg_type": "text",
-                "content": '{"text": "' + text + '"}',
+                # 用 json.dumps 序列化，避免文本里的换行/引号拼坏 JSON
+                "content": json.dumps({"text": text}, ensure_ascii=False),
             },
             timeout=_REQ_TIMEOUT,
         )

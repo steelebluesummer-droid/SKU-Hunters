@@ -113,10 +113,30 @@ def build_asset_fit(category: str, bundle: dict, brief: dict) -> list[dict[str, 
     ip_names = [ip.get("name", "") for ip in ip_pool]
     ip_name_keys = [normalize_ip_name(n) for n in ip_names]
 
+    # 用户指定 IP 锁定（群机器人闭环）：brief.ip_strategy[0] 命中候选池时，
+    # 全方向强制使用该 IP——既在 prompt 强约束，也在下方代码校验处直接锁定，
+    # 双保险防止 LLM 自由改选。未指定 / 指定 IP 不在库时保持原自由匹配逻辑（向后兼容）。
+    locked_idx = -1
+    locked_name = ""
+    ip_strategy = brief.get("ip_strategy") or brief.get("ipStrategy") or []
+    if isinstance(ip_strategy, list) and ip_strategy:
+        locked_key = normalize_ip_name(str(ip_strategy[0]))
+        if locked_key and locked_key in ip_name_keys:
+            locked_idx = ip_name_keys.index(locked_key)
+            locked_name = ip_names[locked_idx]
+
+    system_prompt = _LLM_SYSTEM_PROMPT
+    if locked_idx >= 0:
+        system_prompt += (
+            f"\n\n【本任务已由用户指定联名 IP：{locked_name}】"
+            f"所有 fits 的 ip 必须且只能原样填写「{locked_name}」，禁止选择其它任何 IP；"
+            "ipReason 围绕该 IP 与每个机会方向在人群/色系/叙事/场景上的契合点来写。"
+        )
+
     prompt = _serialize(bundle, category, merged_pool=ip_pool)
     data: dict | None = None
     for _ in range(2):  # 仅 JSON/契约失败重试一次；网络/超时已由 llm.complete 内部重试
-        raw = llm.complete(_LLM_SYSTEM_PROMPT, prompt, temperature=0.4, max_tokens=4000, node="asset_fit")
+        raw = llm.complete(system_prompt, prompt, temperature=0.4, max_tokens=4000, node="asset_fit")
         if not raw:
             break  # 网络/超时失败（llm.complete 已重试）→ 不在此叠加
         data = _parse_llm_json(raw)
@@ -139,6 +159,9 @@ def build_asset_fit(category: str, bundle: dict, brief: dict) -> list[dict[str, 
             ip_idx = ip_name_keys.index(key) if key in ip_name_keys else -1
         if ip and ip_idx < 0:
             ip = ""
+        # 用户指定 IP 锁定：无视 LLM 的选择，强制采用候选池中的指定 IP（其必在库内）
+        if locked_idx >= 0:
+            ip_idx = locked_idx
         fits.append({
             "opportunityId": oid,
             "ip": ip_names[ip_idx] if ip_idx >= 0 else "",

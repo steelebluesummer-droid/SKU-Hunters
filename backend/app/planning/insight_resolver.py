@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -20,6 +21,8 @@ from typing import Any
 
 from app.planning.repository import _snake_keys
 from app.schemas.planning import InsightBundle
+
+logger = logging.getLogger(__name__)
 
 
 class LLMGenerationError(Exception):
@@ -30,25 +33,31 @@ def _resolve_insight_bundle(category: str, brief: dict | None = None) -> dict[st
     """按品类取五看洞察：真实社媒证据优先；无采集数据走 LLM 生成
 
     Returns:
-        五看洞察 bundle（camelCase），顶层带 dataSource 标记（crawled | llm）
+        五看洞察 bundle（camelCase），顶层带 dataSource 标记（crawled | llm | feishu | fixture）
 
     Raises:
         LLMGenerationError: 无采集数据且 LLM 不可用/输出不合契约
     """
     brief = brief or {}
     if brief.get("mode") == "live":
-        # live 任务：只允许 feishu，失败显式报错；拒绝静默回退 fixture/crawled/llm
+        # live 取数优先级：①飞书 Base 实时明细 → ②本地真实社媒采集(crawled) → ③LLM 现场生成。
+        # 三级都如实标注 dataSource：Base 未覆盖的品类（如保温杯）回退本地真实采集文件，
+        # 本地也没有采集（全新品类）时才用 LLM 估计——保证群里提任意品类都能跑，且不把估计当真实。
         provider = os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower()
-        if provider != "feishu":
-            raise LLMGenerationError(
-                f"live 任务「{category}」要求 feishu 数据源，但 BASE_PROVIDER_MODE={provider}，拒绝回退 fixture/crawled/llm"
-            )
-        from app.planning.live_insights import build_live_insight_bundle
+        if provider == "feishu":
+            from app.planning.live_insights import build_live_insight_bundle
 
-        try:
-            return build_live_insight_bundle(category, brief)
-        except Exception as exc:
-            raise LLMGenerationError(f"品类「{category}」的飞书实时洞察不可用：{exc}") from exc
+            try:
+                return build_live_insight_bundle(category, brief)
+            except Exception as feishu_exc:  # noqa: BLE001 — Base 无该品类，回退真实采集/LLM，不静默
+                logger.warning(
+                    "品类「%s」飞书 Base 无实时数据（%s），回退本地真实社媒采集，缺失再 LLM",
+                    category,
+                    feishu_exc,
+                )
+                return _crawled_or_llm_bundle(category, brief)
+        # 未配置 feishu 数据源：本地真实采集优先，缺失再 LLM（来源如实标注）
+        return _crawled_or_llm_bundle(category, brief)
 
     if brief.get("mode") == "fixture":
         # fixture 任务：显式返回演示数据（冻结 fixtures 五看洞察），标 dataSource=fixture
@@ -74,8 +83,14 @@ def _resolve_insight_bundle(category: str, brief: dict | None = None) -> dict[st
             "dataSource": "fixture",
         }
 
+    return _crawled_or_llm_bundle(category, brief)
+
+
+def _crawled_or_llm_bundle(category: str, brief: dict) -> dict[str, Any]:
+    """本地真实社媒采集(crawled)优先；本地也无该品类采集时，才 LLM 现场生成（来源如实标注）。"""
     try:
         from app.insights.loaders.social_evidence import SocialEvidenceLoader
+
         bundle = SocialEvidenceLoader().get_insight_bundle(category)
         # heatCurve 只注入真实快照且限快照所属品类；不匹配留 None（HeatCurve | None 契约允许）
         bundle["trendRadar"]["heatCurve"] = _load_heat_curve(category)
