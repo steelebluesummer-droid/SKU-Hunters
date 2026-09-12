@@ -353,6 +353,7 @@ def test_revise_apply_applies_draft_and_saves_history(monkeypatch):
     plan["plan_card"] = {"name": "测试企划卡", "concept": "测试概念",
                          "pricing": {"price": "69 元", "reason": ""}, "features": ["原功能"],
                          "keywords": [], "validation": [], "schedule": []}
+    plan["report_doc"] = {"document_id": "doc-old", "url": "https://example.com/old"}
     plan["status"] = "plan_card_ready"
     pipeline.revise_preview(plan, "价格压到55元")
     result = pipeline.revise_apply(plan)
@@ -360,6 +361,7 @@ def test_revise_apply_applies_draft_and_saves_history(monkeypatch):
     assert result["history_count"] == 1
     assert plan["plan_card"]["pricing"]["price"] == "55 元"
     assert plan["revise_draft"] is None          # 应用后清除草案
+    assert plan["report_doc"] is None            # 改稿后旧云文档失效
     assert len(plan["plan_card_history"]) == 1   # 保存旧版本
     assert plan["plan_card_history"][0]["version"] == 1
     assert plan["plan_card_history"][0]["card"]["pricing"]["price"] == "69 元"
@@ -454,6 +456,7 @@ def test_rechoose_opportunity_returns_to_opportunities_and_clears_products():
     plan["selected_opportunity"] = "opp-1"
     plan["plan_card"] = {"name": "测试企划卡"}
     plan["product_proposal"] = {"concept": "测试提案"}
+    plan["report_doc"] = {"document_id": "doc-old", "url": "https://example.com/old"}
     plan["revise_logs"] = [{"message": "改一下", "reply": "好的"}]
 
     result = pipeline.rechoose_opportunity(plan)
@@ -462,14 +465,48 @@ def test_rechoose_opportunity_returns_to_opportunities_and_clears_products():
     assert plan["plan_card"] is None
     assert plan["product_proposal"] is None
     assert plan["revise_logs"] == []
+    assert plan["report_doc"] is None
     # 回退到 opportunities_ready 后即可再次 generate-plan-card，不再触发状态机保护
     assert plan["status"] == "opportunities_ready"
+
+
+def test_attach_report_doc_rejects_stale_plan_card():
+    plan = _make_plan()
+    plan["status"] = "plan_card_ready"
+    plan["plan_card"] = {"name": "当前企划卡", "version": 2}
+    old_card = {"name": "旧企划卡", "version": 1}
+    report = {"document_id": "doc-1", "url": "https://example.com/doc-1", "title": "企划案"}
+
+    assert pipeline.attach_report_doc(plan, report, old_card) is None
+    assert plan.get("report_doc") is None
+
+    attached = pipeline.attach_report_doc(plan, report, dict(plan["plan_card"]))
+    assert attached is plan
+    assert plan["report_doc"]["document_id"] == "doc-1"
 
 def test_rechoose_opportunity_rejects_when_not_plan_card_ready():
     plan = _make_plan()
     plan["status"] = "opportunities_ready"  # 尚未生成企划卡
     with pytest.raises(StateTransitionError):
         pipeline.rechoose_opportunity(plan)
+
+
+def test_concept_prompt_distinguishes_ip_tiers():
+    own = pipeline._concept_prompt_dynamic(
+        {"title": "治愈风扇", "direction": "轻盈"},
+        {"ip_strategy": ["YOYO"]},
+    )
+    external = pipeline._concept_prompt_dynamic(
+        {"title": "治愈风扇", "direction": "轻盈"},
+        {"ip_strategy": ["三丽鸥"]},
+    )
+    original = pipeline._concept_prompt_dynamic(
+        {"title": "治愈风扇", "direction": "轻盈"},
+        {"ip_strategy": []},
+    )
+    assert "YOYO自有IP设计" in own
+    assert "三丽鸥联名设计" in external
+    assert "联名设计" not in original
 
 # ── 状态持久化 ───────────────────────────────────────────
 

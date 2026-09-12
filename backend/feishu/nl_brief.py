@@ -294,7 +294,7 @@ def parse_brief_text(text: str) -> dict:
             parsed = _parse_llm_json(raw)
             if isinstance(parsed, dict):
                 data = parsed
-    except Exception:  # noqa: BLE001 — 解析失败必须降级到规则，不阻塞表单流程
+    except Exception:
         logger.exception("NL 需求解析 LLM 异常，走规则兜底")
         data = None
 

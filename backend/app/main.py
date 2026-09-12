@@ -73,7 +73,7 @@ async def _startup_feishu_longconn() -> None:
         from feishu.longconn import start_feishu_longconn
         started = start_feishu_longconn()
         logger.info("飞书长连接启动状态: %s", "已拉起" if started else "未启用/缺凭证")
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("飞书长连接启动异常（不影响主服务）")
 
 

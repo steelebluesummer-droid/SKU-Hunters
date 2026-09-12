@@ -88,6 +88,8 @@ def _save_state() -> None:
                 # 异步后台执行：阶段进度与失败摘要（同步创建的旧任务无此字段）
                 "stage": p.get("stage"),
                 "error_summary": p.get("error_summary"),
+                # 飞书在线云文档（工作台/群共用生成器；重复生成以最新覆盖）
+                "report_doc": p.get("report_doc"),
             }
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)

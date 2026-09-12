@@ -16,6 +16,7 @@ from typing import Any
 
 from app.planning.cost_rules import cost_check
 from app.planning.insight_resolver import LLMGenerationError, _parse_llm_json
+from app.planning.ip_library import is_own_ip_name, normalize_ip_name
 from app.planning.repository import _snake_keys, localize_concept_image
 from app.schemas.planning import PlanCard, ProductProposal
 from app.services import jimeng
@@ -27,6 +28,17 @@ def _find_opportunity(plan: dict, opportunity_id: str) -> dict | None:
         if o.get("id") == opportunity_id:
             return o
     return None
+
+
+def _ip_prompt_clause(ip_name: Any) -> str:
+    """按 IP 归属生成概念图提示词，区分原创、自有 IP 与外部联名。"""
+    name = str(ip_name or "").strip()
+    normalized = normalize_ip_name(name).replace(" ", "")
+    if not name or normalized in {"无外部联名", "不带ip"}:
+        return ""
+    if is_own_ip_name(name):
+        return f"{name}自有IP设计，"
+    return f"{name}联名设计，"
 
 
 def _derive_price_from_band(price_band: str) -> float:
@@ -42,16 +54,16 @@ def _derive_price_from_band(price_band: str) -> float:
 def _concept_prompt_dynamic(opportunity: dict, brief: dict) -> str:
     """动态企划卡即梦 prompt：机会卡标题 + 方向 + 关键词 → 视觉描述
 
-    联名 IP 注入：优先取该方向资产适配锁定的 IP，回退到 brief.ip_strategy[0]，
-    让“和某 IP 联名”真正体现在概念图上；无指定 IP 时与原逻辑一致。
+    IP 注入：优先取 brief 的规范选择；未提供选择时再取该方向资产适配锁定的 IP，
+    并按自有 IP / 外部联名 / 无外部联名生成不同提示词；无指定 IP 时保持原创设计。
     """
-    asset = opportunity.get("assetFit") or opportunity.get("asset_fit") or {}
-    ip_name = str(asset.get("ip", "") or "")
-    if not ip_name:
-        ip_strategy = brief.get("ip_strategy") or brief.get("ipStrategy") or []
-        if isinstance(ip_strategy, list) and ip_strategy:
-            ip_name = str(ip_strategy[0])
-    ip_clause = f"{ip_name}联名设计，" if ip_name else ""
+    ip_strategy = brief.get("ip_strategy") if "ip_strategy" in brief else brief.get("ipStrategy")
+    if isinstance(ip_strategy, list):
+        ip_name = str(ip_strategy[0]) if ip_strategy else ""
+    else:
+        asset = opportunity.get("assetFit") or opportunity.get("asset_fit") or {}
+        ip_name = str(asset.get("ip", "") or "")
+    ip_clause = _ip_prompt_clause(ip_name)
     return (
         f"产品概念渲染图，{ip_clause}{opportunity.get('title', '')}，{opportunity.get('direction', '')}风格，"
         f"关键词：{'、'.join(opportunity.get('keywords', []) or [])}，"
@@ -301,9 +313,13 @@ def _build_product_proposal(plan: dict, opportunity: dict) -> dict:
 
     fields = _llm_proposal_fields(plan, opportunity, asset)
 
-    # 即梦图 prompt 绑定 联名IP + Opportunity + AssetFit + 设计语言 + 颜色 + 材质
-    ip_name = str(asset.get("ip", "") or "")
-    ip_clause = f"{ip_name}联名设计，" if ip_name else ""
+    # 即梦图 prompt 绑定 IP 归属 + Opportunity + AssetFit + 设计语言 + 颜色 + 材质
+    ip_strategy = brief.get("ip_strategy") if "ip_strategy" in brief else brief.get("ipStrategy")
+    if isinstance(ip_strategy, list):
+        ip_name = str(ip_strategy[0]) if ip_strategy else ""
+    else:
+        ip_name = str(asset.get("ip", "") or "")
+    ip_clause = _ip_prompt_clause(ip_name)
     image_prompt = (
         f"{ip_clause}{opportunity.get('title', '')}，{asset.get('designLanguage', '')}风格，"
         f"{asset.get('color', '')}，{asset.get('material', '')}，"

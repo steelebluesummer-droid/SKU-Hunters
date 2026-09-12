@@ -40,6 +40,7 @@ def _make_legacy_plan(pid="p_legacy"):
         "created_at": "2026-08-16T00:00:00+00:00",
         "insights": {
             "trendRadar": {"processLog": []},
+            "dataSource": "feishu",
             "dataContext": {"snapshot_id": "snap1", "summary_snapshot_id": "s1", "competitor_snapshot_id": "c1"},
         },
     }

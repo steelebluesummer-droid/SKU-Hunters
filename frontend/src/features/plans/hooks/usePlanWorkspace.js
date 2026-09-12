@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   archivePlan,
+  buildPlanReport,
   generateInsights,
   generateOpportunities,
   generatePlanCard,
@@ -281,6 +282,23 @@ export default function usePlanWorkspace(planId) {
     }
   }, [planId]);
 
+  // ── 生成飞书在线云文档（约 2-3 分钟，返回链接，不改状态机）────────
+  const runBuildReport = useCallback(async () => {
+    setPendingAction('buildReport');
+    setError(null);
+    try {
+      const data = await buildPlanReport(planId);
+      const reportDoc = data?.report_doc;
+      setPlan((p) => (p ? { ...p, report_doc: reportDoc } : p));
+      return reportDoc;
+    } catch (e) {
+      setError(e);
+      throw e;
+    } finally {
+      setPendingAction(null);
+    }
+  }, [planId]);
+
   const actions = useMemo(() => ({
     generateInsights: runGenerateInsights,
     generateOpportunities: runGenerateOpportunities,
@@ -292,8 +310,9 @@ export default function usePlanWorkspace(planId) {
     reviseCancel: runReviseCancel,
     review: runReview,
     archive: runArchive,
+    buildReport: runBuildReport,
     reload: loadPlan,
-  }), [runGenerateInsights, runGenerateOpportunities, runGeneratePlanCard, runRechooseOpportunity, runRevise, runRevisePreview, runReviseApply, runReviseCancel, runReview, runArchive, loadPlan]);
+  }), [runGenerateInsights, runGenerateOpportunities, runGeneratePlanCard, runRechooseOpportunity, runRevise, runRevisePreview, runReviseApply, runReviseCancel, runReview, runArchive, runBuildReport, loadPlan]);
 
   return {
     plan,

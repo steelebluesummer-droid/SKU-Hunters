@@ -76,6 +76,12 @@ export async function archivePlan(planId) {
   return request(`/plans/${planId}/actions/archive`, { method: 'POST', body: {} });
 }
 
+/** 生成飞书在线完整云文档（五看+企划案+概念图，约 2-3 分钟）→ 返回 { report_doc:{url,title,document_id} }
+ *  纯 fetch 无客户端超时，会长时间等待直到后端生成完成。 */
+export async function buildPlanReport(planId) {
+  return request(`/plans/${planId}/actions/build-report`, { method: 'POST', body: {} });
+}
+
 /** 重新选择机会方向（plan_card_ready → opportunities_ready，清除已选方向与企划产物） */
 export async function rechooseOpportunity(planId) {
   return request(`/plans/${planId}/actions/rechoose-opportunity`, { method: 'POST', body: {} });

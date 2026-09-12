@@ -39,6 +39,7 @@ def isolated(monkeypatch, tmp_path):
 def _fake_resolve(category, brief):
     return {
         "trendRadar": {"processLog": []},
+        "dataSource": "feishu",
         "dataContext": {"snapshot_id": "d1", "summary_snapshot_id": "s1", "competitor_snapshot_id": "c1"},
     }
 

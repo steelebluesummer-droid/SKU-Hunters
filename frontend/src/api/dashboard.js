@@ -25,7 +25,7 @@ export async function getIpResource() {
   return request('/ip-resource');
 }
 
-/** IP 资源库（扩充）：飞书 base_ip_partnerships 当前 35 条合作情报；无配置时后端使用 33 条快照 */
+/** IP 资源库（扩充）：飞书 base_ip_partnerships 当前 35 条合作情报；无配置时后端使用 39 条快照 */
 export async function getIpLibrary() {
   return request('/ip-library');
 }

@@ -1,16 +1,14 @@
 """IP 资源库（扩充）模块测试
 
 覆盖：
-1. seed 完整性：33 条、字段结构、id 唯一。
+1. seed 完整性：39 条、字段结构、id 唯一。
 2. 展示字段映射：potential 分档、ipType 预设（styleTags/audienceGroup/matrix）。
 3. 别名归一：三丽鸥/海贼王/小黄人/宝可梦/Chiikawa 等别名表。
-4. merged_candidate_pool：策展 12 + 扩充 33 并入，同名去重保留并集。
+4. merged_candidate_pool：策展 12 + 扩充 39 并入，同名去重保留并集。
 5. get_ip_library：非 feishu 模式下走 seed 档（不受环境配置影响）。
 """
 
 from __future__ import annotations
-
-import os
 
 from app.planning import ip_library
 
@@ -22,10 +20,10 @@ def _seed_only(monkeypatch):
     ip_library.reset_library_cache()
 
 
-def test_seed_completeness_33():
-    assert len(ip_library.IP_LIBRARY_SEED) == 33
+def test_seed_completeness_39():
+    assert len(ip_library.IP_LIBRARY_SEED) == 39
     ids = [ip["ipId"] for ip in ip_library.IP_LIBRARY_SEED]
-    assert len(set(ids)) == 33
+    assert len(set(ids)) == 39
 
 
 def test_seed_field_contract():
@@ -78,7 +76,7 @@ def test_alias_normalize():
 def test_get_ip_library_seed_mode(monkeypatch):
     _seed_only(monkeypatch)
     ips = ip_library.get_ip_library()
-    assert len(ips) == 33
+    assert len(ips) == 39
     # 展示字段全部补齐
     assert all("potential" in ip and "matrix" in ip and "styleTags" in ip for ip in ips)
     ip_library.reset_library_cache()
@@ -88,11 +86,11 @@ def test_merged_candidate_pool_dedup_and_union(monkeypatch):
     _seed_only(monkeypatch)
     curated = [{"name": "三丽鸥", "status": "合作中", "heat": "9", "fit": ["风格：可爱"]}]
     pool = ip_library.merged_candidate_pool(curated)
-    # 策展 12 + 扩充 33，同名（含别名）去重后无重复
+    # 策展 12 + 扩充 39，同名（含别名）去重后无重复
     keys = [ip_library.normalize_ip_name(p["name"]) for p in pool]
     assert len(keys) == len(set(keys))
     # 三丽鸥（curated 与扩充库 ip-003 同名）保留并集：扩充侧授权信息并入
-    sanrio = [p for p in pool if ip_library.normalize_ip_name(p["name"]) == "三丽鸥"][0]
+    sanrio = next(p for p in pool if ip_library.normalize_ip_name(p["name"]) == "三丽鸥")
     assert sanrio.get("licensor") == "三丽鸥公司"
     assert sanrio.get("priceBand") == "¥5.98-¥474"
     # 扩充库新 IP（如宝可梦）进入池
@@ -103,7 +101,7 @@ def test_merged_candidate_pool_dedup_and_union(monkeypatch):
 def test_merged_candidate_pool_empty_input(monkeypatch):
     _seed_only(monkeypatch)
     pool = ip_library.merged_candidate_pool([])
-    assert len(pool) >= 35  # 12 策展 + 33 扩充 - 同名/别名去重（约 10 个重叠）
+    assert len(pool) >= 35  # 12 策展 + 39 扩充 - 同名/别名去重
     ip_library.reset_library_cache()
 
 
@@ -113,5 +111,5 @@ def test_feishu_missing_config_falls_back_to_seed(monkeypatch):
     monkeypatch.delenv("FEISHU_IP_PARTNERSHIP_TABLE_ID", raising=False)
     ip_library.reset_library_cache()
     ips = ip_library.get_ip_library()
-    assert len(ips) == 33
+    assert len(ips) == 39
     ip_library.reset_library_cache()

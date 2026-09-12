@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, Row, Col, Tag, Timeline, Input, Button, List, Spin, Space, Alert } from 'antd';
 import { SendOutlined, LoadingOutlined, CheckCircleFilled } from '@ant-design/icons';
 import ProcessLog from '../../shared/components/ProcessLog';
+import { isOwnIp, NO_EXTERNAL_IP, NO_IP_OPTION } from '../../shared/utils/ipOptions';
 
 const GRADIENTS = {
   'ip-collect': 'var(--grad-ip-collect)',
@@ -58,7 +59,7 @@ function ModuleCard({ title, subtitle, judge, children }) {
 }
 
 // 新品企划案（名创新品立项提案页）：Hero 决策信息 + 五步决策链 + 六模块
-function ProductProposalView({ proposal = {}, opportunity }) {
+function ProductProposalView({ proposal = {}, opportunity, brief }) {
   const emoji = opportunity?.emoji || '✨';
   const bg = proposal.background || {};
   const pos = proposal.positioning || {};
@@ -77,7 +78,14 @@ function ProductProposalView({ proposal = {}, opportunity }) {
     .filter(Boolean)
     .flatMap((s) => s.split(/[，,、；;]/).map((x) => x.trim()))
     .filter((s) => s && s.length <= 8);
-  const keywords = [...new Set(['IP联名', ...keywordSegments])].slice(0, 5);
+  const ipStrategy = brief?.ipStrategy ?? brief?.ip_strategy;
+  const ipName = Array.isArray(ipStrategy)
+    ? String(ipStrategy[0] || '').trim()
+    : String(opportunity?.assetFit?.ip || '').trim();
+  const ipKeyword = ipName && ipName !== NO_EXTERNAL_IP && ipName !== NO_IP_OPTION
+    ? (isOwnIp(ipName) ? '自有IP' : 'IP联名')
+    : '';
+  const keywords = [...new Set([ipKeyword, ...keywordSegments].filter(Boolean))].slice(0, 5);
 
   // 五步决策链：市场机会 → 用户洞察 → 商品方向 → 设计验证 → 商业评估
   const steps = [
@@ -352,7 +360,7 @@ export default function PlanCard({ card, proposal, opportunity, brief, status, i
       )}
 
       <div style={{ opacity: !card.processLog || logDone ? 1 : 0, transition: 'opacity 0.5s', pointerEvents: !card.processLog || logDone ? 'auto' : 'none' }}>
-        {proposal ? <ProductProposalView proposal={proposal} opportunity={opportunity} /> : <Card>
+        {proposal ? <ProductProposalView proposal={proposal} opportunity={opportunity} brief={brief} /> : <Card>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 4 }}>
             {brief?.theme} · {brief?.category} · 价格带 {priceRange[0]}-{priceRange[1]} 元 · 成本 ≤{costLimit} 元
           </div>

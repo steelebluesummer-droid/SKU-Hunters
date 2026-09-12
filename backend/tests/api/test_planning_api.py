@@ -137,6 +137,28 @@ def test_plan_card_ok_with_cost_check_and_process_log(client):
     # 状态推进
     assert client.get(f"/api/v1/plans/{plan_id}").json()["status"] == "plan_card_ready"
 
+
+def test_build_report_persists_link_and_returns_current_plan(monkeypatch, client):
+    """云文档链接必须返回并持久化，刷新详情仍可打开同一产物。"""
+    plan_id = _create(client)
+    _advance_to_plan_card(client, plan_id)
+    monkeypatch.setattr(
+        "feishu.doc_report.build_plan_report",
+        lambda plan: {
+            "document_id": "doc-test",
+            "url": "https://example.com/doc-test",
+            "title": "测试企划案",
+        },
+    )
+
+    report = client.post(f"/api/v1/plans/{plan_id}/actions/build-report")
+    assert report.status_code == 200, report.text
+    assert report.json()["report_doc"]["document_id"] == "doc-test"
+
+    detail = client.get(f"/api/v1/plans/{plan_id}")
+    assert detail.status_code == 200
+    assert detail.json()["report_doc"]["url"] == "https://example.com/doc-test"
+
 # ── 改稿与归档的状态机约束 ────────────────────────────────
 
 def test_revise_422_without_message(client):

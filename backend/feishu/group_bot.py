@@ -31,9 +31,8 @@ from typing import Any
 from app.planning import pipeline
 from app.planning.insight_resolver import LLMGenerationError
 from app.planning.repository import _snake_keys
-from app.schemas.planning import PlanBrief
 from app.planning.service import StateTransitionError
-
+from app.schemas.planning import PlanBrief
 from feishu import cards_v2, nl_brief
 from feishu.auth import FeishuAuth
 from feishu.bot import FeishuBot
@@ -74,7 +73,7 @@ class GroupBot:
     def _send_text(self, chat_id: str, text: str) -> None:
         try:
             self.bot.send_text(chat_id, text)
-        except Exception:  # noqa: BLE001 — 出站失败不拖垮后台线程
+        except Exception:
             logger.exception("群消息发送失败 chat=%s", chat_id)
 
     def _send_card(self, chat_id: str, card: dict[str, Any]) -> None:
@@ -84,7 +83,7 @@ class GroupBot:
             if code not in (0, None):  # HTTP 200 但卡片被飞书拒收（如非法标签）必须暴露，不能静默当成功
                 logger.error("群卡片被飞书拒收 chat=%s code=%s msg=%s",
                              chat_id, code, str(resp.get("msg", ""))[:300])
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("群卡片发送失败 chat=%s", chat_id)
 
     def _is_running(self, key: tuple[str, str]) -> str | None:
@@ -140,7 +139,7 @@ class GroupBot:
 
         try:
             parsed = nl_brief.parse_brief_text(text)
-        except Exception:  # noqa: BLE001 — 解析器自身已降级，这里兜底不阻塞
+        except Exception:
             logger.exception("NL 需求解析异常，按缺字段处理")
             parsed = {"category": "", "ip_raw": "", "ip_match": None, "audience": "", "price_range": None}
         logger.info("需求解析完成 text=%r parsed=%s", text, parsed)
@@ -301,7 +300,7 @@ class GroupBot:
             from feishu.research_pool import submit_research_request
             try:
                 created, _rid = submit_research_request(category)  # 同步写表（快），失败不换卡可重试
-            except Exception as exc:  # noqa: BLE001 — 权限/接口异常：提示并保留原卡允许重试
+            except Exception as exc:
                 logger.exception("登记调研需求失败 plan_id=%s", plan_id)
                 return {"type": "error", "content": f"登记调研需求失败：{exc}，请稍后重试"}
             self._clear_running(key)
@@ -341,7 +340,7 @@ class GroupBot:
         )
         self._submit(
             self._run_insights, chat_id, key,
-            dict(category=category, ip_name=ip_name, audience=audience, price_range=price_range),
+            {"category": category, "ip_name": ip_name, "audience": audience, "price_range": price_range},
         )
 
     def _run_insights(self, chat_id: str, key: tuple[str, str], draft: dict[str, Any]) -> None:
@@ -385,10 +384,10 @@ class GroupBot:
         except StateTransitionError as e:
             logger.exception("状态机异常 plan_id=%s", plan_id, exc_info=e)
             self._fail(chat_id, key, plan_id, f"流程状态异常（{e.action or '状态机'}），请重新发起")
-        except LLMGenerationError as e:
-            logger.exception("LLM 生成失败 plan_id=%s detail=%s", plan_id, getattr(e, "args", None), exc_info=e)
+        except LLMGenerationError:
+            logger.exception("LLM 生成失败 plan_id=%s", plan_id)
             self._fail(chat_id, key, plan_id, "AI 内容生成暂时不可用（LLM 服务异常），请稍后重试")
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("群闭环洞察阶段异常 plan_id=%s", plan_id)
             self._fail(chat_id, key, plan_id, "洞察/机会生成失败，请检查 LLM/数据源后重试")
 
@@ -430,7 +429,7 @@ class GroupBot:
             self._fail(chat_id, key, plan_id, f"流程状态异常（{e.action or '状态机'}），请回到方向选择重试")
         except LLMGenerationError:
             self._fail(chat_id, key, plan_id, "企划卡 AI 生成暂时不可用，请稍后重试")
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("群闭环企划卡/在线报告阶段异常 plan_id=%s", plan_id)
             self._fail(chat_id, key, plan_id, "企划卡或在线报告生成失败，请稍后重试")
 
@@ -462,7 +461,7 @@ class GroupBot:
             logger.info("确认归档闭环完成 plan_id=%s", plan_id)
         except StateTransitionError as e:
             self._fail(chat_id, key, plan_id, f"流程状态异常（{e.action or '状态机'}），请刷新后重试")
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("群闭环确认归档阶段异常 plan_id=%s", plan_id)
             self._fail(chat_id, key, plan_id, "归档失败，请稍后重试")
 
@@ -471,7 +470,7 @@ class GroupBot:
         try:
             from feishu.bitable_sync import sync_plan_to_bitable
             sync_plan_to_bitable(plan)
-        except Exception:  # noqa: BLE001 — 多维表同步不影响归档与群通知
+        except Exception:
             logger.exception("归档同步多维表失败（不影响归档）plan_id=%s", plan.get("plan_id"))
 
     def _fail(self, chat_id: str, key: tuple[str, str], plan_id: str, message: str) -> None:

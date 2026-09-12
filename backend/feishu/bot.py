@@ -1,9 +1,8 @@
 """
 飞书消息发送
 """
-from typing import Any
-
 import json
+from typing import Any
 
 import requests
 

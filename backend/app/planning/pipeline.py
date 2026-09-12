@@ -80,6 +80,7 @@ from app.planning.repository import (  # noqa: F401
 from app.planning.service import (  # noqa: F401
     StateTransitionError,
     archive_plan,
+    attach_report_doc,
     generate_insights,
     generate_opportunities,
     generate_plan_card,

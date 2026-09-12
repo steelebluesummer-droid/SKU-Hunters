@@ -11,7 +11,7 @@
 
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Alert, Steps, Card, Descriptions, Tag, Button, message, Spin } from 'antd';
+import { Alert, Steps, Card, Descriptions, Tag, Button, Modal, message, Spin } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 
 // 洞察驾驶舱含 ECharts，属实测重模块，按已批准方案做流程内二级懒加载
@@ -61,6 +61,8 @@ export default function TaskFlow() {
   }, [ws.plan?.plan_id, ws.plan?.status, ws.plan?.selected_opportunity, ws.plan?.stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isArchived = ws.status === 'archived';
+  const reportDoc = ws.plan?.report_doc;
+  const reportBuilding = ws.pendingAction === 'buildReport';
   // 异步后台执行中（stage 存在且未到终态）：展示进行中提示，隐藏手动触发按钮
   const stageRunning = !!ws.stage && !['done', 'failed'].includes(ws.stage) && ws.status !== 'failed';
   // 最大可访问 step：未解锁步骤不可跳转（archived 只读，仍可回看 0-3）
@@ -126,6 +128,38 @@ export default function TaskFlow() {
       message.error(`归档失败：${e?.message}`);
     } finally {
       setArchiving(false);
+    }
+  };
+
+  // ── 生成飞书在线云文档（与飞书群同一份产物，生成后新窗口打开）──
+  const onBuildReport = async () => {
+    try {
+      message.loading({ content: '正在生成飞书云文档（约 2-3 分钟），请勿关闭页面…', key: 'buildReport', duration: 0 });
+      const doc = await ws.actions.buildReport();
+      message.destroy('buildReport');
+      if (doc?.url) {
+        // 生成耗时较长，用户手势可能已过期导致浏览器拦截自动弹窗，拦截时用 Modal 给可点链接兜底
+        const win = window.open(doc.url, '_blank', 'noopener,noreferrer');
+        if (win) {
+          message.success('云文档已生成，正在新窗口打开');
+        } else {
+          Modal.success({
+            title: '云文档已生成',
+            okText: '我知道了',
+            content: (
+              <span>
+                浏览器拦截了自动弹窗，请
+                <a href={doc.url} target="_blank" rel="noreferrer">点此在新窗口打开云文档</a>。
+              </span>
+            ),
+          });
+        }
+      } else {
+        message.warning('文档已生成但未返回链接，请稍后重试');
+      }
+    } catch (e) {
+      message.destroy('buildReport');
+      message.error(`云文档生成失败：${e?.message || '请稍后重试'}`);
     }
   };
 
@@ -367,12 +401,20 @@ export default function TaskFlow() {
             {isArchived ? (
               <>
                 <Tag>已归档 · 只读复盘，不可再改稿</Tag>
+                {reportDoc?.url && <Button href={reportDoc.url} target="_blank" rel="noreferrer">打开云文档</Button>}
                 <Button onClick={() => nav('/')}>返回任务中心</Button>
               </>
             ) : (
               <>
-                <Button onClick={onRechooseOpportunity}>返回换方向</Button>
-                <Button type="primary" loading={archiving} onClick={onArchive}>归档企划案</Button>
+                <Button disabled={reportBuilding || archiving} onClick={onRechooseOpportunity}>返回换方向</Button>
+                <Button
+                  loading={reportBuilding}
+                  onClick={onBuildReport}
+                >
+                  生成云文档
+                </Button>
+                {reportDoc?.url && <Button href={reportDoc.url} target="_blank" rel="noreferrer">打开云文档</Button>}
+                <Button disabled={reportBuilding} type="primary" loading={archiving} onClick={onArchive}>归档企划案</Button>
               </>
             )}
           </div>

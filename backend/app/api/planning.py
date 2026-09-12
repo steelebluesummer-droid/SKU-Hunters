@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -224,6 +225,7 @@ async def get_plan(plan_id: str):
         "error_summary": plan.get("error_summary") or "",
         "plan_card": plan_card,  # 已有企划卡（归档后回看用）
         "product_proposal": product_proposal,  # 新品企划案（六模块）
+        "report_doc": plan.get("report_doc"),  # 飞书在线完整企划文档链接
         "created_at": plan["created_at"],
     }
 
@@ -375,6 +377,34 @@ async def action_archive(plan_id: str, background_tasks: BackgroundTasks):
     return {"plan_id": plan_id, "status": plan["status"], "archived_at": plan["archived_at"]}
 
 
+@router.post("/plans/{plan_id}/actions/build-report")
+async def action_build_report(plan_id: str):
+    """生成飞书在线完整云文档（五看驾驶舱+企划案+概念图）。
+
+    工作台与飞书群共用同一生成器 feishu.doc_report.build_plan_report，保证两端最终产物一致。
+    耗时约 2-3 分钟（装块+传概念图），用 to_thread 不阻塞事件循环；返回文档链接由前端新窗口打开。
+    """
+    plan = _get_plan_or_404(plan_id)
+    if plan.get("status") not in ("plan_card_ready", "archived") or not plan.get("plan_card"):
+        raise HTTPException(409, detail={"error": {
+            "code": "PLAN_CARD_NOT_READY",
+            "message": "企划卡尚未就绪，无法生成云文档，请先生成企划卡"}})
+    expected_plan_card = copy.deepcopy(plan["plan_card"])
+    report_plan = copy.deepcopy(plan)
+    from feishu.doc_report import build_plan_report
+    report = await asyncio.to_thread(build_plan_report, report_plan)
+    if not report or not report.get("url"):
+        raise HTTPException(502, detail={"error": {
+            "code": "REPORT_BUILD_FAILED",
+            "message": "云文档生成失败（飞书凭证缺失或接口异常），请稍后重试"}})
+    attached = await asyncio.to_thread(pipeline.attach_report_doc, plan, report, expected_plan_card)
+    if attached is None:
+        raise HTTPException(409, detail={"error": {
+            "code": "PLAN_CHANGED",
+            "message": "企划卡在云文档生成期间已发生变化，未挂载过期文档，请重新生成"}})
+    return {"plan_id": plan_id, "status": attached["status"], "report_doc": attached["report_doc"]}
+
+
 @router.post("/plans/{plan_id}/plan-card")
 async def generate_plan_card(plan_id: str, payload: dict):
     plan = _get_plan_or_404(plan_id)
@@ -490,7 +520,7 @@ async def review_plan(plan_id: str, payload: dict):
 
 @router.get("/ip-library")
 async def get_ip_library():
-    """IP 资源库（扩充）：飞书 base_ip_partnerships 当前 35 条；无凭证时使用 33 条 seed 快照"""
+    """IP 资源库（扩充）：飞书 base_ip_partnerships 当前 35 条；无凭证时使用 39 条 seed 快照"""
     return {
         "ips": ip_library.get_ip_library(),
         "typeFilters": ip_library.TYPE_FILTERS,

@@ -103,7 +103,7 @@ def apply_display_fields(record: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-# ── seed 数据（飞书 base_ip_partnerships 快照 2026-09-04，33 条）──────────────
+# ── seed 数据（飞书 base_ip_partnerships 快照 2026-09-04，39 条）──────────────
 
 IP_LIBRARY_SEED: list[dict[str, Any]] = [
     {"ipId": "ip-001", "slug": "迪士尼", "name": "迪士尼（含皮克斯）", "ipType": "国际动漫影视", "licensor": "华特迪士尼公司", "cooperationStatus": "持续合作", "cooperationSince": "2016年起", "latestSeries": "玩具总动员5系列（2026-6全球首发100+ SKU）", "productLines": "盲盒、搪胶毛绒、毛绒公仔、手办、箱包、服饰、家居日用", "starProducts": "史迪奇搪胶毛绒盲盒¥69、玩具总动员5系列100+款、皮克斯40周年盲盒¥43", "priceMin": 18.9, "priceMax": 599, "channelStrategy": ["全渠道通贩", "主题店"], "ipHeat": 10, "notes": "迪士尼100周年爆款系列；YOYO×玩具总动员5为自有IP首次联动；上海MINISO LAND壹号店IP占比超八成", "sourceUrl": "https://www.miniso.com/brand/news_198.html"},
@@ -190,6 +190,16 @@ def normalize_ip_name(name: str) -> str:
         if candidate in ALIAS_NORMALIZE:
             return ALIAS_NORMALIZE[candidate]
     return stripped or key
+
+
+def is_own_ip_name(name: str) -> bool:
+    """按 seed 资源库判断是否为名创自有 IP，不触发飞书读取。"""
+    normalized = normalize_ip_name(name)
+    return any(
+        ip.get("ipType") == "自有IP"
+        and normalize_ip_name(str(ip.get("name", ""))) == normalized
+        for ip in IP_LIBRARY_SEED
+    )
 
 
 # ── 飞书拉取（feishu 档）────────────────────────────────────────

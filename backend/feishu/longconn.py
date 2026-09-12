@@ -103,7 +103,7 @@ def _on_message(data) -> None:
         _state["last_event_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         logger.info("长连接收到群指令 chat=%s user=%s 文本长度=%d", chat_id, user_id[:6] + "***", len(text))
         get_group_bot().enqueue_message(chat_id, user_id, text)
-    except Exception:  # noqa: BLE001 — 入站解析绝不能炸掉 SDK 连接
+    except Exception:
         logger.exception("分发群消息事件异常（已忽略，不影响长连接）")
 
 
@@ -130,7 +130,7 @@ def _on_card_action(data):
         if isinstance(new_card, dict):
             payload["card"] = {"type": "raw", "data": new_card}
         return P2CardActionTriggerResponse(payload)
-    except Exception:  # noqa: BLE001 — 回调必须有响应，否则客户端报交互错误
+    except Exception:
         logger.exception("处理卡片回传异常（回错误 toast，连接不受影响）")
         return P2CardActionTriggerResponse(
             {"toast": {"type": "error", "content": "操作处理失败，请稍后重试"}}
@@ -165,23 +165,22 @@ def _run_forever() -> None:
     try:
         from feishu import nl_brief
         nl_brief.list_ip_options()
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("IP 资源库预热失败（不影响长连接，首次使用时再加载）")
 
     # SDK 模块在导入时于主线程建过全局 loop，工作线程需把它设为当前 loop
     try:
         asyncio.set_event_loop(ws_internal.loop)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception:
+        logger.debug("设置飞书 SDK 事件循环失败，继续使用当前线程循环", exc_info=True)
 
-    global _stop
     while not _stop:
         try:
             client = _build_client()
             _state["connected_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
             logger.info("飞书长连接启动中…（成功后 SDK 输出 connected to wss://...）")
             client.start()  # 正常情况下阻塞常驻、内部自动重连
-        except Exception:  # noqa: BLE001 — start 异常退出时外层兜底重连，不长时间掉线
+        except Exception:
             logger.exception("飞书长连接异常退出，5 秒后重连")
         if _stop:
             break
@@ -199,7 +198,6 @@ def start_feishu_longconn() -> bool:
         logger.warning("缺少 FEISHU_APP_ID / FEISHU_APP_SECRET，飞书长连接不启动（群机器人闭环不可用）")
         return False
 
-    global _state
     with _lock:
         if _state["started"]:
             return True

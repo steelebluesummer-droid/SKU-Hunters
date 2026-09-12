@@ -22,7 +22,11 @@ from app.engine import llm
 from app.engine.strict_mode import is_demo_hidden
 from app.planning import fixtures, insight_cache
 from app.planning.cost_rules import cost_check
-from app.planning.insight_resolver import _parse_llm_json, _resolve_insight_bundle
+from app.planning.insight_resolver import (
+    LLMGenerationError,
+    _parse_llm_json,
+    _resolve_insight_bundle,
+)
 from app.planning.opportunity_discovery import build_opportunity_pool, personalize_pool
 from app.planning.opportunity_engine import (
     _fallback_opportunities,
@@ -272,8 +276,11 @@ def get_insights(plan: dict[str, Any], advance: bool = False) -> dict[str, Any]:
     if advance and plan.get("status") != "archived":
         plan["status"] = "insights_ready"
     bundle = plan.get("insights")  # 先读缓存：已生成过的任务只读重开不重复烧 LLM
+    if bundle:
+        _ensure_live_bundle_source(plan, bundle)
     if not bundle:  # None 或历史坏缓存（空 dict）都重新生成
         bundle = _resolve_insight_bundle(plan["brief"].get("category", ""), plan["brief"])
+        _ensure_live_bundle_source(plan, bundle)
         _ensure_opportunity_pool(plan, bundle)
         _ensure_consumer_voice_chains(plan, bundle)
         _ensure_competitive_map_analysis(plan, bundle)
@@ -289,7 +296,20 @@ def get_insights(plan: dict[str, Any], advance: bool = False) -> dict[str, Any]:
             if changed:
                 _ = InsightBundle.model_validate(_snake_keys(bundle))  # 失败抛异常则不入库
                 _save_state()
+    _ensure_live_bundle_source(plan, bundle)
     return bundle
+
+
+def _ensure_live_bundle_source(plan: dict[str, Any], bundle: dict[str, Any]) -> None:
+    """拒绝历史 live 任务中遗留的 crawled/LLM 洞察，避免错误标记为实时数据。"""
+    if plan.get("brief", {}).get("mode") != "live":
+        return
+    dc = bundle.get("dataContext") or {}
+    source = str(bundle.get("dataSource") or dc.get("data_source") or "").strip().lower()
+    if source != "feishu":
+        raise LLMGenerationError(
+            f"live 任务未取得飞书实时数据（当前来源：{source or 'unknown'}），已阻止继续使用"
+        )
 
 
 def _build_plan_data_context(plan: dict[str, Any], bundle: dict[str, Any]) -> dict[str, Any]:
@@ -302,6 +322,7 @@ def _build_plan_data_context(plan: dict[str, Any], bundle: dict[str, Any]) -> di
     brief_mode = plan["brief"].get("mode", plan.get("mode", "fixture"))
     now = datetime.now(timezone.utc).isoformat()
     if brief_mode == "live":
+        _ensure_live_bundle_source(plan, bundle)
         dc = bundle.get("dataContext") or {}
         ctx = build_live_context(
             plan_id=plan_id,
@@ -455,6 +476,7 @@ def generate_insights(plan: dict[str, Any]) -> dict[str, Any]:
         _ok = True
         try:
             bundle = _resolve_insight_bundle(category, plan["brief"])
+            _ensure_live_bundle_source(plan, bundle)
             dc = bundle.get("dataContext") or {}
             snapshot_id = dc.get("snapshot_id") or ""
             ck = insight_cache.cache_key(
@@ -559,6 +581,12 @@ def _lock_opportunity_ip(opps: list[dict[str, Any]], brief: dict[str, Any]) -> N
     """
     locked = _locked_ip_from_brief(brief)
     if not locked:
+        # 空列表是当前“无外部联名”的规范值；清掉品类缓存残留，避免旧 IP 渗入新企划。
+        for o in opps:
+            af = o.get("assetFit")
+            if isinstance(af, dict):
+                af["ip"] = ""
+                af["ipReason"] = ""
         return
     for o in opps:
         af = o.get("assetFit")
@@ -586,8 +614,10 @@ def get_opportunities(plan: dict[str, Any], advance: bool = False) -> list[dict[
     bundle = plan.get("insights")
     if not bundle:  # None 或历史坏缓存（空 dict）都重新生成
         bundle = _resolve_insight_bundle(category, brief)
+        _ensure_live_bundle_source(plan, bundle)
         plan["insights"] = bundle  # 重建时回写缓存：企划卡可复用洞察摘要
         _save_state()  # 落盘：服务重启后缓存仍在，不重复触发 LLM
+    _ensure_live_bundle_source(plan, bundle)
     opps = _opportunities_from_bundle(category, bundle, brief)
     if not opps:
         opps = _fallback_opportunities(category, brief)
@@ -844,6 +874,8 @@ def revise_apply(plan: dict[str, Any]) -> dict[str, Any]:
         })
         # 更新企划卡
         plan["plan_card"] = new_card
+        # 旧云文档对应旧版本企划卡，改稿后必须重新生成，不能继续展示过期链接。
+        plan["report_doc"] = None
         # 写改稿日志（标记已应用）
         plan["revise_logs"].append({
             "message": draft.get("message", ""),
@@ -873,7 +905,7 @@ def rechoose_opportunity(plan: dict[str, Any]) -> dict[str, Any]:
 
     返回换方向（前端「返回换方向」按钮）需要回到机会选择步骤。
     清除已选方向及相关产物，使后续能再次 generate-plan-card，避免触发状态机保护。
-    清除：selected_opportunity、plan_card、product_proposal、revise_logs。
+    清除：selected_opportunity、plan_card、product_proposal、revise_logs、report_doc。
     前置状态 plan_card_ready；成功后 status → opportunities_ready。
     """
     with plan_write_lock(plan["plan_id"]):
@@ -883,6 +915,7 @@ def rechoose_opportunity(plan: dict[str, Any]) -> dict[str, Any]:
         plan["plan_card"] = None
         plan["product_proposal"] = None
         plan["revise_logs"] = []
+        plan["report_doc"] = None
         plan["status"] = "opportunities_ready"
         _save_state()
     return plan
@@ -902,6 +935,32 @@ def archive_plan(plan: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("企划卡尚未生成，不能归档")
         plan["status"] = "archived"
         plan["archived_at"] = _now()
+        _save_state()
+    return plan
+
+
+def attach_report_doc(
+    plan: dict[str, Any],
+    report: dict[str, Any],
+    expected_plan_card: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """把已生成的飞书在线云文档信息挂到 plan 并落盘（不改状态机）。
+
+    工作台与飞书群共用同一云文档生成器；plan_card_ready / archived 均可重复生成，
+    每次以最新文档覆盖 report_doc。若文档生成期间企划卡已改稿或换方向，则拒绝
+    把过期文档挂到当前 plan，返回 None。
+    """
+    with plan_write_lock(plan["plan_id"]):
+        if plan.get("status") not in ("plan_card_ready", "archived") or not plan.get("plan_card"):
+            return None
+        if expected_plan_card is not None and plan.get("plan_card") != expected_plan_card:
+            return None
+        plan["report_doc"] = {
+            "document_id": report.get("document_id", ""),
+            "url": report.get("url", ""),
+            "title": report.get("title", ""),
+            "generated_at": _now(),
+        }
         _save_state()
     return plan
 

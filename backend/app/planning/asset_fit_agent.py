@@ -71,7 +71,7 @@ def _serialize(bundle: dict, category: str, merged_pool: list[dict] | None = Non
     lines.append("【机会池（id｜title｜summary）】")
     for o in pool[:6]:
         lines.append(f"- {o.get('id', '')}｜{o.get('title', '')}｜{o.get('summary', '')[:40]}")
-    # IP官候选池：原 insightBase.ipPool ∪ 策展 12 IP ∪ 扩充库（Base 当前 35 / 内置快照 33）
+    # IP官候选池：原 insightBase.ipPool ∪ 策展 12 IP ∪ 扩充库（Base 当前 35 / 内置快照 39）
     # 同名/别名去重，字段并集
     from app.planning.ip_library import merged_candidate_pool
 

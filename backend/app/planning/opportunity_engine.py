@@ -120,7 +120,7 @@ def _build_evidence(item: dict, bundle: dict) -> list[dict]:
     if colors:
         c0 = colors[0]
         extras.append({"from": "流行元素", "text": f"当季配色 {c0.get('name') if isinstance(c0, dict) else c0}"})
-    seen = {(l["from"], l["text"]) for l in links}
+    seen = {(link["from"], link["text"]) for link in links}
     for e in extras:
         if len(links) >= 4:
             break

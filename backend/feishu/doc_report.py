@@ -17,6 +17,8 @@ from typing import Any
 
 import requests
 
+from app.planning.ip_library import is_own_ip_name, normalize_ip_name
+
 from .auth import FeishuAuth
 from .config import FeishuConfig
 
@@ -53,6 +55,15 @@ def _coerce(raw: Any) -> Any:
         except (ValueError, SyntaxError):
             continue
     return raw
+
+
+def _ip_keyword(ip_name: Any) -> str:
+    """云文档关键词按 IP 归属标记，原创企划不伪装成外部联名。"""
+    name = str(ip_name or "").strip()
+    normalized = normalize_ip_name(name).replace(" ", "")
+    if not name or normalized in {"无外部联名", "不带ip"}:
+        return ""
+    return "自有IP" if is_own_ip_name(name) else "IP联名"
 
 
 def _run(content: Any, bold: bool = False, color: int | None = None,
@@ -236,7 +247,7 @@ class DocReportBuilder:
             j = r.json()
             if j.get("code") != 0:
                 logger.warning("清理空块失败 code=%s msg=%s", j.get("code"), j.get("msg"))
-        except requests.RequestException as e:  # noqa: BLE001
+        except requests.RequestException as e:
             logger.warning("清理空块异常：%s", e)
 
     def _insert_callout(self, doc_id: str, index: int, ir: dict[str, Any]) -> None:
@@ -249,7 +260,7 @@ class DocReportBuilder:
             if cid and kids:
                 self._append_plain(doc_id, cid, 0, kids)  # 插到 index0，自带空段落被挤到末尾
                 self._delete_range(doc_id, cid, len(kids), len(kids) + 1)
-        except (requests.RequestException, KeyError, IndexError) as e:  # noqa: BLE001
+        except (requests.RequestException, KeyError, IndexError) as e:
             logger.warning("高亮块写入失败，已跳过：%s", e)
 
     @staticmethod
@@ -296,7 +307,7 @@ class DocReportBuilder:
                 if cid and runs:
                     self._post_children(doc_id, cid, 0, [_blk(T_TEXT, "text", runs)])
                     self._delete_range(doc_id, cid, 1, 2)  # 删掉单元格自带空段落
-        except (requests.RequestException, KeyError, IndexError) as e:  # noqa: BLE001
+        except (requests.RequestException, KeyError, IndexError) as e:
             logger.warning("表格写入失败，已跳过：%s", e)
 
     def _insert_image(self, doc_id: str, index: int, image_path: Path) -> bool:
@@ -336,7 +347,7 @@ class DocReportBuilder:
                 return False
             logger.info("概念图已内嵌 doc=%s block=%s", doc_id, block_id)
             return True
-        except (requests.RequestException, OSError) as e:  # noqa: BLE001
+        except (requests.RequestException, OSError) as e:
             logger.warning("概念图内嵌异常：%s", e)
             return False
 
@@ -351,7 +362,7 @@ class DocReportBuilder:
             j = resp.json()
             if j.get("code") != 0:
                 logger.warning("设置文档链接可读失败 code=%s msg=%s", j.get("code"), j.get("msg"))
-        except requests.RequestException as e:  # noqa: BLE001
+        except requests.RequestException as e:
             logger.warning("设置文档分享异常：%s", e)
 
     # ── 内容组装 ──────────────────────────────
@@ -388,6 +399,9 @@ class DocReportBuilder:
         selected_id = sel.get("opportunityId") if isinstance(sel, dict) else sel
         pool = ins.get("opportunityPool") or []
         pool_title = {p.get("id"): p.get("title", "") for p in pool}
+        selected_opp = sel if isinstance(sel, dict) else next(
+            (o for o in opps if o.get("id") == selected_id), {}
+        )
         out: list[dict[str, Any]] = []
 
         def score_color(v: Any) -> int | None:
@@ -405,12 +419,18 @@ class DocReportBuilder:
             hero_lead.append(P([_run("Slogan　", True, BLUE), _run(pos["slogan"], True, BLUE)]))
         elif (proposal.get("background") or {}).get("marketOpportunity"):
             hero_lead.append(P([_run("一句话机会　", True, BLUE), _run(proposal["background"]["marketOpportunity"])]))
-        # 关键词标签（对齐前端：IP联名 + 设计语言/材质/颜色切短词）
+        # 关键词标签（对齐前端：按 IP 归属 + 设计语言/材质/颜色切短词）
         seg: list[str] = []
         for src in (pd.get("designLanguage"), pd.get("material"), pd.get("color")):
             if src:
                 seg += [x.strip() for x in str(src).replace("，", ",").replace("、", ",").replace("；", ",").split(",") if x.strip()]
-        kws = list(dict.fromkeys(["IP联名"] + [x for x in seg if len(x) <= 8]))[:6]
+        ip_strategy = brief.get("ip_strategy") if "ip_strategy" in brief else brief.get("ipStrategy")
+        if isinstance(ip_strategy, list):
+            ip_name = str(ip_strategy[0]) if ip_strategy else ""
+        else:
+            ip_name = str((selected_opp.get("assetFit") or selected_opp.get("asset_fit") or {}).get("ip", "") or "")
+        ip_keyword = _ip_keyword(ip_name)
+        kws = list(dict.fromkeys(([ip_keyword] if ip_keyword else []) + [x for x in seg if len(x) <= 8]))[:6]
         if hero_lead:
             out.append(callout(hero_lead, bg=CB_BLUE))
         # 决策信息表（封面一眼看到关键约束）
@@ -875,6 +895,6 @@ def build_plan_report(plan: dict[str, Any]) -> dict[str, str] | None:
             logger.warning("飞书凭证未配置，跳过在线报告文档生成")
             return None
         return DocReportBuilder(FeishuAuth(config)).build_for_plan(plan)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("生成在线企划报告失败（不影响归档），plan_id=%s", plan.get("plan_id"))
         return None

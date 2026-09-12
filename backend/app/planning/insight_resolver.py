@@ -1,11 +1,11 @@
-"""五看洞察解析器（insight resolver）：按品类解析洞察——真实社媒证据优先，LLM 生成兜底
+"""五看洞察解析器（insight resolver）：按任务模式解析五看洞察
 
-职责边界：只负责「洞察数据从哪来」（真实证据 vs LLM 生成的选择与组装），
+职责边界：只负责「洞察数据从哪来」（实时飞书证据或非 live 模式的本地/LLM 生成），
 不负责机会生成、企划卡等下游业务。
 
 数据纪律：
-- 有社媒采集数据的品类 → 真实证据，dataSource="crawled"
-- 无采集数据的品类 → LLM 按品类现场生成，dataSource="llm"，process_log 如实标注
+- live 任务 → 只允许真实飞书证据，dataSource="feishu"
+- 非 live 任务 → 按原有本地真实采集/LLM 规则生成，并如实标注 dataSource
 - LLM 未配置/输出连续不合契约 → 抛 LLMGenerationError，不产任何假数据
 - 禁止回退到其他品类的冻结数据（无小风扇 fallback）
 """
@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.data.base_adapter import BaseProviderError, BaseUnavailable
 from app.planning.repository import _snake_keys
 from app.schemas.planning import InsightBundle
 
@@ -40,24 +41,23 @@ def _resolve_insight_bundle(category: str, brief: dict | None = None) -> dict[st
     """
     brief = brief or {}
     if brief.get("mode") == "live":
-        # live 取数优先级：①飞书 Base 实时明细 → ②本地真实社媒采集(crawled) → ③LLM 现场生成。
-        # 三级都如实标注 dataSource：Base 未覆盖的品类（如保温杯）回退本地真实采集文件，
-        # 本地也没有采集（全新品类）时才用 LLM 估计——保证群里提任意品类都能跑，且不把估计当真实。
         provider = os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower()
-        if provider == "feishu":
-            from app.planning.live_insights import build_live_insight_bundle
+        if provider != "feishu":
+            raise LLMGenerationError(
+                "live 任务要求 BASE_PROVIDER_MODE=feishu；当前未启用真实飞书数据源"
+            )
 
-            try:
-                return build_live_insight_bundle(category, brief)
-            except Exception as feishu_exc:  # noqa: BLE001 — Base 无该品类，回退真实采集/LLM，不静默
-                logger.warning(
-                    "品类「%s」飞书 Base 无实时数据（%s），回退本地真实社媒采集，缺失再 LLM",
-                    category,
-                    feishu_exc,
-                )
-                return _crawled_or_llm_bundle(category, brief)
-        # 未配置 feishu 数据源：本地真实采集优先，缺失再 LLM（来源如实标注）
-        return _crawled_or_llm_bundle(category, brief)
+        from app.planning.live_insights import build_live_insight_bundle
+
+        try:
+            return build_live_insight_bundle(category, brief)
+        except (BaseUnavailable, BaseProviderError):
+            # 真实数据源不可用必须保留原始错误类型，由 API 层映射为明确的 unavailable，
+            # 不能改走本地 crawled 或 LLM，避免把估计数据伪装成实时数据。
+            raise
+        except Exception as feishu_exc:
+            logger.exception("品类「%s」飞书实时洞察生成失败", category)
+            raise LLMGenerationError("飞书实时洞察生成失败") from feishu_exc
 
     if brief.get("mode") == "fixture":
         # fixture 任务：显式返回演示数据（冻结 fixtures 五看洞察），标 dataSource=fixture
