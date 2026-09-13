@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.planning import router
-from app.planning import pipeline
+from app.planning import pipeline, repository
 
 app = FastAPI()
 app.include_router(router)
@@ -17,6 +17,20 @@ BRIEF = {
     "category": "小风扇",
     "price_range": [39, 99],
 }
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(monkeypatch, tmp_path):
+    """异步后台任务使用临时状态文件，避免测试竞争真实运行态 JSON。"""
+    snapshot = dict(repository._PLANS)
+    repository._PLANS.clear()
+    monkeypatch.setattr(repository, "_STATE_DIR", tmp_path)
+    monkeypatch.setattr(repository, "_STATE_FILE", tmp_path / "plans_state.json")
+    monkeypatch.setattr(repository, "_LEGACY_STATE_FILE", tmp_path / "legacy_plans_state.json")
+    yield
+    repository._PLANS.clear()
+    repository._PLANS.update(snapshot)
+
 
 @pytest.fixture
 def client():

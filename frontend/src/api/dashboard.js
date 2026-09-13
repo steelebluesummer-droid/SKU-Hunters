@@ -29,3 +29,8 @@ export async function getIpResource() {
 export async function getIpLibrary() {
   return request('/ip-library');
 }
+
+/** 新建企划可选品类（只含已有数据的品类，按样本量排序；全新品类走飞书群调研） */
+export async function getCategories() {
+  return request('/categories');
+}

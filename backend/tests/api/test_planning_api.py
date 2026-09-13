@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import app.api.planning as planning_api
 from app.api.planning import router
 from app.planning import repository
 
@@ -110,6 +111,35 @@ def test_opportunities_carry_process_log(client):
     body = client.get(f"/api/v1/plans/{plan_id}/opportunities").json()
     assert len(body["opportunities"]) == 3
     assert len(body["processLog"]) == 4  # 机会生成思考过程（导师专项）
+
+
+def test_categories_normalize_feishu_subcategories(monkeypatch):
+    """品类目录应把飞书明细子品类聚合为企划层父品类。"""
+    class Record:
+        def __init__(self, category):
+            self.category = category
+
+    class Adapter:
+        def search_all(self, _keyword):
+            return [
+                Record("小风扇"),
+                Record("塔扇"),
+                Record("保温杯"),
+                Record("IP"),
+            ]
+
+    monkeypatch.setenv("BASE_PROVIDER_MODE", "feishu")
+    monkeypatch.setattr("app.data.base_adapter.BaseDataAdapter", Adapter)
+    monkeypatch.setattr(
+        planning_api,
+        "_CATEGORY_CACHE",
+        {"ts": 0.0, "names": [], "source": ""},
+    )
+
+    names, source = planning_api._load_category_names()
+
+    assert names == ["风扇", "保温杯"]
+    assert source == "feishu"
 
 # ── ④⑤⑥ 企划卡 ─────────────────────────────────────────
 

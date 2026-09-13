@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _REQ_TIMEOUT = 10
 
 # ── 表结构定义（字段名, 飞书字段类型）────────────────────────
-# 飞书字段类型：1=多行文本, 5=日期
+# 飞书字段类型：1=多行文本, 5=日期, 15=超链接（写入值为 {"link":url,"text":显示名}）
 FIELD_SPEC: list[tuple[str, int]] = [
     ("plan_id", 1),         # 主列：任务唯一标识（pipeline 任务字典）
     ("theme", 1),           # PlanBrief.theme
@@ -42,6 +42,7 @@ FIELD_SPEC: list[tuple[str, int]] = [
     ("archived_at", 5),     # pipeline 任务字典，ISO → 毫秒时间戳
     ("source_plan_id", 1),  # PlanCard.source_plan_id（复用来源，空为原创）
     ("过会纪要", 1),         # 智能纪要阶段回写，归档时留空
+    ("云文档链接", 15),       # plan.report_doc：飞书在线完整报告，归档时统一收口可点链接
 ]
 
 
@@ -88,6 +89,15 @@ def build_fields(plan: dict[str, Any]) -> dict[str, Any]:
     archived_ms = _iso_to_ms(plan.get("archived_at", ""))
     if archived_ms is not None:
         fields["archived_at"] = archived_ms
+    # 云文档链接（超链接列）：工作台/群都在归档前先生成报告并挂到 plan.report_doc；
+    # 若用户未生成云文档就归档，则该列留空，不阻断同步。
+    report_doc = plan.get("report_doc") or {}
+    doc_url = report_doc.get("url") or ""
+    if doc_url:
+        fields["云文档链接"] = {
+            "link": doc_url,
+            "text": report_doc.get("title") or "AI企划报告",
+        }
     return fields
 
 

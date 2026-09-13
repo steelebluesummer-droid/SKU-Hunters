@@ -12,12 +12,13 @@ import { Form, Select, Input, InputNumber, Button, Card, Checkbox, Row, Col, Ale
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { createPlanAsync } from '../../../api/plans';
 import { invalidateGetCache } from '../../../api/client';
-import { getIpResource, getIpLibrary } from '../../../api/dashboard';
+import { getIpResource, getIpLibrary, getCategories } from '../../../api/dashboard';
 import { fromForm } from '../../../shared/utils/normalizeBrief';
 import { IP_OPTIONS_FALLBACK, NO_EXTERNAL_IP, buildIpSelectGroups } from '../../../shared/utils/ipOptions';
 
-// 品类 / 市场 / IP / 目标 的可选项（UI 选项，非 fixture 数据）
-const CATEGORIES = ['小风扇', '保温杯', '香薰', '雨伞'];
+// 市场 / IP / 目标 的可选项（UI 选项，非 fixture 数据）
+// 品类下拉由后端按飞书「已有数据的品类」动态下发，此常量仅在接口失败时兜底；只允许选已有品类
+const CATEGORY_FALLBACK = ['风扇', '保温杯', '香薰', '雨伞', '帆布袋'];
 const MARKETS = ['中国大陆', '东南亚', '日本', '欧美'];
 const GOAL_OPTIONS = ['夏季销售提升', '打造IP爆款', '拓展新人群', '提升连带率'];
 
@@ -61,6 +62,20 @@ export default function NewPlan() {
   // IP 策略三档分组：无外部联名 / 自有 IP（标注「（自有IP）」）/ 外部联名 IP
   // fallback ∪ 策展 12 ∪ 扩充库（保留 ipType 以识别自有 IP）；并行拉取，全失败降级 fallback，不阻塞表单
   const [ipGroups, setIpGroups] = useState(() => buildIpSelectGroups(IP_OPTIONS_FALLBACK));
+  // 品类候选：后端按飞书已有品类下发，失败用 CATEGORY_FALLBACK 兜底，保证表单始终可选
+  const [categories, setCategories] = useState(CATEGORY_FALLBACK);
+
+  // 拉取已有品类（只允许从中选；全新品类走飞书群 @机器人 提交调研）
+  useEffect(() => {
+    let alive = true;
+    getCategories()
+      .then((res) => {
+        const names = (res?.categories || []).map((c) => c.name).filter(Boolean);
+        if (alive && names.length) setCategories(names);
+      })
+      .catch(() => { /* 接口失败保留兜底，不阻塞新建 */ });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -212,7 +227,9 @@ export default function NewPlan() {
           >
             <Select
               placeholder="选择品类"
-              options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+              showSearch
+              optionFilterProp="label"
+              options={categories.map((c) => ({ value: c, label: c }))}
             />
           </Form.Item>
 

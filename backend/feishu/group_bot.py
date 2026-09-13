@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import re
@@ -416,7 +417,17 @@ class GroupBot:
             )
             self._set_running(key, "在线报告")
             from feishu.doc_report import build_plan_report
-            report = build_plan_report(plan)  # plan_card_ready 即可生成，不依赖 archived
+            expected_plan_card = copy.deepcopy(plan.get("plan_card"))
+            report_plan = copy.deepcopy(plan)
+            report = build_plan_report(report_plan)  # plan_card_ready 即可生成，不依赖 archived
+            # 把在线报告链接挂回任务并落盘，用户『确认归档』时才能一并写进企划资产库的云文档链接列
+            if report and report.get("url"):
+                try:
+                    attached = pipeline.attach_report_doc(plan, report, expected_plan_card)
+                    if attached is None:
+                        logger.warning("在线报告对应的企划卡已变化，跳过挂载旧报告 plan_id=%s", plan_id)
+                except Exception:
+                    logger.exception("挂载在线报告链接失败（不影响发卡/归档）plan_id=%s", plan_id)
             # 文档成功/失败都发待确认卡（失败降级时仍可基于企划卡确认归档或进工作室改稿）
             self._send_card(chat_id, cards_v2.review_report_card(plan, report, self._frontend_base()))
             self._clear_running(key)  # 释放在途锁，等待用户点『确认归档』

@@ -54,6 +54,16 @@ def test_build_fields_mapping():
     assert fields["source_plan_id"] == ""  # 原创企划为空
     assert isinstance(fields["archived_at"], int)  # 毫秒时间戳
 
+    plan = _sample_plan()
+    plan["report_doc"] = {
+        "url": "https://example.com/report",
+        "title": "测试在线报告",
+    }
+    assert bs.build_fields(plan)["云文档链接"] == {
+        "link": "https://example.com/report",
+        "text": "测试在线报告",
+    }
+
 
 def test_build_fields_tolerates_missing_card():
     """plan_card 为空（异常情况）时不抛异常，卡片字段留空"""

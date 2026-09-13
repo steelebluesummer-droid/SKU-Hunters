@@ -35,7 +35,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from pydantic import ValidationError
 
-from app.data.base_adapter import BaseProviderError, BaseUnavailable
+from app.data.base_adapter import BaseProviderError, BaseUnavailable, normalize_category
 from app.engine.strict_mode import StrictModeError, is_demo_hidden
 from app.planning import fixtures, ip_library, ip_resource, pipeline
 from app.planning.insight_resolver import LLMGenerationError
@@ -570,6 +570,64 @@ async def get_ip_resource():
         "audienceFilters": ip_resource.AUDIENCE_FILTERS,
         "styleFilters": ip_resource.STYLE_FILTERS,
     }
+
+
+# 品类目录：只允许选「已有数据」的品类；全新品类走飞书群 @机器人 提交调研需求池
+_CATEGORY_CACHE: dict[str, Any] = {"ts": 0.0, "names": [], "source": ""}
+_CATEGORY_TTL = 600.0  # 10 分钟短缓存，底层明细本身也走快照缓存
+_CATEGORY_FALLBACK = ["风扇", "保温杯", "香薰", "雨伞", "帆布袋"]
+
+
+def _load_category_names() -> tuple[list[str], str]:
+    """返回 (品类名列表[按样本量降序], 来源)；飞书→本地采集→内置常量逐级兜底，不抛异常。"""
+    now = time.time()
+    if _CATEGORY_CACHE["names"] and now - float(_CATEGORY_CACHE["ts"]) < _CATEGORY_TTL:
+        return _CATEGORY_CACHE["names"], _CATEGORY_CACHE["source"]
+
+    names: list[str] = []
+    source = "fallback"
+    if os.getenv("BASE_PROVIDER_MODE", "disabled").strip().lower() == "feishu":
+        try:
+            from collections import Counter
+
+            from app.data.base_adapter import BaseDataAdapter
+
+            counter = Counter(
+                normalize_category(getattr(r, "category", None))
+                for r in BaseDataAdapter().search_all("")
+            )
+            # 过滤空值与非品类噪声（fixture 里混过 category="IP"）；归一名即展示名（如「风扇」）
+            names = [n for n, _ in counter.most_common() if n and n != "IP"]
+            if names:
+                source = "feishu"
+        except Exception:
+            logger.exception("聚合飞书品类目录失败，尝试本地采集兜底")
+            names = []
+
+    if not names:  # 本地社媒采集品类兜底；本地旧文件名是「小风扇」，统一展示为归一名「风扇」
+        try:
+            from app.insights.loaders.social_evidence import SocialEvidenceLoader
+
+            names = sorted({
+                normalize_category(t.split("_")[0]) or t.split("_")[0]
+                for t in SocialEvidenceLoader().list_topics()
+            })
+            source = "local" if names else "fallback"
+        except Exception:  # noqa: BLE001
+            names = []
+
+    if not names:
+        names, source = list(_CATEGORY_FALLBACK), "fallback"
+
+    _CATEGORY_CACHE.update(ts=now, names=names, source=source)
+    return names, source
+
+
+@router.get("/categories")
+async def list_categories():
+    """新建企划可选品类（只含已有数据的品类；全新品类请在飞书群 @趋势官2 提交调研）。"""
+    names, source = await asyncio.to_thread(_load_category_names)
+    return {"categories": [{"name": n} for n in names], "source": source}
 
 
 def _load_curated_module(topic: str, key: str, fallback: dict, use_feishu: bool = True):
