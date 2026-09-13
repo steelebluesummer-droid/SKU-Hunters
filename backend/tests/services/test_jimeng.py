@@ -70,8 +70,10 @@ def test_signature_changes_with_body():
 
 
 class _FakeResp:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
+        self.text = json.dumps(payload, ensure_ascii=False)
 
     def raise_for_status(self):
         pass

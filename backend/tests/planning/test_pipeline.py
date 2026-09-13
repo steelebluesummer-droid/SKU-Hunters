@@ -602,7 +602,7 @@ def test_generate_plan_card_failure_does_not_advance_status(monkeypatch):
 
     opp_id = plan["opportunities"][0]["id"]
 
-    def boom(plan_arg, opportunity):
+    def boom(plan_arg, opportunity, **_kwargs):
         raise RuntimeError("企划卡组装失败")
 
     monkeypatch.setattr("app.planning.service._build_dynamic_plan_card", boom)

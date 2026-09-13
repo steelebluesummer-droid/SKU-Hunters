@@ -51,7 +51,6 @@ from app.planning.repository import (
 )
 from app.schemas.planning import InsightBundle, Opportunity, PlanBrief, PlanCard
 
-
 logger = logging.getLogger("planning.plan_card")
 
 

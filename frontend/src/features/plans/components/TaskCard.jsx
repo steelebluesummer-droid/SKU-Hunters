@@ -143,10 +143,10 @@ export default function TaskCard({ task, onClick, onDelete, style }) {
                 icon={fav ? <StarFilled style={{ color: '#fadb14' }} /> : <StarOutlined />}
                 onClick={toggleFav}
               />
-              {onDelete && !stageRunning ? (
+              {onDelete ? (
                 <Popconfirm
-                  title="删除该企划任务？"
-                  description="删除后不可恢复"
+                  title={stageRunning ? '移除这个卡住的任务？' : '删除该企划任务？'}
+                  description={stageRunning ? '它停在生成中间态（多因后端重启中断、已不会继续），移除后不可恢复' : '删除后不可恢复'}
                   okText="删除"
                   okButtonProps={{ danger: true }}
                   cancelText="取消"

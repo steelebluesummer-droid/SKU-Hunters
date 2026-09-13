@@ -101,7 +101,11 @@ export default function AppShell() {
               color: 'var(--color-action-primary)',
             }}
           >
-            <ShopOutlined style={{ fontSize: 18 }} />
+            <img
+              src="/assets/logo-mark.jpg?v=2"
+              alt="SKU Hunters"
+              style={{ height: 34, width: 34, objectFit: 'contain', borderRadius: 7 }}
+            />
             <span>SKU Hunters</span>
           </div>
           {menu}
@@ -130,7 +134,11 @@ export default function AppShell() {
               aria-label="打开导航菜单"
               onClick={() => setDrawerOpen(true)}
             />
-            <ShopOutlined style={{ fontSize: 16, color: 'var(--color-action-primary)' }} />
+            <img
+              src="/assets/logo-mark.jpg?v=2"
+              alt="SKU Hunters"
+              style={{ height: 30, width: 30, objectFit: 'contain', borderRadius: 6 }}
+            />
             <span style={{ fontWeight: 700, color: 'var(--color-action-primary)' }}>SKU Hunters</span>
           </Header>
         )}

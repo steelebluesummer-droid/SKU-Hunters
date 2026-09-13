@@ -52,6 +52,8 @@ def _now() -> str:
 
 _PLANS: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
+# 本进程已删除任务的“墓碑”：防丢并集时跳过，避免磁盘旧副本把已删任务救回（重启后随磁盘状态自然清空）
+_DELETED_IDS: set[str] = set()
 
 _STATE_DIR = Path(__file__).resolve().parents[2] / "data" / "state"  # backend/data/state/
 _STATE_FILE = _STATE_DIR / "plans_state.json"
@@ -64,8 +66,22 @@ def _save_state() -> None:
     _STATE_DIR.mkdir(parents=True, exist_ok=True)
     tmp = _STATE_FILE.with_name(f".plans_state.{uuid.uuid4().hex}.tmp")
     with _lock:
+        # 防丢保护：并入「磁盘上有、但当前进程内存未加载」的任务，避免独立脚本/多进程
+        # 只持有部分任务时全量覆盖、把其余任务写没；同一 plan_id 以当前内存（最新操作）为准。
+        source = dict(_PLANS)
+        try:
+            if _STATE_FILE.is_file():
+                with open(_STATE_FILE, encoding="utf-8") as df:
+                    on_disk = json.load(df)
+                if isinstance(on_disk, dict):
+                    for pid, p in on_disk.items():
+                        if pid in _DELETED_IDS:
+                            continue  # 本进程已删除，不被磁盘旧副本“救回”
+                        source.setdefault(pid, p)
+        except (json.JSONDecodeError, OSError):
+            pass
         payload = {}
-        for pid, p in _PLANS.items():
+        for pid, p in source.items():
             payload[pid] = {
                 "plan_id": p["plan_id"],
                 "brief": p["brief"],
@@ -243,6 +259,7 @@ def delete_plan(plan_id: str) -> bool:
         if plan_id not in _PLANS:
             return False
         del _PLANS[plan_id]
+        _DELETED_IDS.add(plan_id)
     with _plan_locks_guard:
         _plan_locks.pop(plan_id, None)
     _save_state()
