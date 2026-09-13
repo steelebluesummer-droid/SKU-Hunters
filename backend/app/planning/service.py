@@ -36,6 +36,7 @@ from app.planning.plan_card_builder import (
     _build_dynamic_plan_card,
     _build_product_proposal,
     _find_opportunity,
+    generate_shared_concept_image,
 )
 from app.planning.repository import (
     _PLANS,
@@ -49,6 +50,9 @@ from app.planning.repository import (
     plan_write_lock,
 )
 from app.schemas.planning import InsightBundle, Opportunity, PlanBrief, PlanCard
+
+
+logger = logging.getLogger("planning.plan_card")
 
 
 class StateTransitionError(Exception):
@@ -670,12 +674,20 @@ def generate_plan_card(plan: dict[str, Any], opportunity_id: str) -> dict[str, A
         if opportunity is None:
             return None
 
-        card = _build_dynamic_plan_card(plan, opportunity)
-        proposal = _build_product_proposal(plan, opportunity)
-        # 概念图统一：以企划案图（product_proposal.design.imageUrl）为准回填企划卡
-        proposal_img = (proposal.get("design") or {}).get("imageUrl", "")
-        if proposal_img:
-            card["conceptImage"] = proposal_img
+        # 概念图只生成一次（信息最全的统一 prompt）并下载本地化，企划卡/企划案共用同一张；
+        # 不再重复调即梦，省一半时间与额度，也根除「两次出图一成一败 → 前端误显生成失败」
+        shared_img = generate_shared_concept_image(plan, opportunity)
+        card = _build_dynamic_plan_card(plan, opportunity, concept_image=shared_img)
+        proposal = _build_product_proposal(plan, opportunity, concept_image=shared_img)
+        # 双保险：两处图强制对齐为同一张（本地化路径）
+        card["conceptImage"] = shared_img
+        if isinstance(proposal.get("design"), dict):
+            proposal["design"]["imageUrl"] = shared_img
+        if not shared_img:
+            logger.warning(
+                "概念图未生成（即梦调用失败）plan_id=%s，企划卡/企划案均显示占位图",
+                plan["plan_id"],
+            )
 
         plan["selected_opportunity"] = opportunity_id
         plan["plan_card"] = card

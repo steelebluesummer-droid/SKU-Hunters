@@ -182,16 +182,17 @@ def plan_write_lock(plan_id: str):
 _CONCEPTS_DIR = Path(__file__).resolve().parents[2] / "data" / "evidence" / "images" / "concepts"
 
 
-def localize_concept_image(plan_id: str, concept_image: str) -> str:
+def localize_concept_image(plan_id: str, concept_image: str, overwrite: bool = False) -> str:
     """概念图本地化：即梦临时 URL → 本地 concepts 目录，返回本地路径
 
     即梦 URL 带 x-expires 签名会过期，落本地永久有效；前端 <img src> 直接读返回值。
     已是本地路径（/evidence/、/assets/）或空 → 原样返回；下载失败 → 降级原 URL。
+    overwrite=True（换方向主动重新出图）时即使本地已有同名文件也强制重新下载覆盖，避免沿用旧方向的图。
     """
     if not concept_image or concept_image.startswith(("/evidence/", "/assets/")):
         return concept_image
     local_file = _CONCEPTS_DIR / f"concept_{plan_id}.png"
-    if local_file.is_file():
+    if local_file.is_file() and not overwrite:
         return f"/evidence/concepts/concept_{plan_id}.png"
     try:
         import urllib.request

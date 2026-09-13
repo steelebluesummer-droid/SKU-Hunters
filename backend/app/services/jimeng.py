@@ -19,6 +19,7 @@ import datetime
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 
@@ -28,6 +29,8 @@ _SERVICE = "cv"
 _VERSION = "2022-08-31"
 _ACTION_SUBMIT = "CVSync2AsyncSubmitTask"
 _ACTION_QUERY = "CVSync2AsyncGetResult"
+
+_LOGGER = logging.getLogger("services.jimeng")
 
 
 def _get_config() -> dict[str, str] | None:
@@ -107,57 +110,79 @@ def _post(ak: str, sk: str, action: str, body: dict) -> dict:
     req = _signed_request(ak, sk, action, body)
     with httpx.Client(timeout=30) as client:
         resp = client.send(req)
-    resp.raise_for_status()
+    if resp.status_code != 200:  # 保留火山返回体，便于区分限流 / 审核 / 参数等真实原因
+        raise RuntimeError(f"{action} HTTP {resp.status_code}: {resp.text[:300]}")
     data = resp.json()
     if data.get("code") not in (10000, None):  # 视觉服务成功码 10000
         raise RuntimeError(f"{action} 失败: {data.get('code')} {data.get('message')}")
     return data
 
 
+def _generate_once(config: dict, prompt: str, size: str) -> str | None:
+    """单次「提交 + 轮询」；成功返回 URL，超时/任务失效返回 None，网络或协议异常抛出。"""
+    width, height = (int(x) for x in size.split("x"))
+    submit = _post(config["ak"], config["sk"], _ACTION_SUBMIT, {
+        "req_key": config["req_key"],
+        "prompt": prompt,
+        "seed": -1,
+        "scale": 0.5,
+        "width": width,
+        "height": height,
+        "use_pre_llm": True,   # LLM 扩写 prompt，出图更稳
+        "use_sr": True,        # 超分
+        "return_url": True,
+    })
+    task_id = submit["data"]["task_id"]
+
+    deadline = time.time() + config["timeout"]
+    while time.time() < deadline:
+        time.sleep(2)
+        result = _post(config["ak"], config["sk"], _ACTION_QUERY, {
+            "req_key": config["req_key"],
+            "task_id": task_id,
+            "req_json": json.dumps({"return_url": True}),
+        })
+        data = result.get("data", {})
+        status = data.get("status")
+        if status == "done":
+            urls = data.get("image_urls") or []
+            return urls[0] if urls else None
+        if status in ("not_found", "expired"):
+            _LOGGER.warning("即梦任务失效 status=%s task_id=%s", status, task_id)
+            return None
+    _LOGGER.warning("即梦出图轮询超时（>%.0fs）task_id=%s", config["timeout"], task_id)
+    return None
+
+
 def generate_concept_image(
     prompt: str,
     size: str = "1024x1024",
     fallback: str | None = None,
+    retries: int = 1,
 ) -> str | None:
-    """文生图：prompt → 图片 URL；任何失败返回 fallback（默认 None）
+    """文生图：prompt → 图片 URL；未配置或最终失败返回 fallback（默认 None）
 
-    Returns:
-        图片 URL（return_url 模式）；未配置或失败返回 fallback
+    失败不再静默：超时 / 任务失效 / 异常都记 warning（不打印 AK/SK），并对瞬时失败重试一次，
+    连续两次出图（企划卡 + 企划案）时单次抖动不至于让概念图落空。
     """
     config = _get_config()
     if config is None:
         return fallback
 
-    try:
-        width, height = (int(x) for x in size.split("x"))
-        submit = _post(config["ak"], config["sk"], _ACTION_SUBMIT, {
-            "req_key": config["req_key"],
-            "prompt": prompt,
-            "seed": -1,
-            "scale": 0.5,
-            "width": width,
-            "height": height,
-            "use_pre_llm": True,   # LLM 扩写 prompt，出图更稳
-            "use_sr": True,        # 超分
-            "return_url": True,
-        })
-        task_id = submit["data"]["task_id"]
-
-        deadline = time.time() + config["timeout"]
-        while time.time() < deadline:
-            time.sleep(2)
-            result = _post(config["ak"], config["sk"], _ACTION_QUERY, {
-                "req_key": config["req_key"],
-                "task_id": task_id,
-                "req_json": json.dumps({"return_url": True}),
-            })
-            data = result.get("data", {})
-            status = data.get("status")
-            if status == "done":
-                urls = data.get("image_urls") or []
-                return urls[0] if urls else fallback
-            if status in ("not_found", "expired"):
-                return fallback
-        return fallback
-    except Exception:  # noqa: BLE001 — 出图故障刻意降级，前端用占位图
-        return fallback
+    for attempt in range(retries + 1):
+        try:
+            url = _generate_once(config, prompt, size)
+            if url:
+                return url
+        except Exception as exc:  # noqa: BLE001 — 出图故障刻意降级，前端用占位图，但要留痕
+            msg = str(exc)
+            _LOGGER.warning(
+                "即梦出图第 %d 次调用异常：%s: %s",
+                attempt + 1, type(exc).__name__, msg[:200],
+            )
+            if "50413" in msg or "Risk Not Pass" in msg:
+                # 文本风控对同一 prompt 确定性复现，重试无意义，直接交给上层换安全 prompt 兜底
+                break
+        if attempt < retries:
+            time.sleep(4)  # 间隔 4s，跨过瞬时 400 / 限流的短故障窗口
+    return fallback

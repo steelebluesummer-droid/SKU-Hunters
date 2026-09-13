@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -20,6 +21,38 @@ from app.planning.ip_library import is_own_ip_name, normalize_ip_name
 from app.planning.repository import _snake_keys, localize_concept_image
 from app.schemas.planning import PlanCard, ProductProposal
 from app.services import jimeng
+
+_LOGGER = logging.getLogger("planning.plan_card")
+
+# 出图文本风控防护：即梦对未授权知名版权角色名会返回 50413（Post Text Risk Not Pass），
+# 属确定性拦截、重试同一文本无效。外部联名 IP 已由 _ip_prompt_clause 用「资源库内合法 IP」单独注入；
+# 这里只清 LLM 在机会/设计自由文本里可能夹带的「资源库外版权角色名」，避免整单出图被风控拦截。
+_COPYRIGHT_ROLE_TERMS = (
+    "蜘蛛侠", "钢铁侠", "美国队长", "绿巨人", "奇异博士", "黑寡妇", "雷神托尔", "灭霸", "漫威",
+    "蝙蝠侠", "超人", "神奇女侠", "小丑女", "闪电侠", "海王",
+    "米奇", "米妮", "唐老鸭", "迪士尼公主", "迪士尼", "Disney", "disney",
+    "皮卡丘", "宝可梦", "杰尼龟", "妙蛙种子", "Pokemon", "pokemon",
+    "哆啦A梦", "机器猫", "奥特曼", "假面骑士", "高达", "赛亚人", "贝吉塔",
+    "海绵宝宝", "小猪佩奇", "哈利波特",
+)
+
+
+def _strip_risk_terms(text: Any) -> str:
+    """删除自由文本里的未授权版权角色名，并清理因此产生的空括号与重复标点。"""
+    s = str(text or "")
+    for term in _COPYRIGHT_ROLE_TERMS:
+        if term in s:
+            s = s.replace(term, "")
+    s = re.sub(r"[（(]\s*[、,，/]?\s*[）)]", "", s)      # 被掏空的中英文括号注释
+    s = re.sub(r"[、，,/]{2,}", "、", s)                 # 折叠重复分隔符
+    s = re.sub(r"：\s*[、，,]", "：", s)
+    s = re.sub(r"\s{2,}", " ", s)
+    return s.strip("、，, /")
+
+
+def _join_segs(*segs: Any) -> str:
+    """按中文逗号拼接非空片段，避免出现连续空逗号。"""
+    return "，".join(str(s).strip("、，, ") for s in segs if str(s or "").strip("、，, "))
 
 
 def _find_opportunity(plan: dict, opportunity_id: str) -> dict | None:
@@ -64,11 +97,20 @@ def _concept_prompt_dynamic(opportunity: dict, brief: dict) -> str:
         asset = opportunity.get("assetFit") or opportunity.get("asset_fit") or {}
         ip_name = str(asset.get("ip", "") or "")
     ip_clause = _ip_prompt_clause(ip_name)
-    return (
-        f"产品概念渲染图，{ip_clause}{opportunity.get('title', '')}，{opportunity.get('direction', '')}风格，"
-        f"关键词：{'、'.join(opportunity.get('keywords', []) or [])}，"
-        f"名创优品风格，干净背景，柔光，高质感"
+    title = _strip_risk_terms(opportunity.get("title", ""))
+    direction = _strip_risk_terms(opportunity.get("direction", ""))
+    keywords = "、".join(
+        k for k in (_strip_risk_terms(x) for x in (opportunity.get("keywords", []) or [])) if k
     )
+    segs = ["产品概念渲染图"]
+    if ip_clause or title:
+        segs.append(f"{ip_clause}{title}")
+    if direction:
+        segs.append(f"{direction}风格")
+    if keywords:
+        segs.append(f"关键词：{keywords}")
+    segs += ["名创优品风格", "干净背景", "柔光", "高质感"]
+    return "，".join(segs)
 
 
 # ── LLM 企划卡生成 ─────────────────────────────────────────
@@ -168,10 +210,15 @@ def _llm_plan_card_fields(plan: dict, opportunity: dict) -> dict[str, Any]:
     raise LLMGenerationError(f"企划卡 LLM 生成失败：{last_error}")
 
 
-def _build_dynamic_plan_card(plan: dict, opportunity: dict) -> dict:
+def _build_dynamic_plan_card(
+    plan: dict,
+    opportunity: dict,
+    concept_image: str | None = None,
+) -> dict:
     """动态企划卡：LLM 生成内容 + 代码管定价/成本校验/即梦出图
 
-    无论 mode 都尝试即梦出图，未配置/失败自动降级占位（fail-soft）。
+    concept_image 由外部统一生成后注入时直接复用（企划卡/企划案共用同一张图）；
+    为 None 时才自行调即梦（向后兼容独立调用）。未配置/失败自动降级占位（fail-soft）。
     LLM 生成失败抛 LLMGenerationError（API 层映射 503），不产假数据。
     """
     brief = plan["brief"]
@@ -183,10 +230,13 @@ def _build_dynamic_plan_card(plan: dict, opportunity: dict) -> dict:
 
     fields = _llm_plan_card_fields(plan, opportunity)
 
-    concept_image = jimeng.generate_concept_image(
-        prompt=_concept_prompt_dynamic(opportunity, brief),
-        fallback=None,
-    )
+    # 概念图：优先用外部统一出图（只调一次即梦、两处共用）；未注入才自行生成
+    if concept_image is None:
+        concept_image = jimeng.generate_concept_image(
+            prompt=_concept_prompt_dynamic(opportunity, brief),
+            fallback=None,
+        )
+    concept_image = concept_image or ""
 
     check = cost_check({"pricing": {"price": f"{price:g} 元"}}, cost_limit)
 
@@ -299,9 +349,73 @@ def _trend_evidence(insights: dict | None) -> str:
     return "、".join(s for s in sigs if s)
 
 
-def _build_product_proposal(plan: dict, opportunity: dict) -> dict:
+def _proposal_image_prompt(plan: dict, opportunity: dict) -> str:
+    """概念图统一 prompt：IP 归属 + 机会 + AssetFit 设计语言/颜色/材质 + 场景（信息最全）。
+
+    LLM 自由文本字段先过版权风控清洗；IP 只取用户选定的资源库 IP（合法授权，不参与清洗）。
+    """
+    brief = plan["brief"]
+    asset = opportunity.get("assetFit") or {}
+    ip_strategy = brief.get("ip_strategy") if "ip_strategy" in brief else brief.get("ipStrategy")
+    if isinstance(ip_strategy, list):
+        ip_name = str(ip_strategy[0]) if ip_strategy else ""
+    else:
+        ip_name = str(asset.get("ip", "") or "")
+    ip_clause = _ip_prompt_clause(ip_name)
+    title = _strip_risk_terms(opportunity.get("title", ""))
+    design = _strip_risk_terms(asset.get("designLanguage", ""))
+    color = _strip_risk_terms(asset.get("color", ""))
+    material = _strip_risk_terms(asset.get("material", ""))
+    scenario = _strip_risk_terms(opportunity.get("scenario", ""))
+    segs = []
+    if ip_clause or title:
+        segs.append(f"{ip_clause}{title}")
+    if design:
+        segs.append(f"{design}风格")
+    if color:
+        segs.append(color)
+    if material:
+        segs.append(material)
+    if scenario:
+        segs.append(f"{scenario}场景")
+    segs += ["产品设计渲染图", "名创优品风格", "柔光高质感"]
+    return "，".join(segs)
+
+
+def _safe_image_prompt(plan: dict) -> str:
+    """极简安全兜底 prompt：只保留品类 + 中性风格词，不含任何 LLM 自由文本。"""
+    category = _strip_risk_terms((plan.get("brief") or {}).get("category", ""))
+    return _join_segs(
+        f"{category}产品设计渲染图" if category else "产品设计渲染图",
+        "名创优品风格", "干净背景", "柔光", "高质感",
+    )
+
+
+def generate_shared_concept_image(plan: dict, opportunity: dict) -> str:
+    """概念图全链路唯一出图入口：只调一次即梦 → 下载本地化，企划卡与企划案共用同一张。
+
+    主 prompt 已做版权词清洗；若仍出图失败（残余风控/瞬时故障），用极简安全 prompt 兜底再试一次，
+    尽量保证有图；最终失败返回 ""（fail-soft，前端显示占位）。
+    """
+    prompt = _proposal_image_prompt(plan, opportunity)
+    url = jimeng.generate_concept_image(prompt=prompt, fallback=None)
+    if not url:
+        safe = _safe_image_prompt(plan)
+        if safe and safe != prompt:
+            _LOGGER.warning("主出图 prompt 未成功，降级极简安全 prompt 再试 plan_id=%s", plan.get("plan_id"))
+            url = jimeng.generate_concept_image(prompt=safe, fallback=None)
+    # overwrite=True：换方向重新出图时强制下载覆盖同名旧图，不沿用上一方向的概念图
+    return localize_concept_image(plan["plan_id"], url, overwrite=True) or ""
+
+
+def _build_product_proposal(
+    plan: dict,
+    opportunity: dict,
+    concept_image: str | None = None,
+) -> dict:
     """新品企划案：消费机会卡 + 资产适配 + LLM 创意/商业 + 即梦图 + 成本校验
 
+    concept_image 由外部统一生成后注入时直接复用（与企划卡同一张）；为 None 时才自行出图。
     不重新发现机会；设计（颜色/材质/设计语言）来自 assetFit，不 LLM 随机审美；
     成本/定价来自 cost_check 规则，不编财务数字。
     """
@@ -313,20 +427,10 @@ def _build_product_proposal(plan: dict, opportunity: dict) -> dict:
 
     fields = _llm_proposal_fields(plan, opportunity, asset)
 
-    # 即梦图 prompt 绑定 IP 归属 + Opportunity + AssetFit + 设计语言 + 颜色 + 材质
-    ip_strategy = brief.get("ip_strategy") if "ip_strategy" in brief else brief.get("ipStrategy")
-    if isinstance(ip_strategy, list):
-        ip_name = str(ip_strategy[0]) if ip_strategy else ""
-    else:
-        ip_name = str(asset.get("ip", "") or "")
-    ip_clause = _ip_prompt_clause(ip_name)
-    image_prompt = (
-        f"{ip_clause}{opportunity.get('title', '')}，{asset.get('designLanguage', '')}风格，"
-        f"{asset.get('color', '')}，{asset.get('material', '')}，"
-        f"{opportunity.get('scenario', '')}场景，产品设计渲染图，名创优品风格，柔光高质感"
-    )
-    image_url = jimeng.generate_concept_image(prompt=image_prompt, fallback=None)
-    image_url = localize_concept_image(plan["plan_id"], image_url)
+    # 概念图：优先复用外部统一出图（企划卡/企划案同一张，只调一次即梦）；未注入才自行生成
+    if concept_image is None:
+        concept_image = generate_shared_concept_image(plan, opportunity)
+    image_url = concept_image or ""
 
 
     proposal = {
